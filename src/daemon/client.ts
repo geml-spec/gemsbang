@@ -17,7 +17,7 @@ export function reasonOf(a: Answer): string {
   return typeof b === "object" && b !== null && typeof b.error === "string" ? b.error : `HTTP ${a.status}`;
 }
 
-export interface VenueRow { owner: string; id: string; kind: string; name: string }
+export interface VenueRow { owner: string; id: string; kind: string; name: string; publisher?: string }
 
 export class RelayClient {
   constructor(readonly url: string, readonly token?: string, private readonly fetchImpl: typeof fetch = fetch) {}

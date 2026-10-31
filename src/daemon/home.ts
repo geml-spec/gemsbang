@@ -96,8 +96,8 @@ export function writeInbox(home: string, relayName: string, me: string, needs: r
 
 export interface OutboxEntry {
   id: string;
-  /** A message or a queue marker for a document; a grant or a refusal of a request (no document: the relay's grants endpoints). */
-  kind: "message" | "marker" | "grant" | "refuse";
+  /** A message or a queue marker for a document; a grant or a refusal of a request, an allowance for an agent's ask, a digest's 定, a match's nod, a signal or its retraction (no document: the relay's own endpoints). */
+  kind: "message" | "marker" | "grant" | "refuse" | "allow" | "digest" | "match" | "signal" | "retract";
   /** Whose token signs it: `person`, or `agent:<name>`. */
   as: string;
   owner: string;

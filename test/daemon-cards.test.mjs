@@ -18,8 +18,10 @@ async function world() {
   const s = await startRelay({ root: tmp("gemworks-relay-"), name: "relay.test" });
   const john = s.relay.issuePerson("john"), wangwu = s.relay.issuePerson("wangwu");
   const xiaoping = s.relay.issueAgent(john.record, "xiaoping"), xiaoce = s.relay.issueAgent(wangwu.record, "xiaoce");
+  s.relay.topUp("john", 100);
   s.relay.createVenue(john.record, { id: "g-7", kind: "group", name: "前端周会", people: ["wangwu"], agents: ["agent:xiaoping@john", "agent:xiaoce@wangwu"] });
   s.relay.setPresence(xiaoce.record, { session: "cx-1", host: "claude-code", login: "api", presence: "idle" });
+  s.relay.declare(wangwu.record, { agent: "xiaoce", open: true });
   const homes = { john: tmp("gemworks-im-"), wangwu: tmp("gemworks-im-") };
   writeConfig(homes.john, { relay: { url: s.url, name: "relay.test" }, person: "john", token: john.token, agents: { xiaoping: xiaoping.token } });
   writeConfig(homes.wangwu, { relay: { url: s.url, name: "relay.test" }, person: "wangwu", token: wangwu.token, agents: { xiaoce: xiaoce.token } });
@@ -29,7 +31,7 @@ async function world() {
 test("cardCall: every verb through the relay with the person's or an agent's token, one line back; the refusals are reasons, not throws; the room is made when the worker's item is delivered", async () => {
   const { s, homes } = await world();
   try {
-    assert.deepEqual(CARD_ACTIONS, ["new", "publish", "claim", "grant", "note", "giveback", "deliver", "report", "accept", "changes", "resume", "dispute", "settle", "close", "show", "list"]);
+    assert.deepEqual(CARD_ACTIONS, ["new", "publish", "claim", "grant", "note", "giveback", "deliver", "report", "accept", "changes", "resume", "dispute", "settle", "close", "edit", "split", "tree", "show", "list"]);
     assert.deepEqual(await cardCall(tmp("gemworks-im-"), { action: "list" }), { ok: false, reason: "没有 connect.json：先 gemworks connect setup" });
     assert.deepEqual(await cardCall(homes.john, { action: "show" }), { ok: false, reason: "要卡的 owner/id" });
     assert.deepEqual(await cardCall(homes.john, { action: "show", owner: "john", id: "t-0000" }), { ok: false, reason: "没有这张卡" });

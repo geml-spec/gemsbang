@@ -18,7 +18,9 @@ export const MAIN_PATH: readonly CardState[] = ["draft", "open", "awaiting-grant
 export const FINAL_STATES: readonly CardState[] = ["accepted", "closed"];
 
 /** The verbs a host drives a card with (transport §4.1 im_card): the relay's, plus show and list. */
-export const CARD_ACTIONS = ["new", "publish", "claim", "grant", "note", "giveback", "deliver", "report", "accept", "changes", "resume", "dispute", "settle", "close", "show", "list"] as const;
+export const CARD_ACTIONS = ["new", "publish", "claim", "grant", "note", "giveback", "deliver", "report", "accept", "changes", "resume", "dispute", "settle", "close", "edit", "split", "tree", "show", "list"] as const;
+/** What an edit may change (§8.1 改一下): everything the delegator wrote but the parent. */
+export const EDITABLE: ReadonlySet<string> = new Set(["title", "goal", "constraints", "inputs", "context", "accepts", "direction", "grantFrom", "worker", "venueOfWork", "tools", "network", "budget", "mode", "reward"]);
 export type CardAction = (typeof CARD_ACTIONS)[number];
 export const isCardAction = (v: unknown): v is CardAction => typeof v === "string" && (CARD_ACTIONS as readonly string[]).includes(v);
 
@@ -112,6 +114,8 @@ export interface Card extends CardInput {
   versions: Deliverable[];
   reports: Report[];
   comments: Comment[];
+  /** The child cards of a split (§8.4), by address. */
+  children: string[];
 }
 
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
@@ -245,9 +249,16 @@ const ACTIVE: readonly SlotState[] = ["claimed", "working", "delivered"];
 export function foldCard(id: string, blocks: readonly { id: string; value: Record<string, unknown> }[]): Card | undefined {
   const head = blocks.find((b) => b.id === "card")?.value;
   if (head === undefined || head["kind"] !== "task") return undefined;
-  const input = cardInput(head);
+  // 改一下 (§8.1): every edit block lays its fields over the head, the last word winning; one that would break the card is left out.
+  let merged: Record<string, unknown> = head;
+  for (const b of blocks) {
+    if (!/^edit-\d+$/.test(b.id)) continue;
+    const next = { ...merged, ...Object.fromEntries(Object.entries(b.value).filter(([k]) => EDITABLE.has(k))) };
+    if (cardFaults(next).length === 0) merged = next;
+  }
+  const input = cardInput(merged);
   if (input === undefined) return undefined;
-  const card: Card = { kind: "task", id, by: str(head["by"]) ?? "", at: str(head["at"]) ?? "", state: "draft", transitions: [], slots: [], notes: [], versions: [], reports: [], comments: [], ...input };
+  const card: Card = { kind: "task", id, by: str(head["by"]) ?? "", at: str(head["at"]) ?? "", state: "draft", transitions: [], slots: [], notes: [], versions: [], reports: [], comments: [], children: [], ...input };
   for (const b of blocks) {
     const v = b.value;
     let m: RegExpExecArray | null;
@@ -279,6 +290,8 @@ export function foldCard(id: string, blocks: readonly { id: string; value: Recor
       card.versions.push(deliverableOf(v));
     } else if (/^report-\d+$/.test(b.id)) {
       card.reports.push({ version: num(v["version"]) ?? 0, by: str(v["by"]) ?? "", at: str(v["at"]) ?? "", results: (Array.isArray(v["results"]) ? v["results"] : []).map(obj).filter((r): r is Record<string, unknown> => r !== undefined && num(r["criterion"]) !== undefined).map((r) => ({ criterion: r["criterion"] as number, met: r["met"] === true ? true : r["met"] === false ? false : null, ...(str(r["note"]) !== undefined ? { note: r["note"] as string } : {}) })) });
+    } else if (/^split-\d+$/.test(b.id)) {
+      card.children.push(...strings(v["children"]));
     } else if ((m = /^comment-(\d+)$/.exec(b.id)) !== null) {
       const c: Comment = { n: Number(m[1]), by: str(v["by"]) ?? "", at: str(v["at"]) ?? "", version: num(v["version"]) ?? 0, anchor: str(v["anchor"]) ?? "", text: str(v["text"]) ?? "" };
       const replyTo = str(v["replyTo"]); if (replyTo !== undefined) c.replyTo = replyTo;

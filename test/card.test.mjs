@@ -117,3 +117,14 @@ test("the walks (§8.4): contest slots, the split's depth and budget, the card's
   assert.deepEqual(scopeOfCard({ ...single, tools: ["read", "comment"], venueOfWork: "resource-sandbox", budget: {} }), { write: false, run: "sandbox", budget: null });
   assert.deepEqual(scopeOfCard({ ...single, tools: ["read"], venueOfWork: "worker-sandbox", budget: { credits: 5 } }), { write: false, run: "none", budget: 5 });
 });
+
+test("the verbs edit, split and tree (§8.1, §8.4): a draft's fields changed by edit blocks, the last word winning; a split's children on the parent; an edit that breaks the card is left out", async () => {
+  const { CARD_ACTIONS, EDITABLE, foldCard } = await import("../dist/core/im/card.js");
+  assert.deepEqual(CARD_ACTIONS.slice(-5), ["edit", "split", "tree", "show", "list"]);
+  assert.ok(EDITABLE.has("goal") && EDITABLE.has("budget") && !EDITABLE.has("parent"));
+  const head = { id: "card", value: { kind: "task", title: "给设置页加导出 PDF", goal: "一个按钮", accepts: [{ text: "人点收", verify: { kind: "human" } }], direction: "outsource", venueOfWork: "worker-sandbox", budget: { credits: 40 }, by: "person:john", at: "2026-10-31T09:00:00Z" } };
+  const edited = foldCard("t-1", [head, { id: "edit-1", value: { goal: "右上角一个按钮", budget: { credits: 20 }, by: "person:john", at: "2026-10-31T09:01:00Z" } }, { id: "edit-2", value: { title: "", by: "person:john", at: "2026-10-31T09:02:00Z" } }, { id: "edit-3", value: { tools: ["read", "edit"], by: "agent:xiaoping@john", at: "2026-10-31T09:03:00Z" } }]);
+  assert.deepEqual([edited.goal, edited.budget, edited.title, edited.tools, edited.state, edited.children], ["右上角一个按钮", { credits: 20 }, "给设置页加导出 PDF", ["read", "edit"], "draft", []]);
+  const split = foldCard("t-1", [head, { id: "split-1", value: { by: "agent:xiaoce@wangwu", children: ["https://relay.test/wangwu/cards/t-2.geml", "https://relay.test/wangwu/cards/t-3.geml"], at: "2026-10-31T09:04:00Z" } }]);
+  assert.deepEqual(split.children, ["https://relay.test/wangwu/cards/t-2.geml", "https://relay.test/wangwu/cards/t-3.geml"]);
+});

@@ -33,7 +33,7 @@ export function canRead(o: { relay: string; owner: string; doc: string; block?: 
   const person = personBehind(v);
   if (person === o.owner) return true;
   const kind = kindOf(o.doc);
-  if (kind === "people" || kind === "agents") return true;
+  if (kind === "people" || kind === "agents" || kind === "signals") return true;
   if (w.publicDoc?.(o.owner, o.doc) === true) return true;
   const members = w.membersOf(o.owner, o.doc);
   if (members !== undefined) return members.includes(o.viewer) || (person !== undefined && members.includes(`person:${person}`));

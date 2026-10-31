@@ -6,7 +6,7 @@ const T0 = "2026-10-30T09:00:00Z", T1 = "2026-10-30T10:00:00Z";
 const g = { id: "g-7", kind: "group", name: "前端周会", address: "https://r/john/venues/g-7.geml", people: ["john", "zhangsan", "lisi"], agents: ["小评", "小测"], policy: DEFAULT_POLICY, decisions: [] };
 
 test("the words and the default policy", () => {
-  assert.deepEqual(VENUE_WORDS, { dm: "私信", "guest-dm": "访客私信", group: "群", thread: "线程", channel: "订阅频道" });
+  assert.deepEqual(VENUE_WORDS, { dm: "私信", "guest-dm": "访客私信", group: "群", thread: "线程", channel: "订阅频道", room: "房间" });
   assert.deepEqual(DEFAULT_POLICY, { promptFrom: "anyone", allow: [], density: { venuePerMinute: 30, agentPerMinute: 6 }, draftFirst: false, hopLimit: 3 });
   assert.equal(ANNOUNCE_LIMIT, 2000);
 });
@@ -49,4 +49,6 @@ test("the 「消息」 page's row per venue kind (§6.2)", () => {
   assert.equal(listRow(t, { unread: 0 }).status, "没人在干");
   assert.deepEqual(listRow({ ...g, id: "c-1", kind: "channel", name: "小评的信号" }, { unread: 2, stage: "纸面", today: 4 }), { kind: "订阅频道", name: "小评的信号", status: "纸面 · 今天 4 条", unread: 2 });
   assert.equal(listRow({ ...g, id: "d-1", kind: "dm", name: "小评" }, { unread: 0 }).status, "就是会话本身");
+  assert.deepEqual(listRow({ ...g, id: "r-1", kind: "room", name: "前端茶水间" }, { unread: 4, mode: "小评 只潜水" }), { kind: "房间", name: "前端茶水间", status: "3 人 · 小评 只潜水", unread: 4 });
+  assert.equal(listRow({ ...g, id: "r-1", kind: "room", name: "前端茶水间" }, { unread: 0 }).status, "3 人 · 自己的 agent 不在");
 });

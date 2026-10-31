@@ -160,11 +160,11 @@ test("a guest's question (§11): the envelope says 访客私信 at 访客 level,
     const gid = asked.speaker.slice("guest:".length);
     assert.equal(d.item.id, `qi-${asked.venue}-${asked.message.id}`);
     assert.equal(d.envelope, `[来自 访客私信 · 访客 ${gid}（访客） · 权限：只读 · 回复将发给访客 · 队列中还有 0 条]`);
-    assert.equal(d.text, `${d.envelope}\n[公开范围：src/settings/* 和这 63 轮的记录；不在范围内的明说不讲，请访客给主人留言]\n缓存键为什么不用 URL 直接当键？\n\n（上下文）\nhttps://relay.test/john/venues/${asked.venue}.geml#announce\nsrc/settings/* 和这 63 轮的记录`);
+    assert.equal(d.text, `${d.envelope}\n[公开范围：src/settings/* 和这 63 轮的记录；不在范围内的明说不讲，请访客给主人留言]\n[接待：第一句自报家门——我是 xiaoping，代 john；john 现在不在；john 最近公开的一件事：设置页导出 PDF；访客可以留言，或问公开范围内的。]\n缓存键为什么不用 URL 直接当键？\n\n（上下文）\nhttps://relay.test/john/venues/${asked.venue}.geml#announce\nsrc/settings/* 和这 63 轮的记录`);
     assert.deepEqual(d.scope, { write: false, run: "none", budget: 5 });
     answer(home, "xiaoping", d.item, "因为同一个 URL 带不同的用户态会出不同的配置。", NOW, { session: "cc-1" });
     await daemon.syncOnce();
-    assert.deepEqual(s.relay.venueOf("john", asked.venue).messages.map((m) => [m.speaker, m.text]), [[asked.speaker, "缓存键为什么不用 URL 直接当键？"], ["agent:xiaoping@john", "因为同一个 URL 带不同的用户态会出不同的配置。"]]);
+    assert.deepEqual(s.relay.venueOf("john", asked.venue).messages.map((m) => [m.speaker, m.text]), [["host", "接待：第一句自报家门——我是 xiaoping，代 john；john 现在不在；john 最近公开的一件事：设置页导出 PDF；访客可以留言，或问公开范围内的。"], [asked.speaker, "缓存键为什么不用 URL 直接当键？"], ["agent:xiaoping@john", "因为同一个 URL 带不同的用户态会出不同的配置。"]]);
   } finally {
     await s.close();
   }

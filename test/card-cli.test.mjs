@@ -26,8 +26,10 @@ test("gemworks connect card: a card drafted, published, claimed, noted, delivere
   try {
     const john = s.relay.issuePerson("john"), wangwu = s.relay.issuePerson("wangwu");
     const xiaoping = s.relay.issueAgent(john.record, "xiaoping"), xiaoce = s.relay.issueAgent(wangwu.record, "xiaoce");
+    s.relay.topUp("john", 100);
     s.relay.createVenue(john.record, { id: "g-7", kind: "group", name: "前端周会", people: ["wangwu"], agents: ["agent:xiaoping@john", "agent:xiaoce@wangwu"] });
     s.relay.setPresence(xiaoce.record, { session: "cx-1", host: "claude-code", login: "api", presence: "idle" });
+    s.relay.declare(wangwu.record, { agent: "xiaoce", open: true });
     writeConfig(homes.john, { relay: { url: s.url, name: "relay.test" }, person: "john", token: john.token, agents: { xiaoping: xiaoping.token } });
     writeConfig(homes.wangwu, { relay: { url: s.url, name: "relay.test" }, person: "wangwu", token: wangwu.token, agents: { xiaoce: xiaoce.token } });
     const J = ["--home", homes.john], W = ["--home", homes.wangwu];

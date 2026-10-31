@@ -8,14 +8,16 @@
 // mirror and write the outbox (deliver.ts).
 import type { Need } from "../core/im/needs-me.js";
 import { RelayClient, RelayDown, reasonOf } from "./client.js";
+import type { Performance } from "../core/im/signal.js";
+import { commandConnector, runExec, type Connector } from "./exec.js";
 import { appendMirror, failOutbox, listOutbox, listSessions, readConfig, removeOutbox, removeSession, updateOutbox, writeInbox, writeMirror, writeState, type Config } from "./home.js";
 
-export interface SyncReport { connected: boolean; docs: number; pushed: number; failed: number; left: number; heartbeats: number; error?: string }
+export interface SyncReport { connected: boolean; docs: number; pushed: number; failed: number; left: number; heartbeats: number; executed: number; error?: string }
 export interface Intervals { heartbeatMs: number; outboxMs: number; syncMs: number }
 /** The heartbeat every 30 seconds (transport §3); the outbox every 5; the listing again every minute. */
 export const DEFAULT_INTERVALS: Intervals = { heartbeatMs: 30_000, outboxMs: 5_000, syncMs: 60_000 };
 export const DEFAULT_BACKOFF_MS: readonly number[] = [5_000, 15_000, 30_000, 60_000];
-export interface DaemonOptions { home: string; now?: () => string; fetchImpl?: typeof fetch; log?: (line: string) => void; intervals?: Partial<Intervals>; backoffMs?: readonly number[] }
+export interface DaemonOptions { home: string; now?: () => string; fetchImpl?: typeof fetch; log?: (line: string) => void; intervals?: Partial<Intervals>; connector?: Connector; backoffMs?: readonly number[] }
 
 function splitKey(key: string): [string, string] {
   const i = key.indexOf("/");
@@ -29,6 +31,7 @@ export class Daemon {
   private readonly log: (line: string) => void;
   private readonly intervals: Intervals;
   private readonly backoff: readonly number[];
+  private readonly connector: Connector;
   private ws: WebSocket | undefined;
   private followed: string[] = [];
   private stopped = false;
@@ -41,6 +44,7 @@ export class Daemon {
     this.log = o.log ?? (() => {});
     this.intervals = { ...DEFAULT_INTERVALS, ...o.intervals };
     this.backoff = o.backoffMs ?? DEFAULT_BACKOFF_MS;
+    this.connector = o.connector ?? commandConnector;
   }
 
   config(): Config {
@@ -56,12 +60,12 @@ export class Daemon {
     return new RelayClient(c.relay.url, token, this.fetchImpl);
   }
 
-  /** What the person follows (decision 3): their page, the venues they are in, their agents' queues, the task cards they are on (§8). */
+  /** What the person follows (decision 3): their page, their ledger (§9.1) and their agents' pages, the venues they are in, their agents' queues, the task cards they are on, the signal chains of the channels (§10.2) (§8). */
   async listFollowed(c: Config, client: RelayClient): Promise<string[]> {
     const venues = await client.venues();
     const agents = await client.agents();
     const tasks = await client.tasks();
-    return [`${c.person}/people/${c.person}.geml`, ...venues.map((v) => `${v.owner}/venues/${v.id}.geml`), ...agents.map((a) => `${c.person}/queues/${a}.geml`), ...tasks.map((t) => `${t.owner}/cards/${t.id}.geml`)];
+    return [`${c.person}/people/${c.person}.geml`, `${c.person}/ledger/${c.person}.geml`, ...agents.map((a) => `${c.person}/agents/${a}.geml`), ...venues.map((v) => `${v.owner}/venues/${v.id}.geml`), ...venues.flatMap((v) => (v.kind === "channel" && v.publisher !== undefined ? [`${v.owner}/signals/${v.publisher}.geml`] : [])), ...agents.map((a) => `${c.person}/queues/${a}.geml`), ...tasks.map((t) => `${t.owner}/cards/${t.id}.geml`)];
   }
 
   /** Every followed document mirrored whole, then the inbox; how many documents the relay had. The outbox is flushed first (`syncOnce`), so a round's mirrors carry what it just pushed. */
@@ -84,7 +88,7 @@ export class Daemon {
     for (const e of listOutbox(this.home)) {
       let client: RelayClient;
       try { client = this.client(e.as, c); } catch (err) { failOutbox(this.home, e.id, err instanceof Error ? err.message : String(err)); failed++; continue; }
-      const r = e.kind === "grant" ? await client.post("/grants", e.body) : e.kind === "refuse" ? await client.post("/grants/refuse", e.body) : await client.append(e.owner, e.doc, e.body);
+      const r = e.kind === "grant" ? await client.post("/grants", e.body) : e.kind === "refuse" ? await client.post("/grants/refuse", e.body) : e.kind === "allow" ? await client.post("/wallet/allow", e.body) : e.kind === "digest" ? await client.post("/digests/answer", e.body) : e.kind === "signal" ? await client.post("/signals", e.body) : e.kind === "retract" ? await client.post(`/signals/${encodeURIComponent(e.doc)}/retract`, e.body) : e.kind === "match" ? await client.post(`/match/${encodeURIComponent(e.owner)}/${encodeURIComponent(e.doc)}/answer`, e.body) : await client.append(e.owner, e.doc, e.body);
       if (r.status >= 200 && r.status < 300) { removeOutbox(this.home, e.id); pushed++; }
       else if (r.status >= 400 && r.status < 500) { failOutbox(this.home, e.id, reasonOf(r)); failed++; this.log(`没发出去：${e.kind} → ${e.owner}/${e.doc}：${reasonOf(r)}`); }
       else { updateOutbox(this.home, { ...e, tries: e.tries + 1, error: reasonOf(r) }); left++; }
@@ -116,12 +120,14 @@ export class Daemon {
       this.followed = await this.listFollowed(c, client);
       const docs = await this.mirrorAll(c, client, this.followed);
       const heartbeats = await this.heartbeat(c);
+      // The local execution module (§10.5) after every sync, on what was just mirrored.
+      const executed = await runExec(this.home, at, { prices: async (market) => { const r = await client.get(`/prices/${encodeURIComponent(market)}`); return r.status === 200 ? (r.body as { points: { at: string; price: number }[] }).points : []; }, performance: async (owner, agent) => { const r = await client.get(`/signals/${encodeURIComponent(owner)}/${encodeURIComponent(agent)}`); return r.status === 200 ? (r.body as { performance: Performance }).performance : undefined; }, connector: this.connector });
       writeState(this.home, { connected: true, at });
-      return { connected: true, docs, ...flushed, heartbeats };
+      return { connected: true, docs, ...flushed, heartbeats, executed };
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);
       writeState(this.home, { connected: false, at, error });
-      return { connected: false, docs: 0, pushed: 0, failed: 0, left: listOutbox(this.home).length, heartbeats: 0, error };
+      return { connected: false, docs: 0, pushed: 0, failed: 0, left: listOutbox(this.home).length, heartbeats: 0, executed: 0, error };
     }
   }
 

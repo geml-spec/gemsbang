@@ -86,6 +86,10 @@ export type BridgeOp =
   | { op: "im-read"; owner?: string; venue?: string; src?: string; limit?: number }
   | { op: "im-forward"; from: string; to: string; note?: string; as?: string; session?: string }
   | { op: "im-card"; action: CardAction; owner?: string; id?: string; body?: Record<string, unknown>; as?: string }
+  /** 一句话起草委托书 (plan K): the line into the owner's DM with the agent (the first when none is named); with `card`, 改一下 for that draft. */
+  | { op: "im-brief"; text: string; agent?: string; card?: string }
+  /** A signal (plan L, §10): publish (the fields and the channel in `body`), retract or skip one by `id` (skip with the agent's `reason`), or list an agent's chain by `target` (`<agent>@<owner>`); `as` names the agent whose token signs. */
+  | { op: "im-signal"; action: "publish" | "retract" | "skip" | "list"; as?: string; body?: Record<string, unknown>; id?: string; reason?: string; target?: string }
   | { op: "board" }
   /**
    * What the repository says for the band (attention.ts): branches ahead of their upstream, open pull requests and their
@@ -331,6 +335,10 @@ export type BridgeResponse =
       answered?: { sent: string } | { draft: string };
       /** im-card: the card after the verb and the line the tool prints. */
       card?: CardAnswer;
+      /** im-brief: the DM the line went into. */
+      brief?: { venue: string };
+      /** im-signal: the line the tool prints. */
+      signal?: { line: string };
     }
   /** No shell only when the request itself failed — it threw, or did not decode: the hooks module keeps the last shell and shows the error. */
   | { v: 1; ok: false; error: string; shell?: ShellStatus };
@@ -366,7 +374,7 @@ export function unreadableText(exitCode: number, stderr: string, pluginRoot: str
   return `gemworks：桥接的应答无法解析（退出码 ${exitCode}${said ? `：${said}` : ""}）`;
 }
 
-const OPS = new Set(["status", "refresh", "before", "after", "verb", "learn", "mark", "advance", "pause", "resume", "rollback", "new-item", "bind", "use", "add", "import", "board", "attention", "export", "artifacts", "artifact", "backfill-list", "backfill-one", "turn-ids", "memory", "memory-set", "memory-delete", "im-status", "im-venue", "im-say", "im-next", "im-answer", "im-draft", "im-presence", "im-need", "im-read", "im-forward", "im-card"]);
+const OPS = new Set(["status", "refresh", "before", "after", "verb", "learn", "mark", "advance", "pause", "resume", "rollback", "new-item", "bind", "use", "add", "import", "board", "attention", "export", "artifacts", "artifact", "backfill-list", "backfill-one", "turn-ids", "memory", "memory-set", "memory-delete", "im-status", "im-venue", "im-say", "im-next", "im-answer", "im-draft", "im-presence", "im-need", "im-read", "im-forward", "im-card", "im-brief", "im-signal"]);
 const EXPORT_KINDS = new Set(["journal", "workflow", "text"]);
 const EXPORT_FORMATS = new Set(["geml", "md", "json"]);
 const VERBS = new Set(["status", "move", "set"]);
@@ -437,6 +445,8 @@ export function decodeRequest(text: string): BridgeRequest | { error: string } {
     "im-need": () => str("key") && str("action"),
     "im-forward": () => str("from") && str("to"),
     "im-card": () => str("action"),
+    "im-brief": () => str("text"),
+    "im-signal": () => str("action"),
   };
   const check = fields[op];
   if (check !== undefined && !check()) return { error: `op ${op}: missing or mistyped fields` };

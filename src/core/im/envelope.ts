@@ -31,6 +31,7 @@ export function replyWords(kind: VenueKind, draftFirst: boolean): string {
     case "guest-dm": return draftFirst ? "回复先给主人过目，再发给访客" : "回复将发给访客";
     case "dm": return "回复在私信里";
     case "channel": return "回复不会发出";
+    case "room": return draftFirst ? "回复先给主人过目，再发回该房间" : "回复将发回该房间，成员可见";
   }
 }
 

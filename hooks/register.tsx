@@ -1530,6 +1530,17 @@ async function serveIm($: EngineInterface, name: ImToolName, event: unknown): Pr
     const r = await through({ op: 'im-forward', from, to: `${to.owner}/${to.id}`, ...(note !== undefined ? { note } : {}), as: agent, ...(session !== '' ? { session } : {}) })
     return { result: r.ok ? toolLine(name, await labelOf(to), `已排入待发：${from}`) : r.text }
   }
+  if (name === 'im_signal') {
+    const action = str('action') ?? ''
+    if (action !== 'publish' && action !== 'retract' && action !== 'skip' && action !== 'list') return { result: `${name}: action is publish, retract, skip or list` }
+    const body = typeof args['body'] === 'object' && args['body'] !== null ? args['body'] as Record<string, unknown> : undefined
+    const id = str('id'), reason = str('reason'), target = str('target')
+    const r = await through({ op: 'im-signal', action, as: agent, ...(body !== undefined ? { body } : {}), ...(id !== undefined ? { id } : {}), ...(reason !== undefined ? { reason } : {}), ...(target !== undefined ? { target } : {}) })
+    if (!r.ok) return { result: r.text }
+    const line = r.res.signal?.line ?? ''
+    const where = id ?? (typeof body?.['channel'] === 'string' ? body['channel'] as string : undefined) ?? target ?? t('信号')
+    return { result: action === 'list' ? `${toolLine(name, where, t('业绩与信号'))}\n${line}` : toolLine(name, where, line) }
+  }
   if (name === 'im_card') {
     const action = str('action') ?? ''
     const card = /^([^/#\s]+)\/([^/#\s]+)$/.exec(str('card') ?? '')
@@ -1873,11 +1884,28 @@ async function act($: EngineInterface, action: BoardAction, surface?: string): P
       return
     }
     // A card's button (plan G): the words typed under the card go with the verb that takes them; 发布 asks which venue; a worker's verbs sign as the session's agent.
+    // 一句话起草委托书 (plan K): the line goes to the agent as the owner's word; its turn drafts.
+    case 'im-brief': {
+      const res = await through({ op: 'im-brief', text: action.text })
+      if (res?.ok === true) $.ui.toast(t('已交给 agent 起草'))
+      await loadIm($)
+      return
+    }
     case 'im-card': {
       const key = `${action.owner}/${action.id}`
       const words = (((await read($, imCardWordsAtom)) as unknown) as Record<string, string> | null)?.[key]
       let body: Record<string, unknown> = {}
       let as = 'person'
+      if (action.action === 'brief') {
+        if (words === undefined) { $.ui.toast(t('先写一行：怎么改')); return }
+        const res = await through({ op: 'im-brief', text: words, card: action.id })
+        if (res?.ok === true) {
+          $.ui.toast(t('已交给 agent 改'))
+          await update($, imCardWordsAtom, (was) => { const m = { ...((((was as unknown) as Record<string, string> | null) ?? {})) }; delete m[key]; return m as unknown as GemworksJson })
+        }
+        await loadIm($)
+        return
+      }
       if (action.action === 'publish') {
         const venues = ((await readIm($))?.venues ?? []).filter((v) => v.kind === 'group' || v.kind === 'thread')
         if (venues.length === 0) { $.ui.toast(t('没有能发到的场所')); return }
@@ -3154,6 +3182,7 @@ export const register: Register = (on) => {
   on('tool.call', { tool: 'mcp__gemworks__im_read' }, ($, e) => serveIm($, 'im_read', e)).catch(() => ({ result: 'gemworks IM could not do that' }))
   on('tool.call', { tool: 'mcp__gemworks__im_forward' }, ($, e) => serveIm($, 'im_forward', e)).catch(() => ({ result: 'gemworks IM could not do that' }))
   on('tool.call', { tool: 'mcp__gemworks__im_card' }, ($, e) => serveIm($, 'im_card', e)).catch(() => ({ result: 'gemworks IM could not do that' }))
+  on('tool.call', { tool: 'mcp__gemworks__im_signal' }, ($, e) => serveIm($, 'im_signal', e)).catch(() => ({ result: 'gemworks IM could not do that' }))
 
   // The model is told about the project's other sessions and the ask tool in the system prompt, where this event reaches gemworks (see prefaceFor).
   on('prompt.compose', async ($, e, next) => {

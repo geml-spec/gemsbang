@@ -154,6 +154,8 @@ export type BoardAction =
   /** A card's button (plan G): the verb on `<owner>/<id>`; the words typed for it come first, kept under the card. */
   | { op: "im-card"; action: string; owner: string; id: string }
   | { op: "im-card-words"; card: string; text: string }
+  /** 一句话起草委托书 (plan K): the line under the cards. */
+  | { op: "im-brief"; text: string }
   | { op: "share"; what: ShareWhat; how: ShareHow; strip: boolean };
 
 /** A button as the pure modules describe it: its address, its label, whether it is the main one, and what it does. */

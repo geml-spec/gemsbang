@@ -16,7 +16,11 @@ import { agentPresence, isAlive, type Presence } from "../core/im/presence.js";
 import { readQueue, senderStatus, type Queue } from "../core/im/queue.js";
 import { listRow, VENUE_WORDS, type VenueKind } from "../core/im/venue.js";
 import { foldVenue, shownName, type VenueDoc } from "../relay/relay.js";
+import { balanceOf, capsOf, entryLine, foldLedger, usedToday, walletLines, type Caps, type Used } from "../core/im/ledger.js";
+import { MODE_WORDS, modeOf } from "../core/im/social.js";
 import { localAccess } from "./deliver.js";
+import { channelView, execNeeds, signalsIn } from "./exec.js";
+import { signalLines, type Signal } from "../core/im/signal.js";
 import { listDrafts, listSessions, readConfig, readInbox, readMirror, readState, type Config } from "./home.js";
 
 export interface VenueRow { owner: string; id: string; kind: VenueKind; kindWord: string; name: string; status: string; unread: number; last?: string }
@@ -41,6 +45,8 @@ export interface CardRow {
   actions: string[];
   card: Card;
 }
+/** The wallet as the page shows it (§9.1): the balance and the caps as lines, the last entries as lines (local time). */
+export interface WalletRow { balance: number; caps: Caps; used: Used; lines: string[]; recent: string[] }
 export interface ImStatus {
   configured: boolean;
   person?: string;
@@ -53,6 +59,8 @@ export interface ImStatus {
   venues: VenueRow[];
   drafts: DraftRow[];
   cards: CardRow[];
+  /** The wallet (§9.1), once the ledger is mirrored. */
+  wallet?: WalletRow;
   presence: Record<string, Presence>;
 }
 
@@ -78,8 +86,10 @@ export interface ThreadMessage {
   /** The sender's status line (§6.5) under the person's own call to one of their agents. */
   status?: string;
   decision: boolean;
+  /** A signal message (§10.4): the card's lines, the module's line last. */
+  signal?: string[];
 }
-export interface Thread { owner: string; id: string; kind: VenueKind; kindWord: string; name: string; announce?: string; people: string[]; agents: string[]; draftFirst: boolean; messages: ThreadMessage[]; total: number }
+export interface Thread { owner: string; id: string; kind: VenueKind; kindWord: string; name: string; announce?: string; people: string[]; agents: string[]; draftFirst: boolean; messages: ThreadMessage[]; total: number; channel?: { price: string; stage: string[]; footer: string } }
 
 const EMPTY: ImStatus = { configured: false, agents: [], needs: [], venues: [], drafts: [], cards: [], presence: {} };
 
@@ -108,7 +118,7 @@ export function statusView(home: string, seen: Readonly<Record<string, string>> 
   const c = readConfig(home);
   if (c === undefined) return { ...EMPTY, needs: [], venues: [], drafts: [], cards: [], presence: {}, agents: [] };
   const state = readState(home);
-  const needs: Need[] = [...readInbox(home, c.relay.name, c.person)];
+  const needs: Need[] = [...readInbox(home, c.relay.name, c.person), ...execNeeds(home, c, now)];
   if (state !== undefined && !state.connected) needs.push({ kind: "offline", key: "offline:relay", text: `连不上中继 ${c.relay.name}${state.error === undefined ? "" : `：${state.error}`}`, actions: defaultActions("offline", {}), since: state.at, level: 0 });
   const venues: (VenueRow & { at: string })[] = [];
   for (const { owner, vd } of mirroredVenues(home, c)) {
@@ -116,7 +126,11 @@ export function statusView(home: string, seen: Readonly<Record<string, string>> 
     const mark = seen[`${owner}/${vd.venue.id}`];
     const at = mark === undefined ? -1 : shown.findIndex((m) => m.id === mark);
     const unread = at === -1 ? shown.length : shown.length - (at + 1);
-    const row = listRow(vd.venue, { unread });
+    // A room's row says which of my agents is in it and in which mode (§6.2), from the agent's mirrored page.
+    const mine = vd.venue.kind === "room" ? vd.venue.agents.find((a) => vd.agentSpeakers.get(a) === `agent:${a}@${c.person}`) : undefined;
+    const mode = mine === undefined ? undefined : `${mine} ${MODE_WORDS[modeOf(readMirror(home, c.relay.name, c.person, `agents/${mine}.geml`).blocks.filter((b) => /^social-\d+$/.test(b.id)).at(-1)?.value["mode"])]}`;
+    const channel = vd.venue.kind === "channel" ? channelView(home, c, owner, vd, now) : undefined;
+    const row = listRow(vd.venue, { unread, ...(mode !== undefined ? { mode } : {}), ...(channel !== undefined ? { stage: channel.stageWord, today: channel.today } : {}) });
     const newest = shown[shown.length - 1];
     const r: VenueRow & { at: string } = { owner, id: vd.venue.id, kind: vd.venue.kind, kindWord: row.kind, name: vd.venue.name, status: row.status, unread, at: newest?.at ?? "" };
     if (newest !== undefined) r.last = newest.id;
@@ -126,7 +140,8 @@ export function statusView(home: string, seen: Readonly<Record<string, string>> 
   const presence: Record<string, Presence> = {};
   for (const name of Object.keys(c.agents)) presence[name] = presenceOf(home, name);
   const drafts: DraftRow[] = listDrafts(home).map((d) => ({ id: d.id, agent: d.agent, venueName: d.venueName, text: typeof d.body["text"] === "string" ? d.body["text"] : "", at: d.at }));
-  const out: ImStatus = { configured: true, person: c.person, relay: c.relay.name, agents: Object.keys(c.agents), needs: sortNeeds(needs), venues: venues.map(({ at: _at, ...v }) => v), drafts, cards: cardsView(home, now), presence };
+  const wallet = walletView(home, now);
+  const out: ImStatus = { configured: true, person: c.person, relay: c.relay.name, agents: Object.keys(c.agents), needs: sortNeeds(needs), venues: venues.map(({ at: _at, ...v }) => v), drafts, cards: cardsView(home, now), presence, ...(wallet !== undefined ? { wallet } : {}) };
   if (state !== undefined) { out.connected = state.connected; out.at = state.at; if (state.error !== undefined) out.error = state.error; }
   return out;
 }
@@ -135,7 +150,7 @@ export function statusView(home: string, seen: Readonly<Record<string, string>> 
 function cardActions(role: CardRow["role"], state: CardState): string[] {
   if (role === "delegator") {
     switch (state) {
-      case "draft": return ["发布", "算了"];
+      case "draft": return ["发布", "改一下", "算了"];
       case "open": return ["撤回"];
       case "awaiting-grant": return ["撤回"];
       case "in-progress": return ["问一句", "要求交回"];
@@ -187,6 +202,22 @@ export function cardsView(home: string, now: string = new Date().toISOString()):
   return out.sort((a, b) => (a.card.at < b.card.at ? 1 : a.card.at > b.card.at ? -1 : 0));
 }
 
+const localClock = (at: string): string => { const d = new Date(at); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+
+/** The wallet from the mirrors (§9.1): the ledger's entries, the caps from the person's page; nothing until the ledger is mirrored. */
+export function walletView(home: string, now: string = new Date().toISOString()): WalletRow | undefined {
+  const c = readConfig(home);
+  if (c === undefined) return undefined;
+  const ledger = readMirror(home, c.relay.name, c.person, `ledger/${c.person}.geml`);
+  if (!ledger.exists) return undefined;
+  const entries = foldLedger(ledger.blocks);
+  const page = readMirror(home, c.relay.name, c.person, `people/${c.person}.geml`).blocks.filter((b) => /^caps-\d+$/.test(b.id));
+  const caps = capsOf(page[page.length - 1]?.value);
+  const used = usedToday(entries, now), balance = balanceOf(entries, `person:${c.person}`), agents = Object.keys(c.agents);
+  const recent = entries.slice(-8).reverse();
+  return { balance, caps, used, lines: walletLines({ balance, caps, used, agents }), recent: recent.map((e) => entryLine(e, `person:${c.person}`, localClock)) };
+}
+
 /** One venue as the page shows it: the last `limit` messages, each speaker drawn as rule 6 says. */
 export function threadView(home: string, owner: string, id: string, limit = 50, now?: string): Thread | undefined {
   const c = readConfig(home);
@@ -206,6 +237,8 @@ export function threadView(home: string, owner: string, id: string, limit = 50, 
   const queues = new Map<string, Queue>();
   for (const a of Object.keys(c.agents)) queues.set(a, readQueue(readMirror(home, c.relay.name, c.person, `queues/${a}.geml`).text).queue);
   const me = `person:${c.person}`;
+  const channel = vd.venue.kind === "channel" ? channelView(home, c, owner, vd, now ?? new Date().toISOString()) : undefined;
+  const signals = channel === undefined ? new Map<string, Signal>() : new Map(signalsIn(home, c, owner, vd).map((s) => [s.id, s]));
   const messages: ThreadMessage[] = vd.messages.slice(-limit).map((msg) => {
     const s = parseSpeaker(msg.speaker);
     const t: ThreadMessage = {
@@ -217,6 +250,10 @@ export function threadView(home: string, owner: string, id: string, limit = 50, 
     if (msg.replyTo !== undefined) t.replyTo = msg.replyTo;
     if (msg.ask !== undefined) t.ask = msg.ask;
     if (msg.opinion !== undefined) t.opinion = msg.opinion;
+    if (msg.kind === "signal" && msg.signal !== undefined && channel !== undefined) {
+      const sig = signals.get(parseAddress(msg.signal)?.block ?? "");
+      if (sig !== undefined) t.signal = signalLines(sig, channel.exec[sig.id]);
+    }
     if (msg.speaker === me && now !== undefined) {
       for (const [a, q] of queues) {
         const line = senderStatus(q, `qi-${id}-${msg.id}`, now, { alive: isAlive(presenceOf(home, a)), doing: presenceWord(presenceOf(home, a)) });
@@ -227,6 +264,7 @@ export function threadView(home: string, owner: string, id: string, limit = 50, 
   });
   const th: Thread = { owner, id, kind: vd.venue.kind, kindWord: VENUE_WORDS[vd.venue.kind], name: vd.venue.name, people: vd.venue.people, agents: vd.venue.agents, draftFirst: vd.venue.policy.draftFirst, messages, total: vd.messages.length };
   if (vd.venue.announce !== undefined) th.announce = vd.venue.announce.text;
+  if (channel !== undefined) th.channel = { price: channel.price, stage: channel.stage, footer: channel.footer };
   return th;
 }
 

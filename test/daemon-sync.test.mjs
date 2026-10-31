@@ -29,17 +29,19 @@ test("syncOnce mirrors my page, the venues I am in across owners, my agents' que
     s.relay.appendMessage(zhang.record, "john", "g-7", { id: "m-1", text: "@xiaoping 跑一下" });
     s.relay.appendMessage(zhang.record, "john", "g-7", { id: "m-2", kind: "chat", text: "顺便" });
     const r = await daemon.syncOnce();
-    assert.deepEqual(r, { connected: true, docs: 4, pushed: 0, failed: 0, left: 0, heartbeats: 0 });
+    assert.deepEqual(r, { connected: true, docs: 6, pushed: 0, failed: 0, left: 0, heartbeats: 0, executed: 0 });
     const venue = readMirror(home, "relay.test", "john", "venues/g-7.geml");
     assert.deepEqual(venue.blocks.map((b) => b.id), ["venue", "m-1", "m-2"]);
     assert.equal(venue.text, s.relay.renderVisible(s.relay.read("john", "venues/g-7.geml", "person:john").blocks), "the relay's text, whole");
     assert.deepEqual(readMirror(home, "relay.test", "zhangsan", "venues/t-1.geml").blocks.map((b) => b.id), ["venue"]);
     assert.deepEqual(readMirror(home, "relay.test", "john", "queues/xiaoping.geml").blocks.map((b) => b.id), ["qi-g-7-m-1"]);
     assert.deepEqual(readMirror(home, "relay.test", "john", "people/john.geml").blocks.map((b) => b.id), ["person"]);
+    assert.deepEqual(readMirror(home, "relay.test", "john", "ledger/john.geml").blocks.map((b) => b.id), ["entry-1"], "the ledger is followed");
+    assert.deepEqual(readMirror(home, "relay.test", "john", "agents/xiaoping.geml").blocks.map((b) => b.id), ["agent"], "the agent's page is followed");
     assert.deepEqual(readInbox(home, "relay.test", "john"), []);
     assert.deepEqual(readState(home), { connected: true, at: readState(home).at });
     s.relay.appendMessage(john.record, "john", "g-7", { id: "m-3", text: "再来" });
-    assert.equal((await daemon.syncOnce()).docs, 4);
+    assert.equal((await daemon.syncOnce()).docs, 6);
     assert.deepEqual(readMirror(home, "relay.test", "john", "venues/g-7.geml").blocks.map((b) => b.id), ["venue", "m-1", "m-2", "m-3"], "rewritten whole");
   } finally {
     await s.close();

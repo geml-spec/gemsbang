@@ -263,6 +263,8 @@ function world(on: On) {
     if (req.op === 'im-read') { w.sent.push(req); return { v: 1, ok: true, shell: shell(), text: `群「前端周会」· 最近 ${String(req.limit ?? 12)} 条` } }
     if (req.op === 'im-venue') { w.sent.push(req); return { v: 1, ok: true, shell: shell(), ...(w.imThread !== null ? { thread: w.imThread } : {}) } }
     if (req.op === 'im-card') { w.sent.push(req); return w.imCard === null ? { v: 1, ok: false, error: 'gemworks: 没有这张卡', shell: shell() } : { v: 1, ok: true, shell: shell(), card: w.imCard } }
+    if (req.op === 'im-brief') { w.sent.push(req); return { v: 1, ok: true, shell: shell(), brief: { venue: 'john/dm-xiaoping' } } }
+    if (req.op === 'im-signal') { w.sent.push(req); return { v: 1, ok: true, shell: shell(), signal: { line: req.action === 'list' ? '命中 0/0 · 90 天收益 0% · 最大回撤 0% · 已撤回 0（仍计入）' : '已排入待发：信号 s-1 → 频道 john/ch-9 · 本机哈希 sha256:abcd' } } }
     if (req.op === 'im-presence' || req.op === 'im-need' || req.op === 'im-draft') { w.sent.push(req); return { v: 1, ok: true, shell: shell() } }
     const a = plain(req) as Record<string, unknown>
     return w.im !== null && a['ok'] === true && IM_CARRIERS.includes(req.op) ? { ...a, im: w.im } : a
@@ -402,7 +404,7 @@ test('real event order: session start, a test run moves the stage, the board mov
   await start($, on)
   expect(w.sent.map((r) => r.op), 'the board the inbox is built from is read at the start').toEqual(['status', 'refresh', 'board', 'attention'])
   expect(w.sent[0]).toMatchObject({ v: 1, root: ROOT })
-  expect(w.registered).toEqual(['status', 'move', 'set', 'note', 'artifact', 'ask', 'work', 'im_say', 'im_ask', 'im_report', 'im_read', 'im_forward', 'im_card'])
+  expect(w.registered).toEqual(['status', 'move', 'set', 'note', 'artifact', 'ask', 'work', 'im_say', 'im_ask', 'im_report', 'im_read', 'im_forward', 'im_card', 'im_signal'])
 
   const tests = await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', command: 'npm test' })
   expect(w.sent.at(-1)).toMatchObject({ op: 'after', tool: 'Bash', callId: 'b1', exitCode: 0, isError: false, gitOperation: false, input: { command: 'npm test' } })
@@ -621,7 +623,7 @@ test('a registration the engine refuses: the start goes on, and the band says wh
   w.refuse = { set: 'a tool named set is already registered' }
   await start($, on)
   expect(w.sent.map((r) => r.op)).toEqual(['status', 'refresh', 'board', 'attention'])
-  expect(w.registered).toEqual(['status', 'move', 'note', 'artifact', 'ask', 'work', 'im_say', 'im_ask', 'im_report', 'im_read', 'im_forward', 'im_card'])
+  expect(w.registered).toEqual(['status', 'move', 'note', 'artifact', 'ask', 'work', 'im_say', 'im_ask', 'im_report', 'im_read', 'im_forward', 'im_card', 'im_signal'])
   expect(await bandText($, 'terminal', 400)).toMatch(/^» gemworks：没有注册上 set（[^（]*already registered[^）]*） \[看板\]$/)
 })
 
@@ -2452,7 +2454,7 @@ test('the IM tools: registered with the others; each goes through the bridge as 
   const w = world(on)
   w.im = { configured: true, person: 'john', relay: 'relay.test', agents: [], connected: true, needs: [], venues: [{ owner: 'john', id: 'g-7', kind: 'group', kindWord: '群', name: '前端周会', status: '2 人 · 1 个 agent', unread: 0 }], drafts: [], cards: [], presence: {} }
   await start($, on)
-  expect(w.registered).toEqual(['status', 'move', 'set', 'note', 'artifact', 'ask', 'work', 'im_say', 'im_ask', 'im_report', 'im_read', 'im_forward', 'im_card'])
+  expect(w.registered).toEqual(['status', 'move', 'set', 'note', 'artifact', 'ask', 'work', 'im_say', 'im_ask', 'im_report', 'im_read', 'im_forward', 'im_card', 'im_signal'])
   expect((await $.tool.call({ tool: 'mcp__gemworks__im_say', tool_use_id: 'i0', venue: 'john/g-7', text: 'x' })).result).toBe('im_say: 本会话没有 agent：在设置里选一个')
   w.im = { ...(w.im as object), agents: ['xiaoping'], presence: { xiaoping: 'idle' } }
   await $.command.run({ command: 'gemworks', args: '', origin: COMPOSER, presentation: PRESENTATION })
@@ -2557,4 +2559,39 @@ test('a card\'s turn (plan G): the room is kept on the turn; a write outside it 
   await clock.settle()
   // The test run moved the workflow's stage, whose dictionary now has its own say on a write; the room's rule is gone with the turn.
   expect((await $.tool.call({ tool: 'Write', tool_use_id: 'w3', file_path: '/work/app/y.txt', content: 'y' })).deny ?? '', 'the room ends with the turn').not.toContain('IM：')
+})
+
+test('the brief (plan K): the line under the cards goes through the bridge as im-brief; 改一下 under a draft takes the words typed first, and says so when there are none', async ($, on) => {
+  const w = world(on)
+  w.im = { configured: true, person: 'john', relay: 'relay.test', agents: ['xiaoping'], connected: true, needs: [], venues: [], drafts: [], cards: [{ owner: 'john', id: 't-57', title: '评审', direction: 'outsource', directionWord: '外包', state: 'draft', stateWord: '草拟', progress: '[草拟] · 发布', brief: [], role: 'delegator', heartbeat: '—', versions: 0, actions: ['发布', '改一下', '算了'], card: { id: 't-57', state: 'draft', title: '评审' } }], presence: {} }
+  const clock = await start($, on)
+  await clock.settle()
+  const pane = await $.ui.mount({ plugin: 'gemworks', surface: 'terminal', component: 'Pane', requestId: 'gemworks-board', props: PANE })
+  await pane.press({ key: 'tab-messages' })
+  await pane.input({ key: 'im-brief', text: '去帮李四评一下设置页，别花超过 20 积分' })
+  await clock.settle()
+  expect(w.sent.filter((r) => r.op === 'im-brief').at(-1)).toMatchObject({ op: 'im-brief', text: '去帮李四评一下设置页，别花超过 20 积分' })
+  const sent = w.sent.length
+  await pane.press({ key: 'im-card-1-john/t-57' })
+  await clock.settle()
+  expect(w.sent.length).toBe(sent)
+  await pane.input({ key: 'im-card-words-john/t-57', text: '预算改成 20' })
+  await pane.press({ key: 'im-card-1-john/t-57' })
+  await clock.settle()
+  expect(w.sent.filter((r) => r.op === 'im-brief').at(-1)).toMatchObject({ op: 'im-brief', text: '预算改成 20', card: 't-57' })
+})
+
+test('im_signal (plan L): the tool goes through the bridge as the session\'s agent — publish with the channel in its body, list with its target — and answers with the bridge\'s line', async ($, on) => {
+  const w = world(on)
+  w.im = { configured: true, person: 'john', relay: 'relay.test', agents: ['xiaoping'], connected: true, needs: [], venues: [], drafts: [], cards: [], presence: {} }
+  await start($, on)
+  const body = { channel: 'john/ch-9', market: 'polymarket:x', side: 'yes', sizeHint: { kind: 'fraction-of-bankroll', value: 0.02 }, priceCap: 0.63, expires: '2099-01-01T00:00:00Z', confidence: 0.7 }
+  const made = await $.tool.call({ tool: 'mcp__gemworks__im_signal', tool_use_id: 's1', action: 'publish', body })
+  expect(w.sent.filter((r) => r.op === 'im-signal').at(-1)).toMatchObject({ op: 'im-signal', action: 'publish', as: 'xiaoping', body })
+  expect(String(made.result)).toContain('已排入待发：信号 s-1 → 频道 john/ch-9')
+  const listed = await $.tool.call({ tool: 'mcp__gemworks__im_signal', tool_use_id: 's2', action: 'list', target: 'xiaoping@john' })
+  expect(w.sent.filter((r) => r.op === 'im-signal').at(-1)).toMatchObject({ action: 'list', target: 'xiaoping@john' })
+  expect(String(listed.result)).toContain('命中 0/0')
+  const bad = await $.tool.call({ tool: 'mcp__gemworks__im_signal', tool_use_id: 's3', action: 'sell' })
+  expect(String(bad.result)).toContain('action is publish, retract, skip or list')
 })

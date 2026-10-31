@@ -44,3 +44,8 @@ test("the other levels and scopes read right", () => {
 test("withEnvelope puts the line above the text, nothing else", () => {
   assert.equal(withEnvelope("[来自 x]", "正文\n第二行"), "[来自 x]\n正文\n第二行");
 });
+
+test("a room's envelope (§7.4): the reply goes back to the room, or to the owner first", async () => {
+  const { replyWords, venueLabel } = await import("../dist/core/im/envelope.js");
+  assert.deepEqual([replyWords("room", false), replyWords("room", true), venueLabel("room", "前端茶水间")], ["回复将发回该房间，成员可见", "回复先给主人过目，再发回该房间", "房间「前端茶水间」"]);
+});

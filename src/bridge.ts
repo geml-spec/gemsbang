@@ -49,10 +49,14 @@ import { newTurns, queuedMessages, readTranscript, slugOf, transcriptEvents, typ
 import { branchesElsewhere, markOpen } from "./session-store.js";
 import { statSync } from "node:fs";
 import type { HostInfo } from "./hosts/claude-code/env.js";
-import { answer as imAnswer, answerGrant, dropDraft, nextPrompt, markRead, reportPresence, say, sendDraft } from "./daemon/deliver.js";
+import { answer as imAnswer, answerAllow, answerDigest, answerGrant, answerMatch, dropDraft, nextPrompt, markRead, publishSignal, reportPresence, retractSignal, say, sendDraft } from "./daemon/deliver.js";
 import { homeDir, readConfig, readDraft, readMirror, writeDraft } from "./daemon/home.js";
 import { readForTool, statusView, threadView } from "./daemon/view.js";
 import { cardCall } from "./daemon/cards.js";
+import { briefCall } from "./daemon/brief.js";
+import { answerExecNeed, commandConnector, objectToSignal } from "./daemon/exec.js";
+import { RelayClient, reasonOf } from "./daemon/client.js";
+import { performanceLine, signalFaults, signalInput, signalText, type Performance, type Signal } from "./core/im/signal.js";
 import { isCardAction } from "./core/im/card.js";
 import { parseAddress } from "./core/im/address.js";
 import type { ImStatus } from "./daemon/view.js";
@@ -727,6 +731,10 @@ function moveEarlierLayout(root: string): void {
 export async function handleRequest(req: BridgeRequest): Promise<BridgeResponse> {
   // A card's verb (plan G) waits on the relay; every other op is answered from the files.
   if (req.op === "im-card") return answerCard(req);
+  if (req.op === "im-brief") return answerBrief(req);
+  if (req.op === "im-signal") return answerSignal(req);
+  // A press on the local execution module's ask or 卡住 (§10.5) may place an order: it waits on the connector.
+  if (req.op === "im-need" && /^exec(-stuck)?:/.test(req.key)) return answerExecPress(req);
   return answerRequest(req);
 }
 
@@ -736,6 +744,61 @@ async function answerCard(req: BridgeRequest & { op: "im-card" }): Promise<Bridg
   if (!isCardAction(req.action)) return { v: 1, ok: false, error: `gemworks: 不认识的动作：${String(req.action)}`, shell };
   const r = await cardCall(imHome(), { action: req.action, ...(req.owner !== undefined ? { owner: req.owner } : {}), ...(req.id !== undefined ? { id: req.id } : {}), ...(req.body !== undefined ? { body: req.body } : {}), ...(req.as !== undefined ? { as: req.as } : {}) });
   return r.ok ? { v: 1, ok: true, shell, card: r.answer } : { v: 1, ok: false, error: `gemworks: ${r.reason}`, shell };
+}
+
+/** `im-brief`: the owner's line into their DM with the agent (daemon/brief.ts); a relay out of reach, or its refusal, is the error. */
+async function answerBrief(req: BridgeRequest & { op: "im-brief" }): Promise<BridgeResponse> {
+  const shell = shellAt(req);
+  const r = await briefCall(imHome(), { text: req.text, ...(req.agent !== undefined ? { agent: req.agent } : {}), ...(req.card !== undefined ? { card: req.card } : {}) }, new Date().toISOString());
+  return r.ok ? { v: 1, ok: true, shell, brief: { venue: r.venue } } : { v: 1, ok: false, error: `gemworks: ${r.reason}`, shell };
+}
+
+/** `im-need` on an `exec:` key: the module answers (daemon/exec.ts), an order through the risk file's connector command. */
+async function answerExecPress(req: BridgeRequest & { op: "im-need" }): Promise<BridgeResponse> {
+  const shell = shellAt(req);
+  const r = await answerExecNeed(imHome(), req.key, req.action, new Date().toISOString(), commandConnector);
+  return r.ok ? { v: 1, ok: true, shell } : { v: 1, ok: false, error: `gemworks: ${r.reason}`, shell };
+}
+
+/** `im-signal` (§10): publish seals the signal on this host's chain and queues it for the relay; retract queues the mark; skip records the agent's objection with the channel's state; list reads an agent's chain and performance from the relay. */
+async function answerSignal(req: BridgeRequest & { op: "im-signal" }): Promise<BridgeResponse> {
+  const shell = shellAt(req);
+  const home = imHome();
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+  const done = (line: string): BridgeResponse => ({ v: 1, ok: true, shell, signal: { line } });
+  const refuse = (reason: string): BridgeResponse => ({ v: 1, ok: false, error: `gemworks: ${reason}`, shell });
+  const c = readConfig(home);
+  if (c === undefined) return refuse("没有 connect.json：先 gemworks connect setup");
+  if (req.action === "list") {
+    const m = /^([^@\s]+)@([^@\s]+)$/.exec(req.target ?? "");
+    if (m === null) return refuse("list 要 <agent>@<owner>");
+    let r: { status: number; body: unknown };
+    try { r = await new RelayClient(c.relay.url, c.token).get(`/signals/${encodeURIComponent(m[2]!)}/${encodeURIComponent(m[1]!)}`); } catch (e) { return refuse(`连不上中继：${e instanceof Error ? e.message : String(e)}`); }
+    if (r.status !== 200) return refuse(reasonOf(r));
+    const page = r.body as { signals: Signal[]; performance: Performance };
+    return done([performanceLine(page.performance), ...page.signals.map((s) => `${signalText(s)}${s.retracted !== undefined ? " · 已撤回" : ""}`)].join("\n"));
+  }
+  if (req.action === "skip") {
+    if (req.id === undefined) return refuse("skip 要信号的 id");
+    const reason = (req.reason ?? "").trim();
+    const r = objectToSignal(home, req.id, reason === "" ? "agent 反对" : reason, now);
+    return r.ok ? done(`已反对 ${req.id}（频道 ${r.channel}）`) : refuse(r.reason);
+  }
+  const agent = req.as ?? Object.keys(c.agents)[0];
+  if (agent === undefined) return refuse("本会话没有 agent：在设置里选一个");
+  if (c.agents[agent] === undefined) return refuse(`没有 ${agent} 的令牌`);
+  if (req.action === "retract") {
+    if (req.id === undefined) return refuse("retract 要信号的 id");
+    retractSignal(home, agent, req.id, now);
+    return done(`已排入待发：撤回 ${req.id}`);
+  }
+  const body = req.body ?? {};
+  const channel = typeof body["channel"] === "string" ? body["channel"] : undefined;
+  if (channel === undefined || !/^[^/\s]+\/[^/\s]+$/.test(channel)) return refuse("publish 要 channel（owner/id）");
+  const faults = signalFaults(body);
+  if (faults.length > 0) return refuse(faults.join("；"));
+  const made = publishSignal(home, agent, { ...signalInput(body)!, channel }, now);
+  return done(`已排入待发：信号 ${made.id} → 频道 ${channel} · 本机哈希 ${made.hash}`);
 }
 
 /** handleRequest, answered at once: every op is answered without waiting on anything but the files and git. */
@@ -780,7 +843,14 @@ function answerNeed(home: string, key: string, action: string, text: string | un
     say(home, { as: "person", owner: a.owner, venue: venue[1]!, text: reply, replyTo: a.block }, now);
     return { ok: true };
   }
+  if (/^digests\/[^/]+\.geml$/.test(a.doc)) {
+    if (action === "自己写" && (text?.trim() ?? "") === "") return { ok: false, reason: "自己写：缺正文" };
+    answerDigest(home, { draft: a.block, publish: action !== "不发", ...(action === "自己写" ? { text: (text ?? "").trim() } : {}) }, now);
+    return { ok: true };
+  }
+  if (/^matches\/[^/]+\.geml$/.test(a.doc)) { answerMatch(home, { owner: a.owner, id: a.doc.slice("matches/".length, -".geml".length), yes: action === "亮名片" }, now); return { ok: true }; }
   if (/^people\/[^/]+\.geml$/.test(a.doc)) {
+    if (a.block.startsWith("cap-ask-")) { answerAllow(home, { ask: a.block, allowed: action !== "不行" }, now); return { ok: true }; }
     const request = readMirror(home, c.relay.name, a.owner, a.doc).blocks.find((b) => b.id === a.block);
     const from = typeof request?.value["from"] === "string" ? request.value["from"] : undefined, block = typeof request?.value["block"] === "string" ? request.value["block"] : undefined;
     const person = from?.replace(/^person:/, "").replace(/^agent:[^@]+@/, "");
@@ -841,6 +911,8 @@ function answerIm(req: BridgeRequest & ImOp): BridgeResponse {
         return r.ok ? yes() : no(r.reason);
       }
       case "im-card": return no("卡的动作走 handleRequest，不走同步的答复");
+      case "im-brief": return no("起草走 handleRequest，不走同步的答复");
+      case "im-signal": return no("信号走 handleRequest，不走同步的答复");
       case "im-read": {
         if (req.owner === undefined && req.venue === undefined && req.src === undefined) {
           const s = statusView(home, {}, now);

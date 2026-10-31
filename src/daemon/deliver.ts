@@ -7,18 +7,21 @@
 // first; what a person says from the 「消息」 page; a session's presence
 // report. No network: the daemon pushes the outbox when it can, and a host
 // without a daemon still reads the last mirror.
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { parseAddress } from "../core/im/address.js";
-import type { DataBlock } from "../core/im/chain.js";
+import { readDataBlocks, renderDataBlock, seal, type DataBlock } from "../core/im/chain.js";
 import { expandEmbeds, type Access, type Embed } from "../core/im/embed.js";
 import { envelopeLine, withEnvelope } from "../core/im/envelope.js";
 import { parseSpeaker, personBehind } from "../core/im/identity.js";
 import type { Ask, MessageKind } from "../core/im/message.js";
 import type { Presence } from "../core/im/presence.js";
+import type { SignalInput } from "../core/im/signal.js";
+import { appendText } from "../host-fs.js";
 import { next, pending, readQueue, type Marker, type Queue, type QueueItem } from "../core/im/queue.js";
 import { scopeFor, type ToolScope } from "../core/im/sender.js";
 import { scopeLine } from "../core/im/share.js";
+import { RECEPTION_PREFIX } from "../core/im/social.js";
 import { toolWords, type ToolKey, WORK_WORDS, type VenueOfWork } from "../core/im/card.js";
 import type { JsonValue } from "../core/schema.js";
 import { textOf } from "../relay/access.js";
@@ -144,7 +147,9 @@ export function nextPrompt(home: string, agent: string, now: string): Delivered 
   const envelope = envelopeLine({ venueKind: item.venueKind, venueName: item.venueName, senderName: item.senderName, level: item.level, scope, queued, draftFirst });
   // A guest's question (§11): the card's public range, the guest DM's announce, stands under the envelope — what the agent may talk about comes from the host, not from the text.
   const room = item.card === undefined ? undefined : prepareRoom(home, c, agent, item, item.card);
-  const head = item.card !== undefined ? `${envelope}\n${cardPromptLine(item.card, room ?? "")}` : item.venueKind === "guest-dm" && vd?.venue.announce !== undefined ? `${envelope}\n${scopeLine(vd.venue.announce.text)}` : envelope;
+  // The social secretary's first word (§11): the reception the relay wrote into the DM stands under a first question's range line, and no later one's.
+  const reception = item.venueKind === "guest-dm" && vd !== undefined && vd.messages.filter((x) => x.speaker.startsWith("guest:")).length <= 1 ? vd.messages.find((x) => x.kind === "system" && x.text.startsWith(RECEPTION_PREFIX))?.text : undefined;
+  const head = item.card !== undefined ? `${envelope}\n${cardPromptLine(item.card, room ?? "")}` : item.venueKind === "guest-dm" && vd?.venue.announce !== undefined ? `${envelope}\n${scopeLine(vd.venue.announce.text)}${reception === undefined ? "" : `\n[${reception}]`}` : envelope;
   const context = contextText(home, agent, item.context ?? []);
   return { item, envelope, text: withEnvelope(head, context === "" ? item.prompt : `${item.prompt}\n\n${context}`), scope, queued, draftFirst, dropped, ...(room !== undefined ? { room } : {}) };
 }
@@ -234,6 +239,45 @@ export function answerGrant(home: string, o: { request: string; person: string; 
   const c = requireConfig(home);
   if (o.action === "refuse") return enqueueOutbox(home, { kind: "refuse", as: "person", owner: c.person, doc: "", body: { request: o.request }, at: now });
   return enqueueOutbox(home, { kind: "grant", as: "person", owner: c.person, doc: "", body: { person: o.person, block: o.block, request: o.request, ...(o.action === "allow-once" ? { once: true } : {}) }, at: now });
+}
+
+/** An agent's ask for credits answered (§9.1): today's allowance, or not, as the person, through the outbox. */
+export function answerAllow(home: string, o: { ask: string; allowed: boolean }, now: string): OutboxEntry {
+  const c = requireConfig(home);
+  return enqueueOutbox(home, { kind: "allow", as: "person", owner: c.person, doc: "", body: { ask: o.ask, allowed: o.allowed }, at: now });
+}
+
+/** A digest's 定 (§11, rule 6): 发 as drafted, 发 with the owner's own words, or 不发, as the person, through the outbox. */
+export function answerDigest(home: string, o: { draft: string; publish: boolean; text?: string }, now: string): OutboxEntry {
+  const c = requireConfig(home);
+  return enqueueOutbox(home, { kind: "digest", as: "person", owner: c.person, doc: "", body: { draft: o.draft, publish: o.publish, ...(o.text !== undefined ? { text: o.text } : {}) }, at: now });
+}
+
+/** A match's nod (§11 牵线), as the person, through the outbox; `owner` and `id` name the proposer's record. */
+export function answerMatch(home: string, o: { owner: string; id: string; yes: boolean }, now: string): OutboxEntry {
+  const c = requireConfig(home);
+  return enqueueOutbox(home, { kind: "match", as: "person", owner: o.owner, doc: o.id, body: { yes: o.yes }, at: now });
+}
+
+/** A signal from this host's agent (§10.2 发布即双重盖戳): sealed onto the host's own chain under the home first — `<home>/signals/<agent>.geml`, each block hashed over the last — then to the relay through the outbox with that stamp and hash. */
+export function publishSignal(home: string, agent: string, input: SignalInput & { channel: string }, now: string): { id: string; hash: string } {
+  const c = requireConfig(home);
+  const path = join(home, "signals", `${agent}.geml`);
+  const blocks = existsSync(path) ? readDataBlocks(readFileSync(path, "utf8")).blocks : [];
+  const last = blocks[blocks.length - 1];
+  const prev = typeof last?.value["hash"] === "string" ? last.value["hash"] : null;
+  const id = newBlockId(now).replace(/^m-/, "s-");
+  const block = seal({ id, ...(input as unknown as Record<string, JsonValue>), from: `agent:${agent}@${c.person}`, at: now }, prev);
+  if (!existsSync(path)) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, `=== meta\ntitle = "gemworks im signals ${agent}"\n===\n\n`, "utf8"); }
+  appendText(path, renderDataBlock(id, block as unknown as JsonValue));
+  enqueueOutbox(home, { kind: "signal", as: `agent:${agent}`, owner: c.person, doc: "", body: { ...(input as unknown as Record<string, JsonValue>), at: now, hostHash: block.hash }, at: now });
+  return { id, hash: block.hash };
+}
+
+/** A retraction (§10.2), as the agent, through the outbox; the relay marks its chain. */
+export function retractSignal(home: string, agent: string, id: string, now: string): OutboxEntry {
+  const c = requireConfig(home);
+  return enqueueOutbox(home, { kind: "retract", as: `agent:${agent}`, owner: c.person, doc: id, body: {}, at: now });
 }
 
 /** A session's presence as the host sees it (transport §3 会话登记); the daemon posts it with the heartbeat. */

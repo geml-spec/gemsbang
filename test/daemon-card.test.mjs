@@ -19,8 +19,10 @@ async function world() {
   const s = await startRelay({ root: tmp("gemworks-relay-"), name: "relay.test" });
   const john = s.relay.issuePerson("john"), wangwu = s.relay.issuePerson("wangwu");
   const xiaoping = s.relay.issueAgent(john.record, "xiaoping"), xiaoce = s.relay.issueAgent(wangwu.record, "xiaoce");
+  s.relay.topUp("john", 100);
   s.relay.createVenue(john.record, { id: "g-7", kind: "group", name: "前端周会", people: ["wangwu"], agents: ["agent:xiaoping@john", "agent:xiaoce@wangwu"] });
   s.relay.setPresence(xiaoce.record, { session: "cx-1", host: "claude-code", login: "api", presence: "idle" });
+  s.relay.declare(wangwu.record, { agent: "xiaoce", open: true });
   const homes = { john: tmp("gemworks-im-"), wangwu: tmp("gemworks-im-") };
   writeConfig(homes.john, { relay: { url: s.url, name: "relay.test" }, person: "john", token: john.token, agents: { xiaoping: xiaoping.token } });
   writeConfig(homes.wangwu, { relay: { url: s.url, name: "relay.test" }, person: "wangwu", token: wangwu.token, agents: { xiaoce: xiaoce.token } });
@@ -33,9 +35,9 @@ test("the cards a person is on are mirrored and shown: the delegator's row with 
     const made = s.relay.createTask(john.record, INPUT);
     assert.equal(made.ok, true, made.reason);
     const id = made.card.id;
-    assert.deepEqual((await daemons.john.syncOnce()).docs, 3, "the draft counts among my documents (my page, the group, the card; no queue yet)");
+    assert.deepEqual((await daemons.john.syncOnce()).docs, 5, "the draft counts among my documents (my page, my ledger, my agent's page, the group, the card; no queue yet)");
     assert.ok(readMirror(homes.john, "relay.test", "john", `cards/${id}.geml`).exists);
-    assert.equal((await daemons.wangwu.syncOnce()).docs, 2, "not among 王五's until published");
+    assert.equal((await daemons.wangwu.syncOnce()).docs, 4, "not among 王五's until published");
     s.relay.publishTask(john.record, "john", id, { venue: "john/g-7" });
     s.relay.claimTask(xiaoce.record, "john", id, {});
     await daemons.john.syncOnce(); await daemons.wangwu.syncOnce();

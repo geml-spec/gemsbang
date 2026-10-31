@@ -65,3 +65,17 @@ test("a system message, a signal and a reply in a thread without @ deliver nothi
   const away = deliver(msg("@小写 看看", john), { ...input, roster: [...roster, { name: "小写", kind: "agent" }] });
   assert.deepEqual(away, { ...nothing, degraded: [{ agent: "小写", reason: "不在这个场所" }] });
 });
+
+test("a room (§7.4): a lurker is never prompted, even by a leading @; one in 被问才答 as in a group; one in 可以搭话 also by a mid-sentence mention or a reply to its own word, from a person only", () => {
+  const room = { ...g, id: "r-1", kind: "room", name: "前端茶水间" };
+  const lurk = { ...agents[0], mode: "lurk" }, ask = { ...agents[0], mode: "ask" }, chat = { ...agents[0], mode: "chat" };
+  assert.deepEqual(deliver(msg("@小评 看看", lisi), { venue: room, agents: [lurk], roster }), { ...nothing, degraded: [{ agent: "小评", reason: "只潜水" }] });
+  assert.deepEqual(deliver(msg("@小评 看看", lisi), { venue: room, agents: [ask], roster }).prompts, [{ agent: "小评", level: "trusted", hops: 0 }]);
+  assert.deepEqual(deliver(msg("刚才 @小评 说的对", lisi), { venue: room, agents: [ask], roster }), { ...nothing, mentioned: ["小评"] });
+  assert.deepEqual(deliver(msg("刚才 @小评 说的对", lisi), { venue: room, agents: [chat], roster }), { ...nothing, mentioned: ["小评"], prompts: [{ agent: "小评", level: "trusted", hops: 0, via: "提到" }] });
+  assert.deepEqual(deliver(msg("不对吧", lisi, { replyTo: "m-0" }), { venue: room, agents: [chat], roster, repliedTo: "agent:xiaoping@john" }).prompts, [{ agent: "小评", level: "trusted", hops: 0, via: "回复" }]);
+  assert.deepEqual(deliver(msg("不对吧", lisi, { replyTo: "m-0" }), { venue: room, agents: [chat], roster, repliedTo: "person:john" }), nothing, "a reply to someone else");
+  assert.deepEqual(deliver(msg("@小评 看看 @小评", lisi), { venue: room, agents: [chat], roster }).prompts.length, 1, "called and mentioned: once");
+  const other = { name: "小测", speaker: "agent:xiaoce@zhangsan", relations: relXc, mode: "chat" };
+  assert.deepEqual(deliver(msg("刚才 @小评 说的对", other.speaker === "x" ? john : { kind: "agent", name: "xiaoce", owner: "zhangsan" }), { venue: room, agents: [chat, other], roster, handling: 0 }), { ...nothing, mentioned: ["小评"] }, "an agent's mention prompts no chatty agent");
+});

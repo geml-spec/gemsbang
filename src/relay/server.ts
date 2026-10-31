@@ -7,14 +7,18 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { canRead } from "./access.js";
 import { JSON_TYPE, route, type ApiRequest } from "./api.js";
-import { HTML_TYPE, sharePage } from "./page.js";
+import { giftPage, HTML_TYPE, loginPage, packetPage, sharePage } from "./page.js";
 import { Relay, type RelayOptions } from "./relay.js";
+import { Orchestrator, type Runner } from "./hosted.js";
 import { upgrade, type WsConnection } from "./ws.js";
 
-export interface RelayServer { port: number; url: string; relay: Relay; close(): Promise<void> }
+export interface RelayServer { port: number; url: string; relay: Relay; hosted?: Orchestrator; close(): Promise<void> }
 
 /** A request body may be this long: a message, a card, never a package's bytes (§2.1). */
 export const BODY_LIMIT = 1_048_576;
+
+/** The pages by path (transport §7.1), for a browser (`Accept: text/html`); a script at the same path gets the JSON from api.ts. */
+const PAGES: readonly [RegExp, () => string][] = [[/^\/c\/[^/]+$/, sharePage], [/^\/login$/, loginPage], [/^\/g\/[^/]+$/, giftPage], [/^\/r\/[^/]+$/, packetPage]];
 
 /** The body, or undefined when it ran over the limit (read to its end all the same, so the answer reaches the client). */
 function readBody(req: IncomingMessage): Promise<string | undefined> {
@@ -38,7 +42,7 @@ function reply(res: ServerResponse, status: number, body: string, type: string):
   res.end(body);
 }
 
-export function startRelay(o: RelayOptions & { port?: number; host?: string }): Promise<RelayServer> {
+export function startRelay(o: RelayOptions & { port?: number; host?: string; hosted?: { runner: Runner; credits?: number } }): Promise<RelayServer> {
   const relay = new Relay(o);
   const host = o.host ?? "127.0.0.1";
   const subscribers = new Map<WsConnection, { speaker: string; docs: Set<string> }>();
@@ -56,8 +60,9 @@ export function startRelay(o: RelayOptions & { port?: number; host?: string }): 
     void (async () => {
       try {
         const url = new URL(req.url ?? "/", "http://relay");
-        // A browser at a card's address gets the page (transport §7.1); a script asking for JSON gets the card from the API below.
-        if ((req.method ?? "GET").toUpperCase() === "GET" && /^\/c\/[^/]+$/.test(url.pathname) && /text\/html/.test(String(req.headers["accept"] ?? ""))) { reply(res, 200, sharePage(), HTML_TYPE); return; }
+        // A browser at a page's address gets the page (transport §7.1); a script asking for JSON gets the API below.
+        const page = (req.method ?? "GET").toUpperCase() === "GET" && /text\/html/.test(String(req.headers["accept"] ?? "")) ? PAGES.find(([re]) => re.test(url.pathname)) : undefined;
+        if (page !== undefined) { reply(res, 200, page[1](), HTML_TYPE); return; }
         const text = await readBody(req);
         if (text === undefined) { reply(res, 413, JSON.stringify({ error: "正文超过 1 MB" }), JSON_TYPE); return; }
         let body: unknown;
@@ -107,9 +112,14 @@ export function startRelay(o: RelayOptions & { port?: number; host?: string }): 
     server.once("error", failed);
     server.listen(o.port ?? 0, host, () => {
       const port = (server.address() as AddressInfo).port;
+      const url = `http://${host}:${port}`;
+      // The hosted agents' body (transport §6), awake to their queues while the server runs.
+      const hosted = o.hosted === undefined ? undefined : new Orchestrator({ relay, runner: o.hosted.runner, relayUrl: url, ...(o.hosted.credits !== undefined ? { credits: o.hosted.credits } : {}), log: (line) => console.error(`hosted: ${line}`) });
+      hosted?.start();
       done({
-        port, url: `http://${host}:${port}`, relay,
+        port, url, relay, ...(hosted !== undefined ? { hosted } : {}),
         close: () => new Promise((closed) => {
+          hosted?.stop();
           clearInterval(sweep);
           off();
           for (const c of subscribers.keys()) c.close();

@@ -75,13 +75,14 @@ test("a guest asks: the first word makes a guest identity and the guest DM with 
   assert.deepEqual([first.json.message.speaker, first.json.message.text, first.json.left], [first.json.speaker, "缓存键为什么不用 URL 直接当键？", 2]);
   const vd = r.venueOf("john", first.json.venue);
   assert.deepEqual([vd.venue.kind, vd.venue.name, vd.venue.people, vd.venue.agents, vd.venue.host, vd.venue.card, vd.venue.announce.text, vd.venue.announce.version], ["guest-dm", `访客 ${gid}`, ["john", first.json.speaker], ["xiaoping"], "xiaoping", id, CARD.scope, 1]);
-  assert.equal(vd.messages.length, 1, "no system message for a first announce");
+  assert.deepEqual(vd.messages.map((m) => [m.kind, m.speaker]), [["system", "host"], ["chat", first.json.speaker]], "the reception opens the DM; no system message for a first announce");
+  assert.equal(vd.messages[0].text, "接待：第一句自报家门——我是 xiaoping，代 john；john 现在不在；john 最近公开的一件事：设置页导出 PDF，能跑的；访客可以留言，或问公开范围内的。");
   const q = readQueue(readDoc(r.root, "john", "queues/xiaoping.geml").text).queue;
   assert.deepEqual([q.items.length, q.items[0].level, q.items[0].venueKind, q.items[0].senderName, q.items[0].prompt], [1, "guest", "guest-dm", `访客 ${gid}`, "缓存键为什么不用 URL 直接当键？"]);
   assert.deepEqual(q.items[0].context, [{ src: `https://relay.test/john/venues/${first.json.venue}.geml#announce` }], "the public range rides as the venue's announce");
   const second = call(r, `POST /ask/${id}`, { token: first.json.token, body: { text: "你们生产环境用的是哪家对象存储？" }, ip: "10.0.0.1" });
   assert.deepEqual([second.status, second.json.token, second.json.venue, second.json.left], [201, undefined, first.json.venue, 1], "the same guest: no new token, the same DM, one fewer left");
-  assert.equal(call(r, `GET /john/venues/${first.json.venue}.geml`, { token: first.json.token }).json.blocks.filter((b) => b.value?.text !== undefined && b.value?.speaker !== undefined).length, 2, "the DM is the guest's to read");
+  assert.equal(call(r, `GET /john/venues/${first.json.venue}.geml`, { token: first.json.token }).json.blocks.filter((b) => b.value?.text !== undefined && b.value?.speaker !== undefined).length, 3, "the DM is the guest's to read");
   assert.equal(call(r, `GET /john/venues/${first.json.venue}.geml`, { token: lisi.token }).status, 403, "another person is no member");
   const view = call(r, `GET /c/${id}`, { token: first.json.token }).json;
   assert.deepEqual(view.guest, { speaker: first.json.speaker, left: 1, venue: first.json.venue });

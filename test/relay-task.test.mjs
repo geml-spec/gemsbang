@@ -30,8 +30,10 @@ function world() {
   const r = relay();
   const john = r.issuePerson("john"), wangwu = r.issuePerson("wangwu"), lisi = r.issuePerson("lisi");
   const xiaoping = r.issueAgent(john.record, "xiaoping"), xiaoce = r.issueAgent(wangwu.record, "xiaoce");
+  r.topUp("john", 100);
   r.createVenue(john.record, { id: "g-7", kind: "group", name: "前端周会", people: ["wangwu"], agents: ["agent:xiaoping@john", "agent:xiaoce@wangwu"] });
   r.setPresence(xiaoce.record, { session: "cx-1", host: "claude-code", login: "api", presence: "idle" });
+  r.declare(wangwu.record, { agent: "xiaoce", open: true });
   return { r, john, wangwu, lisi, xiaoping, xiaoce };
 }
 
@@ -90,7 +92,7 @@ test("outsource, the main path: draft, publish (the thread, the 卡片 message, 
   assert.deepEqual([need.kind, need.key, need.text, need.actions], ["accept", `https://relay.test/john/cards/${id}.geml#report-1`, `#${id} 第 1 版 · 机器验法 2/2 过 · 第 3 条等你`, ["接受 · 结算 40", "要改"]]);
   assert.equal(call(r, `POST /tasks/john/${id}/accept`, { token: wangwu.token }).json.error, "只有委托人能把卡从验收中移到已接受");
   const accepted = call(r, `POST /tasks/john/${id}/accept`, { token: john.token });
-  assert.deepEqual([accepted.json.card.state, accepted.json.card.slots[0].state, accepted.json.card.transitions.at(-1).note], ["accepted", "accepted", "结算 40 积分（托管；账本在 ⑤）"]);
+  assert.deepEqual([accepted.json.card.state, accepted.json.card.slots[0].state, accepted.json.card.transitions.at(-1).note], ["accepted", "accepted", "结算 40 积分（托管）"]);
   assert.deepEqual(r.inbox("john"), []);
   assert.equal(call(r, `POST /tasks/john/${id}/close`, { token: john.token }).json.error, "卡不能从已接受直接到关闭");
   assert.deepEqual(call(r, "GET /tasks", { token: wangwu.token }).json.map((t) => [t.id, t.state, t.role]), [[id, "accepted", "worker"]]);
@@ -157,6 +159,7 @@ test("派出: publishing claims the delegator's own agent and waits for the reso
   const zhao = r.issuePerson("zhao"), xiaoma = r.issueAgent(zhao.record, "xiaoma");
   r.addMember(john.record, "john", "g-7", "zhao"); r.addMember(john.record, "john", "g-7", "agent:xiaoma@zhao");
   r.setPresence(xiaoma.record, { session: "cm-1", host: "pi", login: "self-hosted", presence: "idle" });
+  r.declare(zhao.record, { agent: "xiaoma", open: true });
   const c = call(r, "POST /tasks", { token: john.token, body: { ...INPUT, accepts: INPUT.accepts.slice(0, 2), mode: { kind: "contest", slots: 2 }, reward: { kind: "prize", credits: 30, participation: 2 } } }).json.card.id;
   call(r, `POST /tasks/john/${c}/publish`, { token: john.token, body: { venue: "john/g-7" } });
   assert.equal(call(r, `POST /tasks/john/${c}/claim`, { token: xiaoce.token }).json.card.state, "in-progress");
@@ -164,7 +167,7 @@ test("派出: publishing claims the delegator's own agent and waits for the reso
   assert.equal(call(r, `POST /tasks/john/${c}/claim`, { token: xiaoping.token }).json.error, "没有空槽了");
   assert.equal(call(r, `POST /tasks/john/${c}/deliver`, { token: xiaoce.token, body: DELIVERABLE }).json.card.state, "verifying");
   const won = call(r, `POST /tasks/john/${c}/report`, { token: xiaoping.token, body: { results: [{ criterion: 1, met: true }, { criterion: 2, met: true }] } });
-  assert.deepEqual([won.json.decision, won.json.card.slots.map((s) => [s.agent, s.state]), won.json.card.transitions.at(-1).note], ["accepted", [["agent:xiaoce@wangwu", "accepted"], ["agent:xiaoma@zhao", "closed"]], "结算 30 积分（奖金；账本在 ⑤）· 参与补偿 2"]);
+  assert.deepEqual([won.json.decision, won.json.card.slots.map((s) => [s.agent, s.state]), won.json.card.transitions.at(-1).note], ["accepted", [["agent:xiaoce@wangwu", "accepted"], ["agent:xiaoma@zhao", "closed"]], "结算 30 积分（奖金）· 参与补偿 2"]);
 });
 
 test("卡住 and the timeout (§8.2): a silent worker is in its owner's inbox; past the limit the relay gives the card back; the grant need of 待放行 stands in the granter's inbox", () => {
@@ -179,10 +182,10 @@ test("卡住 and the timeout (§8.2): a silent worker is in its owner's inbox; p
   call(r, `POST /tasks/john/${id}/note`, { token: xiaoce.token, body: { text: "还在" } });
   assert.deepEqual(r.inbox("wangwu").filter((n) => n.kind === "stuck"), [], "a note is a heartbeat");
   r.advance(6 * 3_600_000 + 60_000);
-  assert.deepEqual(r.tick(), { returned: [id] });
+  assert.deepEqual(r.tick(), { returned: [id], packets: [], lapsed: [] });
   const card = r.taskOf("john", id);
   assert.deepEqual([card.state, card.slots[0].state, card.transitions.at(-1)], ["open", "returned", { to: "open", by: "host", at: card.transitions.at(-1).at, note: "超时自动交回", slot: 1 }]);
-  assert.deepEqual(r.tick(), { returned: [] });
+  assert.deepEqual(r.tick(), { returned: [], packets: [], lapsed: [] });
   const g = call(r, "POST /tasks", { token: john.token, body: { ...INPUT, grantFrom: "lisi" } }).json.card.id;
   call(r, `POST /tasks/john/${g}/publish`, { token: john.token, body: { venue: "john/g-7" } });
   call(r, `POST /tasks/john/${g}/claim`, { token: xiaoce.token });

@@ -14,7 +14,7 @@ import { hopsOf, hopsSystemText, levelOf, overHops, type Level, type Relations }
 import type { PromptFrom, Venue } from "./venue.js";
 
 /** An agent present in the venue: its shown name, its speaker string, its owner's relations, and its own policy on whose `@` it takes (the venue's when none). */
-export interface AgentInVenue { name: string; speaker: string; relations: Relations; policy?: { promptFrom: PromptFrom; allow: string[] } }
+export interface AgentInVenue { name: string; speaker: string; relations: Relations; policy?: { promptFrom: PromptFrom; allow: string[] }; /** In a room (§7.4): 只潜水 is never prompted; 可以搭话 also by a mid-sentence mention or a reply to its own word. */ mode?: "lurk" | "ask" | "chat" }
 
 export interface DeliveryInput {
   venue: Venue;
@@ -23,6 +23,8 @@ export interface DeliveryInput {
   resolve?: RoleResolver;
   /** When an agent speaks while handling a prompt: that prompt's hops. */
   handling?: number;
+  /** The speaker of the message this one replies to, when it does. */
+  repliedTo?: string;
 }
 
 export interface PromptTo {
@@ -83,6 +85,7 @@ export function deliver(m: Message, d: DeliveryInput): Delivery {
     const target = d.agents.find((a) => a.name === name);
     if (target === undefined) { out.degraded.push({ agent: name, reason: "不在这个场所" }); continue; }
     if (target.speaker === m.speaker) continue;
+    if (target.mode === "lurk") { out.degraded.push({ agent: name, reason: "只潜水" }); continue; }
     if (speaker.kind === "agent") {
       if (!takesAgentPrompt(speaker, target, d.venue)) { out.degraded.push({ agent: name, reason: "对方策略不收 agent 的指令，只当消息读到" }); continue; }
       const limit = d.venue.policy.hopLimit;
@@ -95,6 +98,13 @@ export function deliver(m: Message, d: DeliveryInput): Delivery {
     const prompt: PromptTo = { agent: name, level: levelOf(speaker, target.relations), hops };
     if (call.resolved !== undefined) prompt.via = call.name;
     out.prompts.push(prompt);
+  }
+  if (speaker.kind === "person") {
+    for (const target of d.agents) {
+      if (target.mode !== "chat" || target.speaker === m.speaker || out.prompts.some((p) => p.agent === target.name)) continue;
+      const via = out.mentioned.includes(target.name) ? "提到" : d.repliedTo === target.speaker ? "回复" : undefined;
+      if (via !== undefined) out.prompts.push({ agent: target.name, level: levelOf(speaker, target.relations), hops, via });
+    }
   }
   return out;
 }

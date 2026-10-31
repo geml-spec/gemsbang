@@ -18,7 +18,7 @@ import type { BoardRow, Icon } from "./board.js";
 import type { T } from "./text.js";
 import { hhmm } from "./time.js";
 
-export const IM_TOOL_NAMES = ["im_say", "im_ask", "im_report", "im_read", "im_forward", "im_card"] as const;
+export const IM_TOOL_NAMES = ["im_say", "im_ask", "im_report", "im_read", "im_forward", "im_card", "im_signal"] as const;
 export type ImToolName = (typeof IM_TOOL_NAMES)[number];
 export interface ImToolSpec { name: ImToolName; description: string; inputSchema: Record<string, unknown> }
 
@@ -33,6 +33,7 @@ export const IM_TOOLS: readonly ImToolSpec[] = [
   { name: "im_read", description: "Read what a venue said lately, or one block by its address (rule 3: what is not in your prompt you read on demand). With no arguments, the venues you are in.", inputSchema: { type: "object", properties: { venue: VENUE, src: { type: "string", description: "A block's address." }, limit: { type: "number", description: "How many recent messages (default 12)." } }, additionalProperties: false } },
   { name: "im_forward", description: "Forward a message or a block into another venue by reference (rule 10): the receivers see it by their own permission, a stub otherwise.", inputSchema: { type: "object", properties: { from: { type: "string", description: "The block's address, or `<owner>/<venue>#<message>`." }, to: VENUE, note: { type: "string", description: "A line of your own with it." } }, required: ["from", "to"], additionalProperties: false } },
   { name: "im_card", description: "A task card (§8). action: new (draft one from the fields: title, goal, accepts [{text, verify:{kind: command|file|repo|review|human, run|glob|pr|rubric}}], direction outsource|dispatch, venueOfWork worker-sandbox|resource-sandbox, tools, budget, context {includes, excludes}, grantFrom, worker, mode, reward), publish {venue}, claim, grant, note {text, evidence} (your record on the card: the heartbeat), giveback {note, deliverable}, deliver (a version: kind, sha256, parts, usage, madeBy, evidence, accepts, rights), report {results:[{criterion, met, note}], comments} (the acceptance report after re-running the machine checks in your sandbox), accept, changes {comments}, resume, dispute {reason}, settle {outcome}, close {reason}, show, list. The answer is one line: the card's move.", inputSchema: { type: "object", properties: { action: { type: "string", enum: [...CARD_ACTIONS] }, card: { type: "string", description: "`<owner>/<id>`; not for new and list." }, body: { type: "object", description: "The verb's fields.", additionalProperties: true }, as: { type: "string", enum: ["person", "agent"], description: "Whose token signs: the owner's (person: new, publish, grant, report, accept, changes, dispute, settle, close) or this session's agent's (agent: claim, note, giveback, deliver, resume). Left out, the verb picks." } }, required: ["action"], additionalProperties: false } },
+  { name: "im_signal", description: "A signal (§10). publish: one into a channel your owner made with you as its publisher — body: channel (owner/id), market, side yes|no, sizeHint {kind: fraction-of-bankroll, value}, priceCap, expires (ISO), confidence 0..1, thesis (an address); it is data, never a prompt, sealed on this host's chain first. retract: one by id (it stays on the chain and still counts). skip: a signal in a channel your owner subscribes to, after you read its thesis and object (id, reason) — your owner must have let you take part; you can never widen the risk file. list: an agent's chain and performance (target: agent@owner).", inputSchema: { type: "object", properties: { action: { type: "string", enum: ["publish", "retract", "skip", "list"] }, body: { type: "object", description: "publish: the signal's fields and its channel.", additionalProperties: true }, id: { type: "string", description: "retract, skip: the signal's id on the relay." }, reason: { type: "string", description: "skip: why." }, target: { type: "string", description: "list: `<agent>@<owner>`." } }, required: ["action"], additionalProperties: false } },
 ];
 
 export const OWN = "mcp__gemworks__";
@@ -140,6 +141,8 @@ export function imTabRows(o: ImPageInput): BoardRow[] {
     }
   }
   rows.push(...imCardRows(s, t));
+  if (s.agents.length > 0) rows.push({ kind: "input", key: "im-brief", placeholder: t("一句话起草委托书：去帮谁办什么、按什么准则、别花超过多少积分"), field: "im-brief" });
+  rows.push(...imWalletRows(s, t));
   rows.push(section("im-venues", t("场所"), s.venues.length));
   if (s.venues.length === 0) rows.push(text(t("还没有场所：等守护进程同步，或在中继上建一个群")));
   for (const v of s.venues) rows.push({ kind: "entry", key: `im-venue-${v.owner}-${v.id}`, title: `${v.kindWord}「${v.name}」`, tag: v.unread > 0 ? t("{0} 未读", v.unread) : "", tone: v.unread > 0 ? "normal" : "dim", detail: v.status, action: { op: "im-open", owner: v.owner, id: v.id } });
@@ -147,9 +150,9 @@ export function imTabRows(o: ImPageInput): BoardRow[] {
 }
 
 /** A card's button as the press it raises (§8.1): 问一句 opens the card's thread; the rest are the card's verbs. */
-const CARD_VERBS: Readonly<Record<string, CardAction>> = { 发布: "publish", 算了: "close", 撤回: "close", 关闭: "close", 要求交回: "giveback", 交回: "giveback", 接受: "accept", 要改: "changes", 争议: "dispute", 认领: "claim", 写记录: "note", 交付: "deliver", 继续: "resume", 放行: "grant" };
+const CARD_VERBS: Readonly<Record<string, CardAction | "brief">> = { 发布: "publish", 算了: "close", 撤回: "close", 关闭: "close", 要求交回: "giveback", 交回: "giveback", 接受: "accept", 要改: "changes", 争议: "dispute", 认领: "claim", 写记录: "note", 交付: "deliver", 继续: "resume", 放行: "grant", 改一下: "brief" };
 /** The buttons that take a line of words first (the comment, the reason, the record, the note). */
-const CARD_WORDS: ReadonlySet<string> = new Set(["要改", "争议", "写记录", "交回", "要求交回", "关闭", "算了", "撤回"]);
+const CARD_WORDS: ReadonlySet<string> = new Set(["要改", "争议", "写记录", "交回", "要求交回", "关闭", "算了", "撤回", "改一下"]);
 const CARD_ICON = (state: CardRow["state"]): Icon => (state === "accepted" ? "done" : state === "dispute" || state === "closed" || state === "changes" ? "warn" : "ask");
 
 function cardPress(row: CardRow, label: string, i: number): Pressable {
@@ -170,6 +173,12 @@ export function imCardRows(s: ImStatus, t: T): BoardRow[] {
   return rows;
 }
 
+/** The 钱包 section (§9.1): the balance and the four caps with today's use, then the last entries, a line each; nothing until the daemon mirrored the ledger. */
+export function imWalletRows(s: ImStatus, t: T): BoardRow[] {
+  if (s.wallet === undefined) return [];
+  return [section("im-wallet", t("钱包")), ...s.wallet.lines.map((l) => text(l, "normal")), ...s.wallet.recent.map((l) => text(l))];
+}
+
 /** The band when nothing needs the person (§6.9): the first card still on its way that is theirs to drive, and the groups' unread. */
 export function imQuietLine(status: ImStatus | null): string | undefined {
   if (status === null || !status.configured) return undefined;
@@ -179,8 +188,10 @@ export function imQuietLine(status: ImStatus | null): string | undefined {
 }
 
 function threadRows(th: Thread, replyTo: string | null, columns: number, t: T): BoardRow[] {
-  const rows: BoardRow[] = [{ kind: "heading", key: "im-thread", text: `${th.kindWord}「${th.name}」`, sub: `${th.people.length} 人 · ${th.agents.length} 个 agent${th.draftFirst ? ` · ${t("回群前先给我看")}` : ""}`, action: { key: "im-back", label: t("返回"), action: { op: "im-close" } } }];
+  const rows: BoardRow[] = [{ kind: "heading", key: "im-thread", text: `${th.kindWord}「${th.name}」`, sub: `${th.people.length} 人 · ${th.agents.length} 个 agent${th.draftFirst ? ` · ${t("回群前先给我看")}` : ""}${th.channel !== undefined ? ` · ${th.channel.price}` : ""}`, action: { key: "im-back", label: t("返回"), action: { op: "im-close" } } }];
   if (th.announce !== undefined) rows.push(text(truncate(`${t("公告")}：${th.announce}`, columns)));
+  // A channel (§10.4): the stage card under the head, each signal as its card, the footer last, and no input.
+  if (th.channel !== undefined) for (const l of th.channel.stage) rows.push(text(truncate(l, columns)));
   if (th.total > th.messages.length) rows.push(text(t("还有 {0} 条更早的", th.total - th.messages.length)));
   for (const m of th.messages) {
     const tags = [m.label, hhmm(m.at)];
@@ -189,11 +200,12 @@ function threadRows(th: Thread, replyTo: string | null, columns: number, t: T): 
     if (m.decision) tags.push(t("决策"));
     if (m.status !== undefined) tags.push(m.status);
     const body = m.kind === "system" ? `（${m.text}）` : m.text;
-    rows.push({ kind: "note", key: `im-m-${m.id}`, lines: wrapCells(body, Math.max(10, columns - 4), 6), tag: tags.join(" · "), action: { op: "im-reply", message: replyTo === m.id ? null : m.id } });
+    rows.push({ kind: "note", key: `im-m-${m.id}`, lines: m.signal !== undefined ? m.signal.map((l) => truncate(l, Math.max(10, columns - 4))) : wrapCells(body, Math.max(10, columns - 4), 6), tag: tags.join(" · "), action: { op: "im-reply", message: replyTo === m.id ? null : m.id } });
     for (const p of [...m.evidence, ...m.parts]) rows.push(text(truncate(`  ↳ ${p.src}：${p.text !== undefined ? p.text.split("\n")[0] ?? "" : p.stub !== undefined ? p.stub : t("没镜像到本机")}`, columns)));
     if (m.opinion !== undefined) rows.push(text(truncate(`  ${t("意见")}：${m.opinion}`, columns)));
     if (m.kind === "ask" && m.ask !== undefined) rows.push({ kind: "buttons", items: m.ask.options.map((opt, i): Pressable => ({ key: `im-ask-${m.id}-${i}`, label: opt, action: opt === WRITE_IN ? { op: "im-reply", message: m.id } : { op: "im-say", text: opt, replyTo: m.id } })) });
   }
-  rows.push({ kind: "input", key: "im-say", placeholder: replyTo !== null ? t("回复 {0}…", replyTo) : t("以本人身份发到这里"), field: "im-say", target: venueKey(th.owner, th.id) });
+  if (th.channel !== undefined) rows.push(text(truncate(th.channel.footer, columns)));
+  else rows.push({ kind: "input", key: "im-say", placeholder: replyTo !== null ? t("回复 {0}…", replyTo) : t("以本人身份发到这里"), field: "im-say", target: venueKey(th.owner, th.id) });
   return rows;
 }

@@ -41,7 +41,7 @@ export function tabs(t: T = ZH): { id: BoardTab; label: string }[] {
 }
 
 /** What a field's text means when submitted. */
-export type InputField = "add-tool" | "import-workflow" | "tool-search" | "new-use" | "memory-hook" | "im-say" | "im-draft" | "im-card";
+export type InputField = "add-tool" | "import-workflow" | "tool-search" | "new-use" | "memory-hook" | "im-say" | "im-draft" | "im-card" | "im-brief";
 
 export type BoardRow =
   | { kind: "text"; text: string; tone: Tone }
@@ -211,6 +211,7 @@ export function inputAction(field: InputField, typed: string, target?: string): 
   if (field === "im-say") return { op: "im-say", text: s };
   if (field === "im-draft") return target === undefined ? undefined : { op: "im-draft", id: target, send: true, text: s };
   if (field === "im-card") return target === undefined ? undefined : { op: "im-card-words", card: target, text: s };
+  if (field === "im-brief") return { op: "im-brief", text: s };
   const [tool, use] = s.split("|").map((x) => x.trim());
   if (tool === undefined || tool === "") return undefined;
   return { op: "learn", lessons: use !== undefined && use !== "" ? [{ kind: "use", key: tool, use }] : [{ kind: "allow", key: tool, where: "*" }] };

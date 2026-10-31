@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startRelay } from "../dist/relay/server.js";
-import { HTML_TYPE, sharePage } from "../dist/relay/page.js";
+import { giftPage, HTML_TYPE, loginPage, packetPage, sharePage } from "../dist/relay/page.js";
 
 const CARD = { title: "设置页导出 PDF，能跑的", summary: "一句话", agent: "xiaoping", scope: "src/settings/*", evidence: ["npm test 退出 0"] };
 
@@ -20,8 +20,19 @@ test("the page: a browser asking for HTML gets the one static page; a script ask
     assert.equal(html.headers.get("content-type"), HTML_TYPE);
     const text = await html.text();
     assert.equal(text, sharePage());
-    for (const word of ["问作者的 agent", "不用注册就能看、能问", "想要一个知道你自己项目的 agent？", "注册，先给你一个托管的", "打赏要登录", "怎么做出来的 · 回放", "公开范围", "拿去用", "/ask/", '"/c/"', "还没上线"]) assert.ok(text.includes(word), word);
+    for (const word of ["问作者的 agent", "不用注册就能看、能问", "想要一个知道你自己项目的 agent？", "注册，先给你一个托管的", "打赏要登录", "怎么做出来的 · 回放", "公开范围", "拿去用", "/ask/", '"/c/"']) assert.ok(text.includes(word), word);
     assert.ok(!text.includes("innerHTML"), "the page builds nodes, never markup from data");
+    for (const w of ["/wallet/tip", 'href="/login"', "要一个自己的 agent", "/login/verify"]) assert.ok(text.includes(w), w);
+    for (const [path, page, words] of [["/login", loginPage(), ["邮件验证码", "发验证码", "登录即注册", "/login/verify", "gemworks connect setup"]], ["/g/g-1234", giftPage(), ["领取", "领礼物要登录", "/claim"]], ["/r/r-1234", packetPage(), ["红包", "领一份", "/claim"]]]) {
+      const res = await fetch(`${s.url}${path}`, { headers: { accept: "text/html" } });
+      assert.equal(res.headers.get("content-type"), HTML_TYPE, path);
+      const body = await res.text();
+      assert.equal(body, page, path);
+      for (const w of words) assert.ok(body.includes(w), `${path} says ${w}`);
+      assert.ok(!body.includes("innerHTML"), path);
+    }
+    assert.equal((await fetch(`${s.url}/login`, { headers: { accept: "text/html" } })).status, 200);
+    assert.equal((await fetch(`${s.url}/login`)).status, 405, "no accept: the API, which only takes POST");
     assert.equal((await fetch(`${s.url}/c/nothing`, { headers: { accept: "text/html" } })).status, 200, "the page itself says when there is no such card");
     const json = await fetch(`${s.url}/c/${id}`, { headers: { accept: "application/json" } });
     assert.equal(json.headers.get("content-type"), "application/json; charset=utf-8");

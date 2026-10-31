@@ -37,7 +37,7 @@ test("connect setup, agent, --once and status against a relay; --once and status
     assert.equal((await run(["connect", "agent", "--token", "x", "--home", home])).code, 2);
     const once = await run(["connect", "--once"], { GEMWORKS_IM_HOME: home });
     assert.equal(once.code, 0, once.err);
-    assert.deepEqual(JSON.parse(once.out), { connected: true, docs: 2, pushed: 0, failed: 0, left: 0, heartbeats: 0 });
+    assert.deepEqual(JSON.parse(once.out), { connected: true, docs: 4, pushed: 0, failed: 0, left: 0, heartbeats: 0, executed: 0 });
     assert.ok(readMirror(home, "relay.test", "john", "venues/g-7.geml").exists);
     const status = await run(["connect", "status", "--home", home]);
     assert.equal(status.code, 0);

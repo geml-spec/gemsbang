@@ -41,6 +41,8 @@ export interface Draft {
   /** The thread's anchor, when the message is in one (§6.7). */
   thread?: string;
   replyTo?: string;
+  /** A signal message's signal (§10.1): the chain block's address; the message carries the words, the chain the fields. */
+  signal?: string;
 }
 
 /** The host's stamp: the block's id, the speaker the token names, the time, the chain, and the agent's session when there is one. */
@@ -65,6 +67,8 @@ export interface Message {
   card?: string;
   thread?: string;
   replyTo?: string;
+  /** A signal message's signal: the chain block's address. */
+  signal?: string;
   prev: string | null;
   hash: string;
 }
@@ -90,7 +94,7 @@ export function draftFaults(d: Draft, speaker: Speaker): string[] {
   return out;
 }
 
-const OPTIONAL = ["opinion", "turn", "card", "thread", "replyTo"] as const;
+const OPTIONAL = ["opinion", "turn", "card", "thread", "replyTo", "signal"] as const;
 
 function askOf(a: Ask): Ask {
   const out: Ask = { question: a.question, options: a.options.includes(WRITE_IN) ? [...a.options] : [...a.options, WRITE_IN], who: a.who };

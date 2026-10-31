@@ -5,6 +5,7 @@
 // and a relay out of reach is the answer.
 import { briefLines, DIRECTION_WORDS, progressLine, STATE_WORDS, waitingOn, type Card, type CardAction, type CardState } from "../core/im/card.js";
 import { RelayClient, RelayDown, reasonOf } from "./client.js";
+import type { CardTree } from "../relay/relay.js";
 import { readConfig } from "./home.js";
 
 export { CARD_ACTIONS, isCardAction, type CardAction } from "../core/im/card.js";
@@ -12,7 +13,7 @@ export { CARD_ACTIONS, isCardAction, type CardAction } from "../core/im/card.js"
 export interface CardView { card: Card; address: string; brief: { label: string; text: string }[]; progress: string; waitingOn?: string; heartbeat: string }
 export interface CardListRow { owner: string; id: string; title: string; state: string; direction: string; role: string }
 /** What a card call answers: the card after the verb (and its state before it), the report's decision, a new card's address, a view, a list; always the line. */
-export interface CardAnswer { card?: Card; before?: CardState; decision?: "accepted" | "changes" | "inbox"; address?: string; view?: CardView; rows?: CardListRow[]; line: string }
+export interface CardAnswer { card?: Card; before?: CardState; decision?: "accepted" | "changes" | "inbox"; address?: string; view?: CardView; rows?: CardListRow[]; tree?: CardTree; line: string }
 
 const ROLE_WORDS: Readonly<Record<string, string>> = { delegator: "委托人", worker: "接单方", granter: "放行人" };
 const DECISION_WORDS = { accepted: "已接受", changes: "要改", inbox: "等主人验收" } as const;
@@ -23,6 +24,11 @@ export function showLines(v: CardView): string {
   if (v.waitingOn !== undefined) lines.push(`等：${v.waitingOn}`);
   lines.push(`心跳：${v.heartbeat}`);
   return lines.join("\n");
+}
+
+/** The tree as `tree` prints it (§8.4): a line a card, the children indented. */
+export function treeLines(t: CardTree, depth = 0): string[] {
+  return [`${"  ".repeat(depth)}#${t.id} ${t.title} · ${t.stateWord}`, ...t.children.flatMap((c) => treeLines(c, depth + 1))];
 }
 
 export async function cardCall(home: string, o: { action: CardAction; owner?: string; id?: string; body?: unknown; as?: string }): Promise<{ ok: true; answer: CardAnswer } | { ok: false; reason: string }> {
@@ -50,6 +56,12 @@ export async function cardCall(home: string, o: { action: CardAction; owner?: st
     const seen = await client.get(path);
     if (seen.status !== 200) return { ok: false, reason: reasonOf(seen) };
     const view = seen.body as CardView;
+    if (o.action === "tree") {
+      const r = await client.get(`${path}/tree`);
+      if (r.status !== 200) return { ok: false, reason: reasonOf(r) };
+      const tree = (r.body as { tree: CardTree }).tree;
+      return { ok: true, answer: { card: view.card, tree, line: treeLines(tree).join("\n") } };
+    }
     if (o.action === "show") return { ok: true, answer: { card: view.card, view, line: showLines(view) } };
     const r = await client.post(`${path}/${o.action}`, o.body ?? {});
     if (r.status !== 200) return { ok: false, reason: reasonOf(r) };

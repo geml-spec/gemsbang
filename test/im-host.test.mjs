@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { IM_TOOLS, IM_TOOL_NAMES, imBand, callRule, imQuietLine, imHeaderLine, imTabRows, imToolOf, isImTool, scopeRefusal, toolClassOf, toolLine, unreadOf, venueKey } from "../dist/hosts/claude-code/im.js";
+import { IM_TOOLS, IM_TOOL_NAMES, imBand, callRule, imQuietLine, imHeaderLine, imTabRows, imWalletRows, imToolOf, isImTool, scopeRefusal, toolClassOf, toolLine, unreadOf, venueKey } from "../dist/hosts/claude-code/im.js";
 import { inputAction, TAB_IDS, tabs } from "../dist/hosts/claude-code/board.js";
 import { DEFAULT_SETTINGS, SETTING_KEYS, settingsFrom, withSetting } from "../dist/hosts/claude-code/settings.js";
 import { wordsFor } from "../dist/hosts/claude-code/text.js";
@@ -31,7 +31,7 @@ const THREAD = {
 };
 
 test("the six tools, how they are named, and the one line a call answers with", () => {
-  assert.deepEqual(IM_TOOL_NAMES, ["im_say", "im_ask", "im_report", "im_read", "im_forward", "im_card"]);
+  assert.deepEqual(IM_TOOL_NAMES, ["im_say", "im_ask", "im_report", "im_read", "im_forward", "im_card", "im_signal"]);
   assert.deepEqual(IM_TOOLS.map((x) => x.name), IM_TOOL_NAMES);
   for (const x of IM_TOOLS) { assert.equal(x.inputSchema.type, "object"); assert.equal(x.inputSchema.additionalProperties, false); assert.ok(x.description.length > 20, x.name); }
   assert.deepEqual(IM_TOOLS.find((x) => x.name === "im_ask").inputSchema.required, ["venue", "question", "options", "who"]);
@@ -89,7 +89,7 @@ test("the page: a hint before the daemon is set up; the list with the needs, the
   const list = imTabRows({ ...base, status: STATUS });
   assert.deepEqual(list.map((r) => `${r.kind}:${r.key ?? r.text ?? ""}`), [
     "heading:im-head", "section:im-needs", "card:im-need-https://relay.test/john/venues/g-7.geml#m-ask", "card:im-need-https://relay.test/john/people/john.geml#request-1",
-    "section:im-drafts", "card:im-draft-d-1", "input:im-draft-d-1",
+    "section:im-drafts", "card:im-draft-d-1", "input:im-draft-d-1", "input:im-brief",
     "section:im-venues", "entry:im-venue-john-g-7", "entry:im-venue-zhangsan-t-1",
   ]);
   assert.deepEqual([list[0].text, list[0].sub, list[0].action.action], ["消息", "john @ relay.test · 在线", { op: "im-refresh" }]);
@@ -97,10 +97,10 @@ test("the page: a hint before the daemon is set up; the list with the needs, the
   assert.deepEqual([grant.icon, grant.verb, grant.title, grant.actions.map((a) => [a.label, a.action.action])], ["ask", "放行", "lisi 申请看 https://relay.test/john/sessions/cc-1.geml#turn-3", [["允许一次", "允许一次"], ["允许此人", "允许此人"], ["拒绝", "拒绝"]]]);
   assert.deepEqual([list[5].verb, list[5].title, list[5].tag, list[5].detail, list[5].actions.map((a) => a.action)], ["草稿", "先看", "xiaoping", ["看过了，可以合"], [{ op: "im-draft", id: "d-1", send: true }, { op: "im-draft", id: "d-1", send: false }]]);
   assert.deepEqual([list[6].field, list[6].target, list[6].value], ["im-draft", "d-1", "看过了，可以合"]);
-  assert.deepEqual([list[8].title, list[8].tag, list[8].detail, list[8].tone, list[8].action], ["群「前端周会」", "3 未读", "2 人 · 1 个 agent", "normal", { op: "im-open", owner: "john", id: "g-7" }]);
-  assert.deepEqual([list[9].tag, list[9].tone], ["", "dim"]);
+  assert.deepEqual([list[9].title, list[9].tag, list[9].detail, list[9].tone, list[9].action], ["群「前端周会」", "3 未读", "2 人 · 1 个 agent", "normal", { op: "im-open", owner: "john", id: "g-7" }]);
+  assert.deepEqual([list[10].tag, list[10].tone], ["", "dim"]);
   const empty = imTabRows({ ...base, status: { ...STATUS, needs: [], drafts: [], venues: [], connected: false } });
-  assert.deepEqual(empty.map((r) => r.kind), ["heading", "section", "text"]);
+  assert.deepEqual(empty.map((r) => r.kind), ["heading", "input", "section", "text"]);
   assert.equal(empty[0].sub, "john @ relay.test · 断了");
   const thread = imTabRows({ ...base, status: STATUS, thread: THREAD });
   assert.deepEqual(thread.map((r) => `${r.kind}:${r.key ?? ""}`), [
@@ -186,4 +186,48 @@ test("the cards on the page (§8.1): a section with a card row per card, its but
   assert.equal(imQuietLine({ ...STATUS, cards: [], venues: [] }), "没有需要你的事");
   assert.equal(imQuietLine({ ...STATUS, cards: [CARD_ROW], venues: [{ owner: "john", id: "g-7", kind: "group", kindWord: "群", name: "前端周会", status: "", unread: 3 }, { owner: "john", id: "gd-1", kind: "guest-dm", kindWord: "访客私信", name: "访客", status: "", unread: 2 }] }), "#t-57 待放行 · 等lisi · 群里有 3 条新消息，没点名你");
   assert.equal(imQuietLine({ ...STATUS, cards: [{ ...CARD_ROW, state: "accepted", stateWord: "已接受" }], venues: [] }), "没有需要你的事", "a card at its end is nowhere to be");
+});
+
+test("the wallet on the page (§9.1): a section after the cards with the balance and the caps as lines, then the last entries; nothing until the ledger is mirrored", () => {
+  const t = (s, ...a) => a.reduce((x, v, i) => x.replace(`{${i}}`, String(v)), s);
+  const base = { thread: null, replyTo: null, columns: 120, now: "2026-10-31T09:30:00Z", t };
+  assert.deepEqual(imWalletRows(STATUS, t), []);
+  const wallet = { balance: 86, caps: { agentPerDay: 30, perCard: 40, guestPerDay: 10, autoBuy: 5 }, used: { agents: { xiaoping: 11 }, cards: {}, guest: 2, auto: 0 }, lines: ["钱包 86 积分", "xiaoping 每天 30 · 已用 11", "每张卡 40", "访客问答每天 10 · 已用 2", "自动买东西 5 · 超过要问我"], recent: ["09:12 打赏 · zhangsan 给 xiaoping · 「那个缓存修得漂亮」 | +5"] };
+  const rows = imTabRows({ ...base, status: { ...STATUS, wallet } });
+  const at = rows.findIndex((r) => r.kind === "section" && r.key === "im-wallet");
+  assert.ok(at > rows.findIndex((r) => r.key === "im-drafts") && at < rows.findIndex((r) => r.key === "im-venues"), "after the drafts and the cards, before the venues");
+  assert.deepEqual(rows.slice(at, at + 7).map((r) => [r.kind, r.text, r.tone]), [["section", "钱包", undefined], ["text", "钱包 86 积分", "normal"], ["text", "xiaoping 每天 30 · 已用 11", "normal"], ["text", "每张卡 40", "normal"], ["text", "访客问答每天 10 · 已用 2", "normal"], ["text", "自动买东西 5 · 超过要问我", "normal"], ["text", "09:12 打赏 · zhangsan 给 xiaoping · 「那个缓存修得漂亮」 | +5", "dim"]]);
+  assert.equal(wordsFor("en")("钱包"), "Wallet");
+});
+
+test("the brief (§8.1): one input under the cards when the person has an agent; its line is the im-brief op; 改一下 under a draft is a card press that takes the words typed first", () => {
+  const t = (s, ...a) => a.reduce((x, v, i) => x.replace(`{${i}}`, String(v)), s);
+  const base = { thread: null, replyTo: null, columns: 120, now: "2026-10-31T09:30:00Z", t };
+  const rows = imTabRows({ ...base, status: STATUS });
+  const brief = rows.find((r) => r.kind === "input" && r.field === "im-brief");
+  assert.deepEqual([brief.key, brief.placeholder], ["im-brief", "一句话起草委托书：去帮谁办什么、按什么准则、别花超过多少积分"]);
+  assert.ok(rows.indexOf(brief) < rows.findIndex((r) => r.key === "im-venues"), "under the cards, before the venues");
+  assert.equal(imTabRows({ ...base, status: { ...STATUS, agents: [] } }).some((r) => r.kind === "input" && r.field === "im-brief"), false, "no agent, no brief");
+  assert.deepEqual(inputAction("im-brief", " 去帮李四评一下 "), { op: "im-brief", text: "去帮李四评一下" });
+  assert.equal(inputAction("im-brief", "  "), undefined);
+  const draft = { owner: "john", id: "t-57", title: "评审", direction: "outsource", directionWord: "外包", state: "draft", stateWord: "草拟", progress: "[草拟] · 发布", brief: [], role: "delegator", heartbeat: "—", versions: 0, actions: ["发布", "改一下", "算了"], card: { id: "t-57", state: "draft", title: "评审" } };
+  const page = imTabRows({ ...base, status: { ...STATUS, cards: [draft] } });
+  const row = page.find((r) => r.key === "im-card-john/t-57");
+  assert.deepEqual(row.actions.map((a) => [a.label, a.action.op, a.action.action]), [["发布", "im-card", "publish"], ["改一下", "im-card", "brief"], ["算了", "im-card", "close"]]);
+  assert.ok(page.some((r) => r.kind === "input" && r.field === "im-card" && r.target === "john/t-57"), "改一下 takes a line first");
+});
+
+test("a channel on the page (§10.4): the price in the head, the stage card under it, a signal drawn as its card with the module's line, the footer last, and no input (only signals go there)", () => {
+  const t = (s, ...a) => a.reduce((x, v, i) => x.replace(`{${i}}`, String(v)), s);
+  const base = { thread: null, replyTo: null, columns: 120, now: "2026-10-31T09:30:00Z", t };
+  const thread = {
+    owner: "zhang", id: "ch-1", kind: "channel", kindWord: "订阅频道", name: "alpha 的信号", people: ["zhang", "john"], agents: ["alpha"], draftFirst: false, total: 1,
+    channel: { price: "按月 30 · 按条 2", stage: ["阶段：纸面 · 第 3 天 · 命中 —", "升级：还要 11 天，且命中 ≥ 60%（现在没有结算的信号），主人批准"], footer: "平台不托管资金、不经手密钥 · 订阅时已展示免责条款 · 发布方看不到你跟没跟" },
+    messages: [{ id: "sig-1", speaker: "agent:alpha@zhang", label: "alpha · 代 zhang", kind: "signal", kindWord: "信号", text: "信号 signal-1 · m · 买是 · 价 ≤0.63 · 过期 10:00", at: "2026-10-31T09:12:05Z", source: "agent", parts: [], evidence: [], decision: false, signal: ["信号 signal-1 · 发布 09:12:04 · 中继收到 09:12:05", "市场 m · 买是 · 价 ≤0.63 · 仓位 2% · 过期 10-31 10:00 · 信心 0.7", "纸面 · 记为『若跟：0.61 进，2%』· 没下单"] }],
+  };
+  const rows = imTabRows({ ...base, status: STATUS, thread });
+  assert.deepEqual(rows.map((r) => `${r.kind}:${r.key ?? r.text ?? r.lines?.[0] ?? ""}`), ["heading:im-thread", "text:阶段：纸面 · 第 3 天 · 命中 —", "text:升级：还要 11 天，且命中 ≥ 60%（现在没有结算的信号），主人批准", "note:im-m-sig-1", "text:平台不托管资金、不经手密钥 · 订阅时已展示免责条款 · 发布方看不到你跟没跟"]);
+  assert.equal(rows[0].sub, "2 人 · 1 个 agent · 按月 30 · 按条 2");
+  assert.deepEqual([rows[3].lines, rows[3].tag.replace(/ · \d\d:\d\d · /, " · hh:mm · ")], [thread.messages[0].signal, "alpha · 代 zhang · hh:mm · 信号"]);
+  assert.equal(rows.some((r) => r.kind === "input"), false);
 });
