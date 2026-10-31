@@ -1,6 +1,6 @@
 {
   "name": "gemworks",
-  "version": "0.2.89",
+  "version": "0.3.0",
   "description": "Workflow stages for Claude Code: a GEML statechart says what each stage uses, a tool dictionary binds those uses to the project's tools, evidence records test, PR, CI and deploy results, a line above the prompt shows where the work stands and a board moves it. A tool is refused only where the workflow does not declare its use.",
   "author": {
     "name": "geml-spec",

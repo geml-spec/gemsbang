@@ -3,7 +3,7 @@
 // module runs them — through the bridge, the engine's `$`, or its own state.
 import type { Lesson } from "../../core/dictionary.js";
 
-export type BoardTab = "sessions" | "flow" | "items" | "journal" | "tools";
+export type BoardTab = "messages" | "sessions" | "flow" | "items" | "journal" | "tools";
 export type JournalFilter = "all" | "artifacts" | "evidence" | "moves" | "refusals" | "depends";
 export type Dialog = "settings" | "upgrade" | "about" | "share";
 /** What the share dialog shares, and how. */
@@ -140,6 +140,20 @@ export type BoardAction =
   | { op: "remove"; id: string }
   /** Under a `file:` unit, make this file the current work item (the shell's last written file). */
   | { op: "switch-file"; file: string; say?: string }
+  /** The 消息 page (plan D): open a venue's thread, or close it; the box answers one message (an ask's 自己写), or none. */
+  | { op: "im-open"; owner: string; id: string }
+  | { op: "im-close" }
+  | { op: "im-reply"; message: string | null }
+  /** Speak as the person into the open thread; with `replyTo`, as an answer to that message (an ask's option). */
+  | { op: "im-say"; text: string; replyTo?: string }
+  /** A draft waiting for the owner: sent (its text changed, when given) or dropped. */
+  | { op: "im-draft"; id: string; send: boolean; text?: string }
+  /** One of a need's buttons, on the band or the page. */
+  | { op: "im-need"; key: string; action: string }
+  | { op: "im-refresh" }
+  /** A card's button (plan G): the verb on `<owner>/<id>`; the words typed for it come first, kept under the card. */
+  | { op: "im-card"; action: string; owner: string; id: string }
+  | { op: "im-card-words"; card: string; text: string }
   | { op: "share"; what: ShareWhat; how: ShareHow; strip: boolean };
 
 /** A button as the pure modules describe it: its address, its label, whether it is the main one, and what it does. */

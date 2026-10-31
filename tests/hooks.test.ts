@@ -130,6 +130,14 @@ function world(on: On) {
     queued: [] as { uuid: string; text: string; at: string }[],
     /** The project's memory the bridge answers. */
     memory: { dir: '/h/memory', entries: [{ file: 'a.md', title: '甲', hook: '第一条', type: 'feedback', at: '2026-10-22T08:00:00Z' }, { file: 'b.md', title: '乙', hook: '第二条', type: 'project', at: '2026-10-21T08:00:00Z' }] },
+    /** The IM as the bridge carries it on status, refresh, attention and im-status; null, not set up. */
+    im: null as unknown,
+    /** What the next im-next answers, once; null, nothing waits. */
+    imNext: null as unknown,
+    /** What im-venue answers. */
+    imThread: null as unknown,
+    /** What im-card answers; null, the relay refuses. */
+    imCard: null as unknown,
   }
   const stage = () => `[gemworks] stage #${w.state} · rev ${w.rev}`
   const shell = () => ({
@@ -186,7 +194,7 @@ function world(on: On) {
       svg: '<svg/>',
     },
   })
-  const answer = (req: Req) => {
+  const plain = (req: Req) => {
     w.sent.push(req)
     if (!w.workflow) {
       const none = { status: null, policy: null, contextKey: null, problem: { text: 'no workflow here: run `gemworks init`', quiet: true } }
@@ -246,6 +254,18 @@ function world(on: On) {
     if (req.op === 'status' && w.sessionsDir !== null) return { v: 1, ok: true, shell: shell(), sessions: w.sessionsDir }
     if (req.op === 'attention') return { v: 1, ok: true, shell: shell(), attention: { ahead: w.ahead, prs: w.prs, ...(w.unread.length > 0 ? { unread: w.unread } : {}), ...(w.bump !== null ? { bump: w.bump } : {}) }, ...(w.sessionsDir !== null ? { sessions: w.sessionsDir } : {}), host: { name: 'build-box', platform: 'linux', user: 'dev', branch: 'feat/x' } }
     return { v: 1, ok: true, shell: shell(), ...(req.op === 'before' ? { recorded: false } : {}), ...(req.op === 'after' ? handoff(req) : {}) }
+  }
+  const IM_CARRIERS = ['status', 'refresh', 'attention', 'im-status']
+  const answer = (req: Req) => {
+    if (req.op === 'im-next') { const d = w.imNext; w.imNext = null; w.sent.push(req); return { v: 1, ok: true, shell: shell(), ...(d !== null ? { delivered: d } : {}) } }
+    if (req.op === 'im-answer') { w.sent.push(req); return { v: 1, ok: true, shell: shell(), answered: { sent: 'https://relay.test/john/venues/gd-1.geml#m-r' } } }
+    if (req.op === 'im-say' || req.op === 'im-forward') { w.sent.push(req); return { v: 1, ok: true, shell: shell(), text: '排入待发 o-1' } }
+    if (req.op === 'im-read') { w.sent.push(req); return { v: 1, ok: true, shell: shell(), text: `群「前端周会」· 最近 ${String(req.limit ?? 12)} 条` } }
+    if (req.op === 'im-venue') { w.sent.push(req); return { v: 1, ok: true, shell: shell(), ...(w.imThread !== null ? { thread: w.imThread } : {}) } }
+    if (req.op === 'im-card') { w.sent.push(req); return w.imCard === null ? { v: 1, ok: false, error: 'gemworks: 没有这张卡', shell: shell() } : { v: 1, ok: true, shell: shell(), card: w.imCard } }
+    if (req.op === 'im-presence' || req.op === 'im-need' || req.op === 'im-draft') { w.sent.push(req); return { v: 1, ok: true, shell: shell() } }
+    const a = plain(req) as Record<string, unknown>
+    return w.im !== null && a['ok'] === true && IM_CARRIERS.includes(req.op) ? { ...a, im: w.im } : a
   }
   const ran = (stdout: string, exitCode = 0) => ({ exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false })
   on('process.run', async ($, e) => {
@@ -382,7 +402,7 @@ test('real event order: session start, a test run moves the stage, the board mov
   await start($, on)
   expect(w.sent.map((r) => r.op), 'the board the inbox is built from is read at the start').toEqual(['status', 'refresh', 'board', 'attention'])
   expect(w.sent[0]).toMatchObject({ v: 1, root: ROOT })
-  expect(w.registered).toEqual(['status', 'move', 'set', 'note', 'artifact', 'ask', 'work'])
+  expect(w.registered).toEqual(['status', 'move', 'set', 'note', 'artifact', 'ask', 'work', 'im_say', 'im_ask', 'im_report', 'im_read', 'im_forward', 'im_card'])
 
   const tests = await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', command: 'npm test' })
   expect(w.sent.at(-1)).toMatchObject({ op: 'after', tool: 'Bash', callId: 'b1', exitCode: 0, isError: false, gitOperation: false, input: { command: 'npm test' } })
@@ -601,7 +621,7 @@ test('a registration the engine refuses: the start goes on, and the band says wh
   w.refuse = { set: 'a tool named set is already registered' }
   await start($, on)
   expect(w.sent.map((r) => r.op)).toEqual(['status', 'refresh', 'board', 'attention'])
-  expect(w.registered).toEqual(['status', 'move', 'note', 'artifact', 'ask', 'work'])
+  expect(w.registered).toEqual(['status', 'move', 'note', 'artifact', 'ask', 'work', 'im_say', 'im_ask', 'im_report', 'im_read', 'im_forward', 'im_card'])
   expect(await bandText($, 'terminal', 400)).toMatch(/^» gemworks：没有注册上 set（[^（]*already registered[^）]*） \[看板\]$/)
 })
 
@@ -2428,3 +2448,113 @@ test('整理: a message typed mid-turn is picked on its own; its row id is learn
   expect(w.toasts.at(-1)).toBe('有 1 条在对话记录里找不到，没有交给模型')
 })
 
+test('the IM tools: registered with the others; each goes through the bridge as the session\'s agent and answers one line; without an agent it says so', async ($, on) => {
+  const w = world(on)
+  w.im = { configured: true, person: 'john', relay: 'relay.test', agents: [], connected: true, needs: [], venues: [{ owner: 'john', id: 'g-7', kind: 'group', kindWord: '群', name: '前端周会', status: '2 人 · 1 个 agent', unread: 0 }], drafts: [], cards: [], presence: {} }
+  await start($, on)
+  expect(w.registered).toEqual(['status', 'move', 'set', 'note', 'artifact', 'ask', 'work', 'im_say', 'im_ask', 'im_report', 'im_read', 'im_forward', 'im_card'])
+  expect((await $.tool.call({ tool: 'mcp__gemworks__im_say', tool_use_id: 'i0', venue: 'john/g-7', text: 'x' })).result).toBe('im_say: 本会话没有 agent：在设置里选一个')
+  w.im = { ...(w.im as object), agents: ['xiaoping'], presence: { xiaoping: 'idle' } }
+  await $.command.run({ command: 'gemworks', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  const said = await $.tool.call({ tool: 'mcp__gemworks__im_say', tool_use_id: 'i1', venue: 'john/g-7', text: '测试跑完了' })
+  expect(said.result).toBe('im_say · 群「前端周会」· 已排入待发')
+  expect(w.sent.at(-1)).toMatchObject({ op: 'im-say', owner: 'john', venue: 'g-7', text: '测试跑完了', as: 'xiaoping', kind: 'chat', session: 'sess-1234567890' })
+  const asked = await $.tool.call({ tool: 'mcp__gemworks__im_ask', tool_use_id: 'i2', venue: 'john/g-7', question: '合吗', options: ['合', '不合'], who: 'person:john' })
+  expect(asked.result).toBe('im_ask · 群「前端周会」· 问 person:john：合吗')
+  expect(w.sent.at(-1)).toMatchObject({ op: 'im-say', kind: 'ask', text: '合吗', ask: { question: '合吗', options: ['合', '不合'], who: 'person:john' } })
+  const reported = await $.tool.call({ tool: 'mcp__gemworks__im_report', tool_use_id: 'i3', venue: 'john/g-7', text: '跑完了', evidence: [{ src: 'https://relay.test/john/journals/t-42.geml#rev-14', rev: 14 }], opinion: '可以合' })
+  expect(reported.result).toBe('im_report · 群「前端周会」· 汇报，带证据 1 条')
+  expect(w.sent.at(-1)).toMatchObject({ op: 'im-say', kind: 'report', evidence: [{ src: 'https://relay.test/john/journals/t-42.geml#rev-14', rev: 14 }], opinion: '可以合' })
+  const read = await $.tool.call({ tool: 'mcp__gemworks__im_read', tool_use_id: 'i4', venue: 'john/g-7', limit: 2 })
+  expect(read.result).toBe('im_read · 群「前端周会」· 最近 2 条\n群「前端周会」· 最近 2 条')
+  expect(w.sent.at(-1)).toMatchObject({ op: 'im-read', owner: 'john', venue: 'g-7', limit: 2 })
+  const fwd = await $.tool.call({ tool: 'mcp__gemworks__im_forward', tool_use_id: 'i5', from: 'john/g-7#m-1', to: 'john/g-7', note: '看' })
+  expect(fwd.result).toBe('im_forward · 群「前端周会」· 已排入待发：john/g-7#m-1')
+  expect(w.sent.at(-1)).toMatchObject({ op: 'im-forward', from: 'john/g-7#m-1', to: 'john/g-7', note: '看', as: 'xiaoping' })
+  w.imCard = { card: { id: 't-57', state: 'open', title: '评审' }, before: 'draft', line: '草拟 → 发布' }
+  const carded = await $.tool.call({ tool: 'mcp__gemworks__im_card', tool_use_id: 'i6', action: 'publish', card: 'john/t-57', body: { venue: 'john/g-7' } })
+  expect(carded.result).toBe('im_card · #t-57 · 草拟 → 发布')
+  expect(w.sent.at(-1)).toMatchObject({ op: 'im-card', action: 'publish', owner: 'john', id: 't-57', body: { venue: 'john/g-7' }, as: 'person' })
+  await $.tool.call({ tool: 'mcp__gemworks__im_card', tool_use_id: 'i7', action: 'note', card: 'john/t-57', body: { text: '跑完了' } })
+  expect(w.sent.at(-1)).toMatchObject({ op: 'im-card', action: 'note', as: 'xiaoping' })
+  w.imCard = { rows: [], line: '没有任务卡' }
+  expect((await $.tool.call({ tool: 'mcp__gemworks__im_card', tool_use_id: 'i8', action: 'list' })).result).toBe('im_card · 任务卡 · 列出\n没有任务卡')
+  w.imCard = null
+  expect((await $.tool.call({ tool: 'mcp__gemworks__im_card', tool_use_id: 'i9', action: 'show', card: 'john/t-0' })).result).toBe('im_card: 没有这张卡')
+  expect((await $.tool.call({ tool: 'mcp__gemworks__im_report', tool_use_id: 'i6', venue: 'nowhere', text: 'x' })).result).toBe('im_report: venue is owner/id (im_read lists them)')
+})
+
+test('a queue item is delivered between turns with its envelope: the turn it starts keeps the sender\'s scope, and its answer goes back as the agent; presence follows the session', async ($, on) => {
+  const w = world(on)
+  w.im = { configured: true, person: 'john', relay: 'relay.test', agents: ['xiaoping'], connected: true, needs: [], venues: [], drafts: [], cards: [], presence: {} }
+  const item = { id: 'qi-gd-1-g-1', n: 1, prompt: '这个项目怎么跑？', sender: 'guest:g-1', senderName: '访客 g-1', level: 'guest', venue: 'gd-1', venueKind: 'guest-dm', venueName: '访客', at: '2026-10-31T09:00:00Z', hops: 0, prev: null, hash: 'sha256:x' }
+  const envelope = '[来自 访客私信 · 访客 g-1（访客） · 权限：只读 · 回复将发给访客 · 队列中还有 0 条]'
+  w.imNext = { item, envelope, text: `${envelope}\n这个项目怎么跑？`, scope: { write: false, run: 'none', budget: 5 }, queued: 0, draftFirst: false, dropped: [] }
+  const prompts: { text: string; origin: unknown }[] = []
+  on('prompt.submit', ($, e) => { prompts.push({ text: e.text, origin: e.origin }); return { text: e.text } })
+  on('tool.call', { tool: 'Read' }, () => ({ result: 'file text', text: 'file text' }))
+  on('tool.call', { tool: 'Write' }, () => ({ result: 'written', text: 'written' }))
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  const clock = await start($, on)
+  expect(w.sent.filter((r) => r.op === 'im-next').at(-1)).toMatchObject({ agent: 'xiaoping', take: true })
+  expect(prompts).toEqual([{ text: `${envelope}\n这个项目怎么跑？`, origin: { kind: 'plugin', name: 'gemworks' } }])
+  await clock.settle()
+  expect(w.sent.filter((r) => r.op === 'im-presence').map((r) => [r.agent, r.session, r.presence, r.login])).toEqual([['xiaoping', 'sess-1234567890', 'idle', 'subscription'], ['xiaoping', 'sess-1234567890', 'thinking', 'subscription']])
+  expect((await $.tool.call({ tool: 'Read', tool_use_id: 'r1', file_path: '/work/app/README.md' })).deny).toBeUndefined()
+  const write = await $.tool.call({ tool: 'Write', tool_use_id: 'w1', file_path: '/work/app/x.txt', content: 'x' })
+  expect(write.deny).toBe('IM：这一轮来自 访客 g-1（访客），权限：只读；Write 不在范围内，没有执行。要更多权限，在回复里说明，由主人放行。')
+  await clock.settle()
+  expect(w.sent.filter((r) => r.op === 'im-presence').map((r) => r.presence)).toEqual(['idle', 'thinking', 'tool'])
+  await $.turn.complete({ answer: '跑 npm start 就行', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.settle()
+  expect(w.sent.filter((r) => r.op === 'im-answer')).toMatchObject([{ agent: 'xiaoping', text: '跑 npm start 就行', session: 'sess-1234567890', item: { id: 'qi-gd-1-g-1' } }])
+  expect(w.toasts.at(-1)).toBe('已发回 访客私信')
+  expect(w.sent.filter((r) => r.op === 'im-next').length).toBe(2)
+  expect(w.sent.filter((r) => r.op === 'im-presence').map((r) => r.presence)).toEqual(['idle', 'thinking', 'tool', 'idle'])
+  expect((await $.tool.call({ tool: 'Write', tool_use_id: 'w2', file_path: '/work/app/y.txt', content: 'y' })).deny, 'the scope ends with the turn').toBeUndefined()
+})
+
+test('the band\'s 需要我 row leads with its buttons; a press goes through the bridge and reads the IM again; 断了 leads the rest', async ($, on) => {
+  const w = world(on)
+  const decide = { kind: 'decide', key: 'https://relay.test/john/venues/g-7.geml#m-ask', text: '群「前端周会」· xiaoping 问：要不要合并？', actions: ['合', '不合', '自己写'], since: '2026-10-31T09:00:00Z', venue: 'g-7', level: 0 }
+  const grant = { kind: 'grant', key: 'https://relay.test/john/people/john.geml#request-1', text: 'lisi 申请看一块', actions: ['允许一次', '允许此人', '拒绝'], since: '2026-10-31T08:00:00Z', level: 0 }
+  w.im = { configured: true, person: 'john', relay: 'relay.test', agents: ['xiaoping'], connected: true, needs: [decide, grant], venues: [], drafts: [], cards: [], presence: {} }
+  await start($, on)
+  const text = await bandText($)
+  expect(text).toContain('定 群「前端周会」· xiaoping 问：要不要合并？')
+  expect(text).toContain('还有 1 件')
+  expect(text).toContain('[合] [不合] [自己写]')
+  const band = await $.ui.mount({ plugin: 'gemworks', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+  await band.press({ key: 'im-need-0' })
+  expect(w.sent.at(-2)).toMatchObject({ op: 'im-need', key: 'https://relay.test/john/venues/g-7.geml#m-ask', action: '合' })
+  expect(w.sent.at(-1)).toMatchObject({ op: 'im-status' })
+  await band.unmount()
+  w.im = { ...(w.im as object), needs: [{ kind: 'offline', key: 'offline:relay', text: '连不上中继 relay.test', actions: ['重试'], since: '2026-10-31T09:00:00Z', level: 0 }, decide, grant] }
+  await $.command.run({ command: 'gemworks', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  expect(await bandText($)).toContain('断了 连不上中继 relay.test')
+  expect(await bandText($)).toContain('还有 2 件')
+})
+
+test('a card\'s turn (plan G): the room is kept on the turn; a write outside it is refused with the room\'s path, one inside passes, a Bash command starts in the room; the band says where the card stands when nothing needs the person', async ($, on) => {
+  const w = world(on)
+  w.im = { configured: true, person: 'wangwu', relay: 'relay.test', agents: ['xiaoce'], connected: true, needs: [], venues: [], drafts: [], cards: [{ owner: 'john', id: 't-42', title: '导出 PDF', direction: 'outsource', directionWord: '外包', state: 'in-progress', stateWord: '进行中', progress: 'p', brief: [], role: 'worker', worker: 'xiaoce', waitingOn: 'xiaoce', heartbeat: '还没写记录', versions: 0, actions: ['写记录', '交付', '交回'], card: {} }], presence: {} }
+  const item = { id: 'qi-t-42-start-2', n: 1, prompt: '任务卡归你了', sender: 'person:john', senderName: 'john', level: 'member', venue: 'th-t-42', venueKind: 'thread', venueName: '导出 PDF', at: '2026-10-31T09:00:00Z', hops: 0, prev: null, hash: 'sha256:x', card: { id: 't-42', address: 'https://relay.test/john/cards/t-42.geml', title: '导出 PDF', tools: ['read', 'edit', 'test'], venueOfWork: 'worker-sandbox', credits: 40 } }
+  const envelope = '[来自 线程「导出 PDF」 · john（成员） · 权限：读、在沙箱里跑 · 回复将发回该线程，成员可见 · 队列中还有 0 条]'
+  w.imNext = { item, envelope, text: `${envelope}\n任务卡归你了`, scope: { write: true, run: 'sandbox', budget: 40 }, queued: 0, draftFirst: false, dropped: [], room: '/h/im/rooms/t-42' }
+  const commands: string[] = []
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  on('tool.call', { tool: 'Write' }, () => ({ result: 'written', text: 'written' }))
+  on('tool.call', { tool: 'Bash' }, ($, e) => { commands.push(e.command); return { result: 'ran', text: 'ran' } })
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  const clock = await start($, on)
+  await clock.settle()
+  expect(await bandText($)).toContain('#t-42 进行中 · 等xiaoce')
+  expect((await $.tool.call({ tool: 'Write', tool_use_id: 'w1', file_path: '/work/app/x.txt', content: 'x' })).deny).toBe('IM：这一轮是任务卡 #t-42 的客房，只能写到 /h/im/rooms/t-42 里；Write 写的是 /work/app/x.txt，没有执行。')
+  expect((await $.tool.call({ tool: 'Write', tool_use_id: 'w2', file_path: '/h/im/rooms/t-42/x.txt', content: 'x' })).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', command: 'npm test' })).deny).toBeUndefined()
+  expect(commands).toEqual(['cd "/h/im/rooms/t-42" && npm test'])
+  await $.turn.complete({ answer: '做完了', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.settle()
+  // The test run moved the workflow's stage, whose dictionary now has its own say on a write; the room's rule is gone with the turn.
+  expect((await $.tool.call({ tool: 'Write', tool_use_id: 'w3', file_path: '/work/app/y.txt', content: 'y' })).deny ?? '', 'the room ends with the turn').not.toContain('IM：')
+})

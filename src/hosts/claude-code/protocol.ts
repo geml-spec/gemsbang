@@ -13,6 +13,13 @@ import type { AttentionFacts } from "./attention.js";
 import type { HostInfo } from "./env.js";
 import type { MemoryList } from "../../memory-store.js";
 import type { QueuedMessage } from "../../core/transcript.js";
+import type { Presence } from "../../core/im/presence.js";
+import type { QueueItem } from "../../core/im/queue.js";
+import type { Embed } from "../../core/im/embed.js";
+import type { Delivered } from "../../daemon/deliver.js";
+import type { CardAction } from "../../core/im/card.js";
+import type { CardAnswer } from "../../daemon/cards.js";
+import type { ImStatus, Thread } from "../../daemon/view.js";
 import type { Transcript } from "../../core/transcript.js";
 
 export type { VerbName } from "../../core/verb-specs.js";
@@ -60,6 +67,25 @@ export type BridgeOp =
   | { op: "add"; workflow?: string }
   /** Write a workflow from a path (a directory with flow.geml, or a .geml file) into the project's .geml/workflows/; answers `added`. */
   | { op: "import"; path: string }
+  /**
+   * The IM (plan D), over the daemon's home: the page's and the band's data
+   * (`imSeen` on the request marks what the page showed); one thread; a
+   * word as the person or an agent; the next queue item for an agent (`take`
+   * marks it read in); the final answer back; a draft sent or dropped; a
+   * session's presence; a need's button; what the read tool answers; a
+   * forward by reference.
+   */
+  | { op: "im-status" }
+  | { op: "im-venue"; owner: string; id: string; limit?: number }
+  | { op: "im-say"; owner: string; venue: string; text: string; as?: string; kind?: "chat" | "ask" | "report"; ask?: { question: string; options: string[]; who: string; expires?: string }; evidence?: Embed[]; parts?: Embed[]; opinion?: string; turn?: string; replyTo?: string; session?: string }
+  | { op: "im-next"; agent: string; take?: boolean }
+  | { op: "im-answer"; agent: string; item: QueueItem; text: string; kind?: "chat" | "report"; evidence?: Embed[]; session?: string }
+  | { op: "im-draft"; id: string; send: boolean; text?: string }
+  | { op: "im-presence"; agent: string; session: string; presence: Presence; task?: string; login?: string }
+  | { op: "im-need"; key: string; action: string; text?: string }
+  | { op: "im-read"; owner?: string; venue?: string; src?: string; limit?: number }
+  | { op: "im-forward"; from: string; to: string; note?: string; as?: string; session?: string }
+  | { op: "im-card"; action: CardAction; owner?: string; id?: string; body?: Record<string, unknown>; as?: string }
   | { op: "board" }
   /**
    * What the repository says for the band (attention.ts): branches ahead of their upstream, open pull requests and their
@@ -110,7 +136,8 @@ export type Backfill =
   | { uuids: string[]; messages?: QueuedMessage[] }
   | { id: string; turns: number; files: number; links: number; skipped?: boolean; transcript?: Transcript };
 
-export type BridgeRequest = { v: 1; root: string; lastFile?: string; gh?: GhSeen } & BridgeOp;
+/** `imSeen`: per venue (owner/id), the last message id the 消息 page showed, for the unread counts. */
+export type BridgeRequest = { v: 1; root: string; lastFile?: string; gh?: GhSeen; imSeen?: Record<string, string> } & BridgeOp;
 
 export interface ShellStatus {
   status: Status | null;
@@ -294,6 +321,16 @@ export type BridgeResponse =
       backfill?: Backfill;
       /** memory, memory-set and memory-delete: the project's memory as it now stands. */
       memory?: MemoryList;
+      /** status, refresh, attention and im-status: the IM as the daemon's home holds it, when it is set up. */
+      im?: ImStatus;
+      /** im-venue: one thread. */
+      thread?: Thread;
+      /** im-next: the item to deliver, with its envelope and text; absent when nothing waits. */
+      delivered?: Delivered;
+      /** im-answer: where the reply went, or the draft holding it. */
+      answered?: { sent: string } | { draft: string };
+      /** im-card: the card after the verb and the line the tool prints. */
+      card?: CardAnswer;
     }
   /** No shell only when the request itself failed — it threw, or did not decode: the hooks module keeps the last shell and shows the error. */
   | { v: 1; ok: false; error: string; shell?: ShellStatus };
@@ -329,7 +366,7 @@ export function unreadableText(exitCode: number, stderr: string, pluginRoot: str
   return `gemworks：桥接的应答无法解析（退出码 ${exitCode}${said ? `：${said}` : ""}）`;
 }
 
-const OPS = new Set(["status", "refresh", "before", "after", "verb", "learn", "mark", "advance", "pause", "resume", "rollback", "new-item", "bind", "use", "add", "import", "board", "attention", "export", "artifacts", "artifact", "backfill-list", "backfill-one", "turn-ids", "memory", "memory-set", "memory-delete"]);
+const OPS = new Set(["status", "refresh", "before", "after", "verb", "learn", "mark", "advance", "pause", "resume", "rollback", "new-item", "bind", "use", "add", "import", "board", "attention", "export", "artifacts", "artifact", "backfill-list", "backfill-one", "turn-ids", "memory", "memory-set", "memory-delete", "im-status", "im-venue", "im-say", "im-next", "im-answer", "im-draft", "im-presence", "im-need", "im-read", "im-forward", "im-card"]);
 const EXPORT_KINDS = new Set(["journal", "workflow", "text"]);
 const EXPORT_FORMATS = new Set(["geml", "md", "json"]);
 const VERBS = new Set(["status", "move", "set"]);
@@ -391,6 +428,15 @@ export function decodeRequest(text: string): BridgeRequest | { error: string } {
     memory: () => v["transcripts"] === undefined || str("transcripts"),
     "memory-set": () => str("file") && v["file"] !== "" && str("hook") && (v["transcripts"] === undefined || str("transcripts")),
     "memory-delete": () => str("file") && v["file"] !== "" && (v["transcripts"] === undefined || str("transcripts")),
+    "im-venue": () => str("owner") && str("id"),
+    "im-say": () => str("owner") && str("venue") && str("text"),
+    "im-next": () => str("agent"),
+    "im-answer": () => str("agent") && obj("item") && str("text"),
+    "im-draft": () => str("id") && typeof v["send"] === "boolean",
+    "im-presence": () => str("agent") && str("session") && str("presence"),
+    "im-need": () => str("key") && str("action"),
+    "im-forward": () => str("from") && str("to"),
+    "im-card": () => str("action"),
   };
   const check = fields[op];
   if (check !== undefined && !check()) return { error: `op ${op}: missing or mistyped fields` };

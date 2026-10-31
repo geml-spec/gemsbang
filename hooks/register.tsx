@@ -76,6 +76,12 @@ import { askJudgeRequest, judgementLine, judgeOptions, judgeRequest, JUDGEMENT_M
 import type { Judgement, JudgeOption } from '../dist/hosts/claude-code/judge.js'
 import { langOf, wordsFor } from '../dist/hosts/claude-code/text.js'
 import type { T } from '../dist/hosts/claude-code/text.js'
+import { callRule, IM_TOOLS, imBand, imHeaderLine, imQuietLine, imTabRows, imToolOf, toolLine, unreadOf, venueKey } from '../dist/hosts/claude-code/im.js'
+import type { ImTurn } from '../dist/hosts/claude-code/im.js'
+import type { ImStatus, Thread } from '../dist/daemon/view.js'
+import type { Presence } from '../dist/core/im/presence.js'
+import type { CardAction } from '../dist/core/im/card.js'
+import { venueLabel } from '../dist/core/im/envelope.js'
 
 const shellAtom = atom({ plugin: 'gemworks', key: 'shell' } as const, null as GemworksJson)
 const problemAtom = atom({ plugin: 'gemworks', key: 'problem' } as const, null as string | null)
@@ -160,6 +166,15 @@ const hostAtom = atom({ plugin: 'gemworks', key: 'host' } as const, null as Gemw
 const clientsAtom = atom({ plugin: 'gemworks', key: 'clients' } as const, [] as GemworksJson)
 /** Where the last prompt came from: composer (this machine), bridge (Remote Control), sdk. */
 const originAtom = atom({ plugin: 'gemworks', key: 'origin' } as const, null as string | null)
+/** The IM (plan D): the daemon's home as the bridge last carried it (ImStatus); the thread open on the 消息 page; the message its box answers; the turn a queue item started (ImTurn); per venue the last message id the page showed; the presence last reported. */
+const imAtom = atom({ plugin: 'gemworks', key: 'im' } as const, null as GemworksJson)
+const imThreadAtom = atom({ plugin: 'gemworks', key: 'imThread' } as const, null as GemworksJson)
+const imReplyAtom = atom({ plugin: 'gemworks', key: 'imReply' } as const, null as string | null)
+const imTurnAtom = atom({ plugin: 'gemworks', key: 'imTurn' } as const, null as GemworksJson)
+const imSeenAtom = atom({ plugin: 'gemworks', key: 'imSeen' } as const, {} as GemworksJson)
+const imPresenceAtom = atom({ plugin: 'gemworks', key: 'imPresence' } as const, null as string | null)
+/** The line of words typed under a card for its next button (plan G): the comment, the reason, the record; per card, cleared once used. */
+const imCardWordsAtom = atom({ plugin: 'gemworks', key: 'imCardWords' } as const, null as GemworksJson)
 /** The steps the person pressed that went into the session: queued until it is idle, then entered and being done until that turn ends. */
 const queuedAtom = atom({ plugin: 'gemworks', key: 'queued' } as const, [] as GemworksJson)
 /** The project's shared session logs: where they are, what they hold, the other session unfolded, the decisions already passed on, a commit in this turn. */
@@ -306,6 +321,9 @@ const AFTER_WAIT_MS = 2_000
 const LATE = Symbol('late')
 
 /** One request to the CLI. Undefined when the bridge is unavailable; the band then says why. */
+/** The ops whose answers carry the IM (decision 9): they take the page's marks with them. */
+const IM_CARRIERS: ReadonlySet<string> = new Set(['status', 'refresh', 'attention', 'im-status'])
+
 async function bridge($: EngineInterface, op: BridgeOp, timeoutMs: number = BRIDGE_TIMEOUT_MS, onFile?: string): Promise<BridgeResponse | undefined> {
   const node = await read($, nodeAtom)
   const root = await read($, rootAtom)
@@ -313,7 +331,7 @@ async function bridge($: EngineInterface, op: BridgeOp, timeoutMs: number = BRID
   // `onFile`: this one request acts on that work item's file; the current one stays the shell's.
   const lastFile = onFile ?? (await read($, lastFileAtom))
   const gh = (await readShell($))?.status?.gh
-  const request = { v: 1, root, ...(lastFile !== null ? { lastFile } : {}), ...(gh ? { gh } : {}), ...op } as BridgeRequest
+  const request = { v: 1, root, ...(lastFile !== null ? { lastFile } : {}), ...(gh ? { gh } : {}), ...(IM_CARRIERS.has(op.op) ? { imSeen: ((await read($, imSeenAtom)) as unknown as Record<string, string> | null) ?? {} } : {}), ...op } as BridgeRequest
   let out: { exitCode: number; stdout: string; stderr: string }
   try {
     out = await $.process.run([node, `${$.plugin.root}/dist/gemworks.mjs`, 'hook'], { cwd: root, stdin: encodeRequest(request), timeoutMs })
@@ -337,6 +355,7 @@ async function bridge($: EngineInterface, op: BridgeOp, timeoutMs: number = BRID
   if ((await read($, problemAtom)) !== problem) await update($, problemAtom, () => problem)
   const shell = res.shell
   if (shell !== undefined && JSON.stringify(shell) !== JSON.stringify(await read($, shellAtom))) await update($, shellAtom, () => shell as unknown as GemworksJson)
+  await keepIm($, res)
   // Refresh and board answers carry the to-do count; every other answer leaves the last one standing.
   if (res.ok && res.todo !== undefined) {
     const todo = res.todo
@@ -1392,6 +1411,149 @@ async function notePrompt($: EngineInterface, fn: (p: PromptRecord) => PromptRec
 
 // ---- the actions -------------------------------------------------------------------
 
+// ---- the IM (plan D) ----------------------------------------------------------------------
+
+const readIm = async ($: EngineInterface): Promise<ImStatus | null> => (await read($, imAtom)) as unknown as ImStatus | null
+const readImTurn = async ($: EngineInterface): Promise<ImTurn | null> => (await read($, imTurnAtom)) as unknown as ImTurn | null
+
+/** The IM as an answer carried it: kept when it came, so the band and the page draw it. */
+async function keepIm($: EngineInterface, res: BridgeResponse | undefined): Promise<void> {
+  if (res === undefined || !res.ok || res.im === undefined) return
+  const im = res.im
+  if (JSON.stringify(im) !== JSON.stringify(await read($, imAtom))) await update($, imAtom, () => im as unknown as GemworksJson)
+}
+
+/** Which agent this session is (decision 1): the setting, else the first the daemon lists; none when it lists none. */
+async function imAgentOf($: EngineInterface): Promise<string | undefined> {
+  const im = await readIm($)
+  if (im === null || !im.configured) return undefined
+  const chosen = (await readSettings($)).im.agent
+  return chosen !== '' && im.agents.includes(chosen) ? chosen : im.agents[0]
+}
+
+/** The IM read again (im-status), with the page's marks. */
+async function loadIm($: EngineInterface): Promise<void> {
+  await keepIm($, await bridge($, { op: 'im-status' }))
+}
+
+/** The open thread read again; what it shows is marked seen. */
+async function loadImThread($: EngineInterface): Promise<void> {
+  const open = (await read($, imThreadAtom)) as unknown as { owner: string; id: string } | null
+  if (open === null) return
+  const res = await bridge($, { op: 'im-venue', owner: open.owner, id: open.id })
+  if (res === undefined || !res.ok || res.thread === undefined) return
+  const thread = res.thread
+  await update($, imThreadAtom, () => ({ owner: open.owner, id: open.id, thread }) as unknown as GemworksJson)
+  const last = thread.messages.filter((m) => m.kind !== 'system').at(-1)
+  if (last !== undefined) await update($, imSeenAtom, (was) => ({ ...((((was as unknown) as Record<string, string> | null) ?? {})), [venueKey(open.owner, open.id)]: last.id }) as unknown as GemworksJson)
+}
+
+/** The session's presence (§6.10), reported when it changes; the daemon posts it with its heartbeat. */
+async function imPresence($: EngineInterface, presence: Presence, task?: string): Promise<void> {
+  const agent = await imAgentOf($)
+  if (agent === undefined) return
+  const key = `${presence}${task === undefined ? '' : `:${task}`}`
+  if ((await read($, imPresenceAtom)) === key) return
+  await update($, imPresenceAtom, () => key)
+  const session = await $.session.id().catch(() => '')
+  if (session === '') return
+  let login = 'subscription'
+  try { if ((await $.env.get('ANTHROPIC_API_KEY')) !== undefined) login = 'api' } catch { /* subscription */ }
+  await bridge($, { op: 'im-presence', agent, session, presence, login, ...(task !== undefined ? { task } : {}) })
+}
+
+/** Between turns (decision 2): the next queue item taken and submitted with its envelope; the turn it starts is marked, so the scope holds and the answer goes back. */
+async function imDeliverNext($: EngineInterface): Promise<void> {
+  if (turnBusy || (await readImTurn($)) !== null) return
+  const agent = await imAgentOf($)
+  if (agent === undefined) return
+  const res = await bridge($, { op: 'im-next', agent, take: true })
+  const d = res?.ok === true ? res.delivered : undefined
+  if (d === undefined) return
+  const turn: ImTurn = { agent, item: d.item, scope: d.scope, draftFirst: d.draftFirst, refused: 0, ...(d.room !== undefined ? { room: d.room } : {}) }
+  await update($, imTurnAtom, () => turn as unknown as GemworksJson)
+  trace($, `im: delivering ${d.item.id} to ${agent}`)
+  try { await $.prompt.submit({ text: d.text }) } catch (err) { await update($, imTurnAtom, () => null); trace($, `im: submit failed: ${reasonOf(err)}`); return }
+  // A plugin's own submit goes through every hook but its own (the engine's rule), so the turn it starts is marked here: busy until turn.complete, and the presence the sender sees.
+  turnBusy = true; turnActed = false; turnReported = false
+  await imPresence($, 'thinking')
+}
+
+/** A delivered turn's end: the final answer back to its venue as the agent, or held as a draft (§6.5); an aborted turn sends nothing. */
+async function imAnswerTurn($: EngineInterface, answer: string, aborted: boolean): Promise<void> {
+  const turn = await readImTurn($)
+  if (turn === null) return
+  await update($, imTurnAtom, () => null)
+  if (aborted) return
+  const t = await words($)
+  const session = await $.session.id().catch(() => '')
+  const res = await bridge($, { op: 'im-answer', agent: turn.agent, item: turn.item, text: answer, ...(session !== '' ? { session } : {}) })
+  if (res === undefined || !res.ok) { $.ui.toast(t('IM：{0}', res === undefined ? ((await read($, problemAtom)) ?? '') : res.error.replace(/^gemworks: /, ''))); return }
+  const a = res.answered
+  if (a !== undefined && 'draft' in a) $.ui.toast(t('已成草稿，到「消息」页过目'))
+  else if (a !== undefined) $.ui.toast(t('已发回 {0}', venueLabel(turn.item.venueKind, turn.item.venueName)))
+}
+
+type ImToolName = NonNullable<ReturnType<typeof imToolOf>>
+
+/** One of the five tools (transport §4.1): one bridge call, one line back. */
+async function serveIm($: EngineInterface, name: ImToolName, event: unknown): Promise<ToolCallResult> {
+  const args = toolArgs(event as Record<string, unknown>)
+  const t = await words($)
+  const agent = await imAgentOf($)
+  if (agent === undefined) return { result: `${name}: ${t('本会话没有 agent：在设置里选一个')}` }
+  const session = await $.session.id().catch(() => '')
+  const venueOf = (v: unknown): { owner: string; id: string } | undefined => { const m = typeof v === 'string' ? /^([^/#\s]+)\/([^/#\s]+)$/.exec(v) : null; return m === null ? undefined : { owner: m[1] as string, id: m[2] as string } }
+  const labelOf = async (v: { owner: string; id: string }): Promise<string> => { const row = (await readIm($))?.venues.find((x) => x.owner === v.owner && x.id === v.id); return row === undefined ? `${v.owner}/${v.id}` : venueLabel(row.kind, row.name) }
+  const str = (k: string): string | undefined => (typeof args[k] === 'string' ? args[k] as string : undefined)
+  const embeds = (k: string): { src: string; rev?: number; hash?: string }[] | undefined => (Array.isArray(args[k]) ? (args[k] as unknown[]).filter((x): x is { src: string; rev?: number; hash?: string } => typeof x === 'object' && x !== null && typeof (x as { src?: unknown }).src === 'string') : undefined)
+  const through = async (op: BridgeOp): Promise<{ ok: true; res: Extract<BridgeResponse, { ok: true }> } | { ok: false; text: string }> => {
+    const res = await bridge($, op)
+    if (res === undefined) return { ok: false, text: `${name}: gemworks is unavailable: ${(await read($, problemAtom)) ?? ''}` }
+    if (!res.ok) return { ok: false, text: `${name}: ${res.error.replace(/^gemworks: /, '')}` }
+    return { ok: true, res }
+  }
+  if (name === 'im_read') {
+    const v = venueOf(args['venue'])
+    const src = str('src')
+    const limit = typeof args['limit'] === 'number' ? args['limit'] as number : undefined
+    const r = await through({ op: 'im-read', ...(v !== undefined ? { owner: v.owner, venue: v.id } : {}), ...(src !== undefined ? { src } : {}), ...(limit !== undefined ? { limit } : {}) })
+    if (!r.ok) return { result: r.text }
+    const where = v !== undefined ? await labelOf(v) : src ?? t('场所')
+    return { result: `${toolLine(name, where, v !== undefined ? `最近 ${limit ?? 12} 条` : src !== undefined ? '读了一块' : '列出场所')}\n${r.res.text ?? ''}` }
+  }
+  if (name === 'im_forward') {
+    const to = venueOf(args['to'])
+    const from = str('from')
+    if (to === undefined || from === undefined) return { result: `${name}: from is an address or owner/venue#message, to is owner/id` }
+    const note = str('note')
+    const r = await through({ op: 'im-forward', from, to: `${to.owner}/${to.id}`, ...(note !== undefined ? { note } : {}), as: agent, ...(session !== '' ? { session } : {}) })
+    return { result: r.ok ? toolLine(name, await labelOf(to), `已排入待发：${from}`) : r.text }
+  }
+  if (name === 'im_card') {
+    const action = str('action') ?? ''
+    const card = /^([^/#\s]+)\/([^/#\s]+)$/.exec(str('card') ?? '')
+    const body = typeof args['body'] === 'object' && args['body'] !== null ? args['body'] as Record<string, unknown> : undefined
+    // Whose token signs: the owner's unless told otherwise, the agent's for the verbs a worker takes.
+    const as = str('as') === 'person' ? 'person' : str('as') === 'agent' || ['claim', 'note', 'giveback', 'deliver', 'resume'].includes(action) ? agent : 'person'
+    const r = await through({ op: 'im-card', action: action as CardAction, ...(card !== null ? { owner: card[1] as string, id: card[2] as string } : {}), ...(body !== undefined ? { body } : {}), as })
+    if (!r.ok) return { result: r.text }
+    const a = r.res.card
+    const where = a?.card !== undefined ? `#${a.card.id}` : card !== null ? `#${card[2] as string}` : t('任务卡')
+    return { result: action === 'show' || action === 'list' ? `${toolLine(name, where, action === 'show' ? t('看卡') : t('列出'))}\n${a?.line ?? ''}` : toolLine(name, where, a?.line ?? '') }
+  }
+  const v = venueOf(args['venue'])
+  if (v === undefined) return { result: `${name}: venue is owner/id (im_read lists them)` }
+  const kind = name === 'im_ask' ? 'ask' : name === 'im_report' ? 'report' : 'chat'
+  const text = name === 'im_ask' ? str('question') ?? '' : str('text') ?? ''
+  const ask = name === 'im_ask' ? { question: str('question') ?? '', options: Array.isArray(args['options']) ? (args['options'] as unknown[]).filter((x): x is string => typeof x === 'string') : [], who: str('who') ?? '', ...(str('expires') !== undefined ? { expires: str('expires') as string } : {}) } : undefined
+  const evidence = embeds('evidence'), parts = embeds('parts'), opinion = str('opinion'), turn = str('turn'), replyTo = str('replyTo')
+  const r = await through({ op: 'im-say', owner: v.owner, venue: v.id, text, as: agent, kind, ...(ask !== undefined ? { ask } : {}), ...(evidence !== undefined ? { evidence } : {}), ...(parts !== undefined ? { parts } : {}), ...(opinion !== undefined ? { opinion } : {}), ...(turn !== undefined ? { turn } : {}), ...(replyTo !== undefined ? { replyTo } : {}), ...(session !== '' ? { session } : {}) })
+  if (!r.ok) return { result: r.text }
+  const what = name === 'im_ask' ? `问 ${ask?.who ?? ''}：${text}` : name === 'im_report' ? `汇报${(evidence ?? []).length > 0 ? `，带证据 ${(evidence ?? []).length} 条` : ''}` : '已排入待发'
+  return { result: toolLine(name, await labelOf(v), what) }
+}
+
 const VERB_FAILED = { result: 'gemworks failed; the line above the prompt says why' }
 
 const PANE_TITLE = 'Gemworks'
@@ -1620,6 +1782,15 @@ async function act($: EngineInterface, action: BoardAction, surface?: string): P
       await update($, expandedTurnAtom, (was) => (((was as unknown) as { id?: string } | null)?.id === action.id ? { id: action.id, answer } : was) as unknown as GemworksJson)
       return
     }
+    case 'im-open': {
+      await update($, imThreadAtom, () => ({ owner: action.owner, id: action.id }) as unknown as GemworksJson)
+      await update($, imReplyAtom, () => null)
+      await loadImThread($)
+      return
+    }
+    case 'im-close': await update($, imThreadAtom, () => null); await update($, imReplyAtom, () => null); return
+    case 'im-reply': await update($, imReplyAtom, () => action.message); return
+    case 'im-card-words': await update($, imCardWordsAtom, (was) => ({ ...(((was as unknown) as Record<string, string> | null) ?? {}), [action.card]: action.text }) as unknown as GemworksJson); return
     default: break
   }
   const t = await words($)
@@ -1671,6 +1842,67 @@ async function act($: EngineInterface, action: BoardAction, surface?: string): P
       await update($, expandedAtom, () => null)
       await through({ op: 'rollback', rev: action.rev })
       await loadBoard($)
+      return
+    }
+    case 'im-refresh': await loadIm($); await loadImThread($); return
+    case 'im-say': {
+      const open = (await read($, imThreadAtom)) as unknown as { owner: string; id: string } | null
+      if (open === null) { $.ui.toast(t('先打开一个场所')); return }
+      const replyTo = action.replyTo ?? (await read($, imReplyAtom)) ?? undefined
+      await through({ op: 'im-say', owner: open.owner, venue: open.id, text: action.text, as: 'person', ...(replyTo !== undefined ? { replyTo } : {}) })
+      await update($, imReplyAtom, () => null)
+      await loadImThread($)
+      return
+    }
+    case 'im-draft': await through({ op: 'im-draft', id: action.id, send: action.send, ...(action.text !== undefined ? { text: action.text } : {}) }); await loadIm($); return
+    // 自己写: the thread opens with its box answering the ask; any other button is the need's own.
+    case 'im-need': {
+      if (action.action === '自己写') {
+        const m = /^https:\/\/[^/]+\/([^/]+)\/venues\/([^/]+)\.geml#(.+)$/.exec(action.key)
+        if (m !== null) {
+          await update($, tabAtom, () => 'messages')
+          await update($, imThreadAtom, () => ({ owner: m[1], id: m[2] }) as unknown as GemworksJson)
+          await update($, imReplyAtom, () => m[3] as string)
+          await loadImThread($)
+          await openBoard($, 'messages', false)
+        }
+        return
+      }
+      await through({ op: 'im-need', key: action.key, action: action.action })
+      await loadIm($)
+      return
+    }
+    // A card's button (plan G): the words typed under the card go with the verb that takes them; 发布 asks which venue; a worker's verbs sign as the session's agent.
+    case 'im-card': {
+      const key = `${action.owner}/${action.id}`
+      const words = (((await read($, imCardWordsAtom)) as unknown) as Record<string, string> | null)?.[key]
+      let body: Record<string, unknown> = {}
+      let as = 'person'
+      if (action.action === 'publish') {
+        const venues = ((await readIm($))?.venues ?? []).filter((v) => v.kind === 'group' || v.kind === 'thread')
+        if (venues.length === 0) { $.ui.toast(t('没有能发到的场所')); return }
+        const labels = venues.map((v) => `${v.kindWord}「${v.name}」`)
+        let picked: string
+        try { picked = await $.ui.ask(t('发到哪个场所？'), labels) } catch { return }
+        const v = venues[labels.indexOf(picked)]
+        if (v === undefined) return
+        body = { venue: `${v.owner}/${v.id}` }
+      } else if (action.action === 'changes') body = { comments: words === undefined ? [] : [{ anchor: '', text: words }] }
+      else if (action.action === 'dispute' || action.action === 'close') body = words === undefined ? {} : { reason: words }
+      else if (action.action === 'note') { if (words === undefined) { $.ui.toast(t('先写一行记录')); return } body = { text: words } }
+      else if (action.action === 'giveback') body = words === undefined ? {} : { note: words }
+      else if (action.action === 'deliver') { $.ui.toast(t('交付由 agent 用 im_card deliver 完成')); return }
+      if (['claim', 'note', 'giveback', 'resume'].includes(action.action)) {
+        const agent = await imAgentOf($)
+        if (agent === undefined) { $.ui.toast(t('本会话没有 agent：在设置里选一个')); return }
+        as = agent
+      }
+      const res = await through({ op: 'im-card', action: action.action as CardAction, owner: action.owner, id: action.id, body, as })
+      if (res?.ok === true) {
+        $.ui.toast(`#${action.id} ${res.card?.line ?? ''}`)
+        await update($, imCardWordsAtom, (was) => { const m = { ...((((was as unknown) as Record<string, string> | null) ?? {})) }; delete m[key]; return m as unknown as GemworksJson })
+      }
+      await loadIm($)
       return
     }
     case 'check-update': await update($, latestAtom, () => null); await checkLatest($); return
@@ -2468,6 +2700,8 @@ interface Header {
   flow?: string;
   /** Why there is no work item, when there is none. */
   reason?: string;
+  /** The IM (plan D): the agent, 代 whom, its presence, whether the relay is reached. */
+  agent?: string;
 }
 
 async function headerRows($: EngineInterface, t: T): Promise<Header> {
@@ -2480,6 +2714,8 @@ async function headerRows($: EngineInterface, t: T): Promise<Header> {
   const newer = settings.notify.update && latest?.version !== undefined && version !== '' && isNewer(latest.version, version) ? latest.version : undefined
   const dialogs: Pressable[] = (['share', 'settings', 'upgrade', 'about'] as const).map((d) => ({ key: `dialog-${d}`, label: d === 'share' ? t('分享') : d === 'settings' ? t('设置') : d === 'upgrade' ? t('升级') : t('关于'), action: { op: 'dialog', dialog: d } }))
   const head: Header = { version, dialogs, ...(newer !== undefined ? { newer } : {}), ...(synced !== undefined && synced !== '' && version !== '' && synced !== version ? { synced } : {}) }
+  const agentLine = imHeaderLine(await readIm($), await imAgentOf($), t)
+  if (agentLine !== undefined) head.agent = agentLine
   if (s !== null && s.item.kind === 'item') {
     return { ...head, name: s.title ?? s.item.id, ...(s.state !== undefined ? { stage: s.paused ? `${s.state.title} · ${t('已暂停')}` : s.state.title } : {}), flow: s.workflow.title }
   }
@@ -2513,6 +2749,10 @@ text(t('排查看板问题时打开；开着会在对话里刷诊断行。'), 'd
     rows.push(section('language', t('语言')), { kind: 'buttons', items: ([['system', t('跟随系统（{0}）', names[system] ?? system)], ['zh', '中文'], ['en', 'English'], ['ja', '日本語']] as const).map(([v, label]): Pressable => ({ key: `lang-${v}`, label, ...(s.language === v ? { primary: true } : {}), action: { op: 'setting', key: 'language', value: v } })) })
     rows.push(text(t('状态带、看板、提醒的文字跟着换；流程自己的标题和说明保持作者写的语言。'), 'dim'))
     rows.push(text(t('流程在「流程」页换和调整，工具在「工具」页归类，都写回仓库里的文件。'), 'dim'))
+    const im = await readIm($)
+    rows.push(section('im', t('IM')))
+    if (im === null || !im.configured || im.agents.length === 0) rows.push(text(t('还没连上中继：在终端里运行 gemworks connect setup --relay <地址> --token <令牌>，再 gemworks connect。'), 'dim'))
+    else rows.push(text(t('这个会话是哪个 agent'), 'dim'), { kind: 'buttons', items: im.agents.map((a): Pressable => ({ key: `im-agent-${a}`, label: a, ...((s.im.agent === '' ? im.agents[0] : s.im.agent) === a ? { primary: true } : {}), action: { op: 'setting', key: 'im.agent', value: a } })) })
   } else if (dialog === 'upgrade') {
     const latest = known as unknown as { version?: string; error?: string } | null
     rows.push({ kind: 'heading', key: 'version', text: t('当前 {0}', version), sub: '' })
@@ -2605,6 +2845,10 @@ async function within<V>($: EngineInterface, ms: number, work: Promise<V>): Prom
 /** The rows of one tab of the board, read for that tab alone; the work items open on 此刻. */
 async function tabRows($: EngineInterface, e: { surface: string; props: { bodyColumns: number; scroll: { bodyRows: number } } }, t: T, tab: BoardTab): Promise<BoardRow[]> {
   const columns = e.props.bodyColumns
+  if (tab === 'messages') {
+    const [im, open, replyTo, now] = await Promise.all([readIm($), read($, imThreadAtom), read($, imReplyAtom), nowIso($)])
+    return imTabRows({ status: im, thread: ((open as unknown) as { thread?: Thread } | null)?.thread ?? null, replyTo, columns, now, t })
+  }
   // Each read is a trip to the host: the ones a tab needs, at once; the ones written on every tool call only where the tab shows them.
   const shows = (visible: boolean) => <V,>(get: () => Promise<V>, otherwise: V): Promise<V> => (visible ? get() : Promise.resolve(otherwise))
   const attention = shows(tab === 'items')(() => Promise.all([attentionNow($, t), readQueued($), read($, heldOpenAtom)]).catch(() => null), null)
@@ -2688,6 +2932,7 @@ function drawHeader($: EngineInterface, els: Els, head: Header | undefined, envL
           </Box>
         ))}
       {head?.reason !== undefined && <Text dimColor>{head.reason}</Text>}
+      {head?.agent !== undefined && <Text key="agent" dimColor wrap="truncate-end">{head.agent}</Text>}
       {envLine.length > 0 && <Text key="env" dimColor wrap="truncate-end">{envLine.join(SEP)}</Text>}
     </Box>
   )
@@ -2708,6 +2953,9 @@ export const register: Register = (on) => {
     await registerOne($, ARTIFACT_TOOL.name, () => $.tool.register({ name: ARTIFACT_TOOL.name, description: ARTIFACT_TOOL.description, inputSchema: ARTIFACT_TOOL.inputSchema as unknown as Record<string, unknown>, isDeferred: false }))
     await registerOne($, ASK_TOOL.name, () => $.tool.register({ name: ASK_TOOL.name, description: ASK_TOOL.description, inputSchema: ASK_TOOL.inputSchema as unknown as Record<string, unknown>, isDeferred: false }))
     await registerOne($, WORK_TOOL.name, () => $.tool.register({ name: WORK_TOOL.name, description: WORK_TOOL.description, inputSchema: WORK_TOOL.inputSchema as unknown as Record<string, unknown>, isDeferred: false }))
+    for (const x of IM_TOOLS) {
+      await registerOne($, x.name, () => $.tool.register({ name: x.name, description: x.description, inputSchema: x.inputSchema, isDeferred: false }))
+    }
     await registerOne($, '/gemworks', () => $.command.register({ name: 'gemworks', description: 'Gemworks：当前阶段、看板、暂停与继续、切换或添加流程', argumentHint: COMMAND_HINT }))
     // The settings, from the store; the host's language; the plugin's version.
     try {
@@ -2729,7 +2977,8 @@ export const register: Register = (on) => {
     await update($, queuedAtom, () => [])
     $.clock.after(0, () => { void loadFacts($) })
     $.clock.every(120_000, () => { void loadFacts($) })
-    $.clock.every(60_000, () => { $.ui.invalidate('ui.render'); void loadProjectSessions($) })
+    $.clock.every(60_000, () => { $.ui.invalidate('ui.render'); void loadProjectSessions($); void imDeliverNext($).catch(() => undefined) })
+    $.clock.after(0, () => { void imPresence($, 'idle').then(() => imDeliverNext($)).catch(() => undefined) })
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -2756,6 +3005,7 @@ export const register: Register = (on) => {
     await update($, deliveredAtom, () => null)
     try { await update($, toldAtom, () => false) } catch { /* said again at the next */ }
     try { await storeUsage($) } catch { /* kept for the session */ }
+    try { await imPresence($, 'asleep') } catch { /* the daemon's heartbeat retires it */ }
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -2774,7 +3024,20 @@ export const register: Register = (on) => {
     if (e.agentId === undefined && (CLAUDE_CODE_TOOLS.write.includes(tool) || CLAUDE_CODE_TOOLS.run.includes(tool) || tool === 'Artifact' || tool === `mcp__gemworks__${ASK_TOOL.name}`)) turnActed = true
     // How often each tool is used: every call is noted under its day as it starts, by the key the dictionary would give it, gemworks's own too.
     await noteUsage($, tool, toolArgs(e as unknown as Record<string, unknown>))
-    if (isOwnTool(tool) || tool === `mcp__gemworks__${NOTE_TOOL.name}` || tool === `mcp__gemworks__${ARTIFACT_TOOL.name}` || tool === `mcp__gemworks__${ASK_TOOL.name}` || tool === `mcp__gemworks__${WORK_TOOL.name}`) return next(e)
+    if (isOwnTool(tool) || tool === `mcp__gemworks__${NOTE_TOOL.name}` || tool === `mcp__gemworks__${ARTIFACT_TOOL.name}` || tool === `mcp__gemworks__${ASK_TOOL.name}` || tool === `mcp__gemworks__${WORK_TOOL.name}` || imToolOf(tool) !== undefined) return next(e)
+    // A turn a queue item started (plan D): the sender's scope over every call (rule 5); the session is at a tool.
+    const imTurn = await readImTurn($)
+    let ev = e
+    if (imTurn !== null) {
+      const rule = callRule(imTurn, tool, toolArgs(e as unknown as Record<string, unknown>))
+      if (rule !== undefined && 'deny' in rule) {
+        await update($, imTurnAtom, () => ({ ...imTurn, refused: imTurn.refused + 1 }) as unknown as GemworksJson)
+        return { deny: rule.deny }
+      }
+      // A sandbox run starts in the card's room (§7.5): the command goes there first.
+      if (rule !== undefined && 'cwd' in rule && e.tool === 'Bash') ev = { ...e, command: `cd ${JSON.stringify(rule.cwd)} && ${e.command}` }
+    }
+    if (e.agentId === undefined) $.clock.after(0, () => { void imPresence($, 'tool').catch(() => undefined) })
     await retryStart($)
     if (e.agentId === undefined) await notePrompt($, (p) => ({ ...p, tools: p.tools + 1 }))
     const input = toolArgs(e as unknown as Record<string, unknown>)
@@ -2817,7 +3080,7 @@ export const register: Register = (on) => {
     }
     // A tool with default parameters in the dictionary: the ones the model left out are filled in.
     const fill = paramsToFill(policy, call)
-    const ran = await next(fill === undefined ? e : { ...e, ...fill })
+    const ran = await next(fill === undefined ? ev : { ...ev, ...fill })
     if (ran.deny !== undefined) return ran
     // A page the Artifact tool published is one of the work item's artifacts: recorded once the call is answered.
     // A visual drawn inline is kept as a page: it has no file or link of its own.
@@ -2885,6 +3148,12 @@ export const register: Register = (on) => {
   on('tool.call', { tool: 'mcp__gemworks__artifact' }, ($, e) => recordArtifact($, e)).catch(() => ({ result: 'gemworks could not record that' }))
   on('tool.call', { tool: 'mcp__gemworks__ask' }, ($, e) => registerAsk($, e)).catch(() => ({ result: 'gemworks could not register that' }))
   on('tool.call', { tool: 'mcp__gemworks__work' }, ($, e) => recordWork($, e)).catch(() => ({ result: 'gemworks could not record that' }))
+  on('tool.call', { tool: 'mcp__gemworks__im_say' }, ($, e) => serveIm($, 'im_say', e)).catch(() => ({ result: 'gemworks IM could not do that' }))
+  on('tool.call', { tool: 'mcp__gemworks__im_ask' }, ($, e) => serveIm($, 'im_ask', e)).catch(() => ({ result: 'gemworks IM could not do that' }))
+  on('tool.call', { tool: 'mcp__gemworks__im_report' }, ($, e) => serveIm($, 'im_report', e)).catch(() => ({ result: 'gemworks IM could not do that' }))
+  on('tool.call', { tool: 'mcp__gemworks__im_read' }, ($, e) => serveIm($, 'im_read', e)).catch(() => ({ result: 'gemworks IM could not do that' }))
+  on('tool.call', { tool: 'mcp__gemworks__im_forward' }, ($, e) => serveIm($, 'im_forward', e)).catch(() => ({ result: 'gemworks IM could not do that' }))
+  on('tool.call', { tool: 'mcp__gemworks__im_card' }, ($, e) => serveIm($, 'im_card', e)).catch(() => ({ result: 'gemworks IM could not do that' }))
 
   // The model is told about the project's other sessions and the ask tool in the system prompt, where this event reaches gemworks (see prefaceFor).
   on('prompt.compose', async ($, e, next) => {
@@ -2909,6 +3178,8 @@ export const register: Register = (on) => {
     const done = await next(e)
     if (e.agentId === undefined) {
       turnBusy = false
+      const answer = e.answer, aborted = e.isAborted
+      $.clock.after(0, () => { void imAnswerTurn($, answer, aborted).then(() => imPresence($, asksOf(answer).length > 0 ? 'waiting' : 'idle')).then(() => imDeliverNext($)).catch(() => undefined) })
       try { await setQueued($, (q) => q.filter((x) => !x.entered)) } catch { /* shown till the next */ }
       $.clock.after(0, () => { void storePrompts($) })
       if (!e.isAborted) { const answer = e.answer; $.clock.after(0, () => { void sessionsOnAnswer($, answer) }) }
@@ -2949,6 +3220,7 @@ export const register: Register = (on) => {
     turnBusy = true
     turnActed = false
     turnReported = false
+    $.clock.after(0, () => { void imPresence($, 'thinking').catch(() => undefined) })
     try { if (((await read($, initAtom)) as unknown as InitState | null)?.state === 'done') await update($, initAtom, () => null) } catch { /* stays */ }
     if (person && e.origin.kind !== 'plugin') { try { await update($, originAtom, () => e.origin.kind) } catch { /* unknown */ } }
     // The first prompt of a conversation carries the standing instructions, where the system prompt did not.
@@ -3096,6 +3368,19 @@ export const register: Register = (on) => {
         }
       } catch { /* the workflow's line stands */ }
     }
+    // The 「需要我」 row (§6.9, plan D) leads whatever else: the verb in its colour, the sentence, its buttons, how many more.
+    try {
+      const imRow = imBand(await readIm($))
+      if (imRow !== undefined && view.tone !== 'error') {
+        view = { verb: imRow.verb, title: imRow.text, tone: imRow.tone, note: imRow.more > 0 ? t('还有 {0} 件', imRow.more) : '', detail: imRow.text, actions: imRow.actions, more: { count: 0, detail: '' } }
+        attentionPresses = null
+        question = undefined
+      } else if (imRow === undefined) {
+        // Nothing needs the person (§6.9): where the current card stands, and the groups' unread, lead the dim words.
+        const quiet = imQuietLine(await readIm($))
+        if (quiet !== undefined && quiet !== '没有需要你的事') view = { ...view, note: view.note === '' ? quiet : `${quiet}${SEP}${view.note}` }
+      }
+    } catch { /* the band keeps its line */ }
     // Something else leads: the initialization's count stays as the dim words after it.
     if (notice !== null && attentionPresses !== null && view.note === '') view = { ...view, note: notice.text }
     const options: Pressable[] = attentionPresses ?? view.actions
@@ -3252,16 +3537,20 @@ export const register: Register = (on) => {
       if (fit.left > 0) body = [...fit.kept, <Text key="rows-cut" dimColor>{t('内容太多，后面 {0} 项没画出来：收起一些，或换个页签。', fit.left)}</Text>]
     }
     trace($, `drew board on ${e.surface}: tab ${tab}, ${rows.length} rows, ${drawn} elements`)
+    const unread = unreadOf(await readIm($).catch(() => null))
     return (
       <Box flexDirection="column">
         {header}
         {hairline(els, 'rule-head')}
         <Box gap={els.Svg !== undefined ? 3 : 2} flexWrap="wrap" alignItems="center">
-          {tabs(t).map((x) => els.Svg !== undefined
-            ? iconButton($, els, { key: `tab-${x.id}`, label: x.label, action: { op: 'tab', tab: x.id } }, x.id, { tone: x.id === tab ? 'active' : 'dim', from: 'left' })
-            : x.id === tab
-              ? <Button key={`tab-${x.id}`} plain onPress={press($, { op: 'tab', tab: x.id })}><Text bold underline>{x.label}</Text></Button>
-              : <Button key={`tab-${x.id}`} plain dimColor label={x.label} onPress={press($, { op: 'tab', tab: x.id })} />)}
+          {tabs(t).map((x) => {
+            const label = x.id === 'messages' && unread > 0 ? `${x.label} ${unread}` : x.label
+            return els.Svg !== undefined
+              ? iconButton($, els, { key: `tab-${x.id}`, label, action: { op: 'tab', tab: x.id } }, x.id, { tone: x.id === tab ? 'active' : 'dim', from: 'left' })
+              : x.id === tab
+                ? <Button key={`tab-${x.id}`} plain onPress={press($, { op: 'tab', tab: x.id })}><Text bold underline>{label}</Text></Button>
+                : <Button key={`tab-${x.id}`} plain dimColor label={label} onPress={press($, { op: 'tab', tab: x.id })} />
+          })}
         </Box>
         {hairline(els, 'rule-tabs')}
         {body}

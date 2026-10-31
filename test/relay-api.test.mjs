@@ -1,0 +1,132 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { route } from "../dist/relay/api.js";
+import { Relay } from "../dist/relay/relay.js";
+
+const relay = () => new Relay({ root: mkdtempSync(join(tmpdir(), "gemworks-relay-")), name: "relay.test", version: "0.0.0" });
+/** One request: `GET /path?x=y` or `POST /path`, a token, a body; the answer parsed when it is JSON. */
+function call(r, line, { token, body, geml } = {}) {
+  const [method, rest] = line.split(" ");
+  const [path, qs] = rest.split("?");
+  const query = Object.fromEntries(new URLSearchParams(qs ?? ""));
+  const res = route({ method, path, query, ...(token !== undefined ? { token } : {}), ...(body !== undefined ? { body } : {}), ...(geml ? { geml: true } : {}) }, r);
+  return { status: res.status, type: res.type, text: res.body, json: res.type.startsWith("application/json") ? JSON.parse(res.body) : undefined };
+}
+
+test("the root, guests and tokens: who needs no token, who needs one, what an invalid one gets", () => {
+  const r = relay();
+  assert.deepEqual(call(r, "GET /").json, { name: "relay.test", version: "0.0.0", federation: "closed" });
+  assert.equal(call(r, "POST /").status, 405);
+  const guest = call(r, "POST /guests");
+  assert.equal(guest.status, 201);
+  assert.match(guest.json.speaker, /^guest:g-/);
+  assert.match(guest.json.token, /^gwx_/);
+  assert.deepEqual(call(r, "GET /me"), { status: 401, type: "application/json; charset=utf-8", text: '{"error":"要令牌"}', json: { error: "要令牌" } });
+  assert.equal(call(r, "GET /me", { token: "gwx_bad" }).json.error, "令牌无效");
+  const me = call(r, "GET /me", { token: guest.json.token }).json;
+  assert.deepEqual([me.speaker, me.scope], [guest.json.speaker, "guest"]);
+  const john = r.issuePerson("john").token;
+  const agent = call(r, "POST /tokens", { token: john, body: { agent: "xiaoping", policy: { promptFrom: "nobody" } } });
+  assert.equal(agent.status, 201);
+  assert.equal(agent.json.speaker, "agent:xiaoping@john");
+  assert.equal(call(r, "POST /tokens", { token: john, body: { scope: "inbox" } }).json.speaker, "person:john");
+  assert.equal(call(r, "POST /tokens", { token: john, body: {} }).status, 400);
+  assert.equal(call(r, "POST /tokens", { token: agent.json.token, body: { agent: "x" } }).status, 403);
+  assert.equal(call(r, "GET /nowhere").status, 401, "a token before anything else");
+  assert.equal(call(r, "GET /nowhere", { token: john }).status, 404);
+});
+
+test("venues over the API: create, members, announce, decisions, messages; documents read as JSON or GEML, one block or all", () => {
+  const r = relay();
+  const john = r.issuePerson("john").token;
+  const zhang = r.issuePerson("zhangsan").token;
+  const xiaoping = call(r, "POST /tokens", { token: john, body: { agent: "xiaoping" } }).json.token;
+  const made = call(r, "POST /venues", { token: john, body: { id: "g-7", kind: "group", name: "前端周会", people: ["zhangsan"], agents: ["agent:xiaoping@john"] } });
+  assert.equal(made.status, 201);
+  assert.equal(made.json.venue.name, "前端周会");
+  assert.equal(call(r, "POST /venues", { token: john, body: { id: "g-7", kind: "group" } }).status, 409);
+  assert.equal(call(r, "POST /venues/john/g-7/members", { token: zhang, body: { speaker: "person:lisi" } }).status, 403);
+  assert.equal(call(r, "POST /venues/john/g-7/members", { token: john, body: { speaker: "person:lisi" } }).json.venue.people.length, 3);
+  assert.equal(call(r, "POST /venues/john/g-7/announce", { token: john, body: { text: "周三 10 点" } }).json.system.text, "person:john 改了群公告（第 1 版）");
+  const m = call(r, "POST /john/venues/g-7.geml", { token: zhang, body: { id: "m-1", text: "@xiaoping 跑一下", speaker: "person:john" } });
+  assert.equal(m.status, 201);
+  assert.deepEqual([m.json.message.speaker, m.json.existed, m.json.delivery.prompts], ["person:zhangsan", false, [{ agent: "xiaoping", level: "member", hops: 0 }]]);
+  assert.equal(call(r, "POST /john/venues/g-7.geml", { token: zhang, body: { id: "m-1", text: "again" } }).status, 200, "a resend is 200 with the message that is there");
+  assert.equal(call(r, "POST /john/venues/g-7.geml", { token: zhang, body: { id: "sys-1", text: "x" } }).status, 400);
+  assert.equal(call(r, "POST /john/venues/g-7.geml", { token: zhang, body: "x" }).status, 400);
+  assert.equal(call(r, "POST /venues/john/g-7/decisions", { token: zhang, body: { message: "m-1" } }).json.venue.decisions.length, 1);
+  assert.equal(call(r, "POST /venues/john/g-7/nothing", { token: zhang, body: {} }).status, 404);
+  const doc = call(r, "GET /john/venues/g-7.geml", { token: zhang });
+  assert.equal(doc.status, 200);
+  assert.deepEqual(doc.json.blocks.map((b) => b.id), ["venue", "member-1", "announce-1", "sys-1", "m-1", "decision-1"]);
+  const one = call(r, "GET /john/venues/g-7.geml?block=m-1", { token: zhang });
+  assert.equal(one.json.blocks[0].value.text, "@xiaoping 跑一下");
+  assert.equal(call(r, "GET /john/venues/g-7.geml?block=announce", { token: zhang }).json.blocks[0].value.text, "周三 10 点");
+  const text = call(r, "GET /john/venues/g-7.geml?format=geml", { token: zhang });
+  assert.equal(text.type, "text/plain; charset=utf-8");
+  assert.match(text.text, /^=== data \{#venue format=json\}\n/);
+  assert.match(call(r, "GET /john/venues/g-7.geml", { token: zhang, geml: true }).text, /^=== data/);
+  assert.equal(call(r, "GET /john/venues/g-7.geml", { token: r.issuePerson("lisi2").token }).status, 403);
+  assert.equal(call(r, "GET /john/venues/none.geml", { token: zhang }).status, 404);
+  assert.equal(call(r, "GET /john/venues/g-7.geml?block=m-9", { token: zhang }).status, 404);
+  assert.equal(call(r, "PUT /john/venues/g-7.geml", { token: zhang }).status, 405);
+  assert.equal(call(r, "POST /john/people/john.geml", { token: john, body: {} }).status, 405, "only venues and queues take an append");
+  const q = call(r, "GET /queues/john/xiaoping", { token: xiaoping });
+  assert.equal(q.json.pending.length, 1);
+  assert.equal(call(r, "GET /queues/john/xiaoping", { token: zhang }).status, 403);
+  const read = call(r, "POST /john/queues/xiaoping.geml", { token: xiaoping, body: { kind: "read", item: "qi-g-7-m-1" } });
+  assert.equal(read.status, 201);
+  assert.deepEqual([read.json.marker.kind, read.json.marker.n], ["read", 1]);
+  assert.equal(call(r, "POST /queues/john/xiaoping", { token: xiaoping, body: { kind: "answered", item: "qi-g-7-m-1", reply: "https://relay.test/john/venues/g-7.geml#m-2" } }).json.marker.reply, "https://relay.test/john/venues/g-7.geml#m-2");
+  assert.equal(call(r, "GET /queues/john/xiaoping", { token: john }).json.pending.length, 0);
+});
+
+test("presence, the inbox, trust and grants over the API", () => {
+  const r = relay();
+  const john = r.issuePerson("john").token;
+  const lisi = r.issuePerson("lisi").token;
+  const xiaoping = call(r, "POST /tokens", { token: john, body: { agent: "xiaoping" } }).json.token;
+  assert.equal(call(r, "POST /presence", { token: john, body: { session: "cc-1", presence: "idle" } }).status, 403);
+  assert.deepEqual(call(r, "POST /presence", { token: xiaoping, body: { session: "cc-1", presence: "tool", host: "claude-code", login: "api" } }).json, { presence: "tool" });
+  const p = call(r, "GET /presence/john/xiaoping", { token: lisi }).json;
+  assert.deepEqual([p.presence, p.sessions.length, p.sessions[0].host], ["tool", 1, "claude-code"]);
+  assert.equal(call(r, "GET /presence/john/nobody", { token: lisi }).json.presence, "asleep");
+  call(r, "POST /venues", { token: john, body: { id: "g-7", kind: "group", name: "群", agents: ["agent:xiaoping@john"] } });
+  call(r, "POST /john/venues/g-7.geml", { token: xiaoping, body: { id: "a-1", kind: "ask", text: "合吗", ask: { question: "合吗", options: ["合"], who: "person:john" } } });
+  const inbox = call(r, "GET /inbox", { token: john }).json;
+  assert.deepEqual(inbox.map((n) => [n.kind, n.text]), [["decide", "群「群」· xiaoping 问：合吗"]]);
+  assert.equal(call(r, "GET /inbox", { token: call(r, "POST /tokens", { token: john, body: { scope: "inbox" } }).json.token }).json.length, 1, "the phone's token reads the inbox");
+  assert.equal(call(r, "GET /inbox", { token: xiaoping }).status, 403);
+  assert.equal(call(r, "POST /trust", { token: john, body: { person: "lisi" } }).status, 200);
+  assert.equal(call(r, "POST /trust", { token: xiaoping, body: { person: "lisi" } }).status, 403);
+  const block = "https://relay.test/john/sessions/cc-1.geml#turn-3";
+  const req = call(r, "POST /grants/request", { token: lisi, body: { owner: "john", block, reason: "看看" } });
+  assert.equal(req.status, 201);
+  assert.equal(req.json.id, "request-1");
+  assert.equal(call(r, "GET /inbox", { token: john }).json.filter((n) => n.kind === "grant").length, 1);
+  assert.equal(call(r, "POST /grants", { token: john, body: { person: "lisi", block, request: "request-1" } }).json.id, "grant-1");
+  assert.equal(call(r, "POST /grants", { token: john, body: { person: "lisi", widen: { run: "sandbox" } } }).json.id, "grant-2");
+  assert.equal(call(r, "POST /grants/refuse", { token: john, body: { request: "request-9" } }).status, 404);
+  const grants = call(r, "GET /grants/john", { token: xiaoping }).json;
+  assert.deepEqual(grants.map((g) => [g.to.person, g.widen]), [["lisi", { run: "sandbox" }]]);
+  assert.equal(call(r, "GET /grants/john", { token: lisi }).status, 403);
+  assert.equal(call(r, "GET /inbox", { token: john }).json.filter((n) => n.kind === "grant").length, 0);
+});
+
+test("the daemon's listings: the venues I am in across owners, and my agents", () => {
+  const r = relay();
+  const john = r.issuePerson("john").token;
+  const zhang = r.issuePerson("zhangsan").token;
+  call(r, "POST /tokens", { token: john, body: { agent: "xiaoping" } });
+  call(r, "POST /tokens", { token: john, body: { agent: "xiaoguan" } });
+  call(r, "POST /venues", { token: john, body: { id: "g-7", kind: "group", name: "前端周会", people: ["zhangsan"] } });
+  call(r, "POST /venues", { token: zhang, body: { id: "t-1", kind: "thread", name: "回复：看看这个", people: ["john"] } });
+  call(r, "POST /venues", { token: zhang, body: { id: "g-9", kind: "group", name: "没我" } });
+  assert.deepEqual(call(r, "GET /venues", { token: john }).json, [{ owner: "john", id: "g-7", kind: "group", name: "前端周会" }, { owner: "zhangsan", id: "t-1", kind: "thread", name: "回复：看看这个" }]);
+  assert.deepEqual(call(r, "GET /agents", { token: john }).json, ["xiaoguan", "xiaoping"]);
+  assert.deepEqual(call(r, "GET /agents", { token: zhang }).json, []);
+  assert.equal(call(r, "GET /venues", { token: call(r, "POST /tokens", { token: john, body: { agent: "x" } }).json.token }).status, 403);
+});

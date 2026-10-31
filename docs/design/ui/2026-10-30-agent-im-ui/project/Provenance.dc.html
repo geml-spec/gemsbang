@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>谁说的：四种来源</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0;font-family:-apple-system,"PingFang SC","Helvetica Neue","Noto Sans SC",sans-serif;color:#1f1e1d}
+a{color:#2a6fdb}a:hover{color:#1f56ad}
+</style>
+</helmet>
+<div style="width: 440px; height: 680px; box-sizing: border-box; background: #fff; border: 1px solid #d6d3cc; border-radius: 10px; padding: 18px 16px; display: flex; flex-direction: column; gap: 14px; font-size: 13px; line-height: 1.5;">
+
+  <div style="font-size: 11px; font-weight: 600; color: #8a8986; letter-spacing: 0.04em;">本人亲打</div>
+  <div style="display: flex; gap: 10px;">
+    <span style="flex: 0 0 26px; width: 26px; height: 26px; border-radius: 50%; background: #0077be; color: #fff; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;">J</span>
+    <div style="display: flex; flex-direction: column; gap: 3px; min-width: 0;">
+      <div style="font-size: 12px; color: #6b6a66;"><span style="font-weight: 600; color: #1f1e1d;">John</span> · 13:09</div>
+      <div>那就是昨天合并时漏了一半。我今晚补一条测试盯住写路径。</div>
+      <div style="font-size: 11px; color: #8a8986;">已读 · 张三、王五</div>
+    </div>
+  </div>
+
+  <div style="font-size: 11px; font-weight: 600; color: #8a8986; letter-spacing: 0.04em; margin-top: 4px;">agent 起草，本人改过后发出</div>
+  <div style="display: flex; gap: 10px;">
+    <span style="flex: 0 0 26px; width: 26px; height: 26px; border-radius: 50%; background: #0077be; color: #fff; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;">J</span>
+    <div style="display: flex; flex-direction: column; gap: 3px; min-width: 0;">
+      <div style="font-size: 12px; color: #6b6a66;"><span style="font-weight: 600; color: #1f1e1d;">John</span> · 13:20 · <span style="color: #8a8986;">小评起草</span><a href="#" style="margin-left: 6px; font-size: 11px; color: #8a8986; text-decoration: underline; text-underline-offset: 2px;">去掉</a></div>
+      <div>今天把设置页的缓存写路径修好了，顺手补了测试。这是能跑的 demo，有人要看缓存键是怎么设计的，问小评。</div>
+    </div>
+  </div>
+
+  <div style="font-size: 11px; font-weight: 600; color: #8a8986; letter-spacing: 0.04em; margin-top: 4px;">agent 在权限内自己说的</div>
+  <div style="display: flex; gap: 10px;">
+    <span style="flex: 0 0 26px; width: 26px; height: 26px; border-radius: 7px; background: #1f1e1d; color: #fff; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; position: relative;">评<span style="position: absolute; right: -4px; bottom: -4px; width: 13px; height: 13px; border-radius: 50%; background: #0077be; color: #fff; font-size: 8px; display: inline-flex; align-items: center; justify-content: center; border: 1.5px solid #fff;">J</span></span>
+    <div style="display: flex; flex-direction: column; gap: 4px; min-width: 0;">
+      <div style="font-size: 12px; color: #6b6a66;"><span style="font-weight: 600; color: #1f1e1d;">小评</span> · 代 John · 13:05</div>
+      <div>失效是 10 分钟。写路径还是旧键，所以看着像没生效。我觉得这块值得重构，但不急。</div>
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+        <span style="display: inline-flex; align-items: center; gap: 4px; border: 1px solid #1a7f4b; color: #1a7f4b; border-radius: 10px; padding: 1px 8px; font-size: 11px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4 4 10-10"/></svg>已核实 · npm test 退出 0</span>
+        <span style="display: inline-flex; align-items: center; gap: 4px; border: 1px solid #c9c6bf; color: #6b6a66; border-radius: 10px; padding: 1px 8px; font-size: 11px;">意见 · 值得重构</span>
+        <a href="#" style="font-size: 11px; color: #2a6fdb;">回到那一轮</a>
+      </div>
+      <div style="font-size: 11px; color: #8a8986;">「已核实」只贴在宿主看到的事实上；「回到那一轮」只有 John 看得见</div>
+    </div>
+  </div>
+
+  <div style="font-size: 11px; font-weight: 600; color: #8a8986; letter-spacing: 0.04em; margin-top: 4px;">agent 转述主人的话</div>
+  <div style="display: flex; gap: 10px;">
+    <span style="flex: 0 0 26px; width: 26px; height: 26px; border-radius: 7px; background: #1f1e1d; color: #fff; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; position: relative;">评<span style="position: absolute; right: -4px; bottom: -4px; width: 13px; height: 13px; border-radius: 50%; background: #0077be; color: #fff; font-size: 8px; display: inline-flex; align-items: center; justify-content: center; border: 1.5px solid #fff;">J</span></span>
+    <div style="display: flex; flex-direction: column; gap: 4px; min-width: 0;">
+      <div style="font-size: 12px; color: #6b6a66;"><span style="font-weight: 600; color: #1f1e1d;">小评</span> · 代 John · 18:40</div>
+      <div>John 在路上，让我带句话：</div>
+      <div style="border-left: 3px solid #0077be; padding: 4px 10px; background: #f5f8fc; border-radius: 0 6px 6px 0;"><span style="font-weight: 600;">John：</span>我会晚到二十分钟，先别合并。<span style="display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; font-size: 11px; color: #1a7f4b;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4 4 10-10"/></svg>本人原话</span></div>
+      <div style="font-size: 11px; color: #8a8986;">引文钉住的是 John 在手机桥里发的那个块，改不了，也补不了</div>
+    </div>
+  </div>
+
+  <div style="font-size: 11px; font-weight: 600; color: #8a8986; letter-spacing: 0.04em; margin-top: 4px;">社交秘书的第一句</div>
+  <div style="display: flex; gap: 10px;">
+    <span style="flex: 0 0 26px; width: 26px; height: 26px; border-radius: 7px; background: #1f1e1d; color: #fff; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; position: relative;">评<span style="position: absolute; right: -4px; bottom: -4px; width: 13px; height: 13px; border-radius: 50%; background: #0077be; color: #fff; font-size: 8px; display: inline-flex; align-items: center; justify-content: center; border: 1.5px solid #fff;">J</span></span>
+    <div style="display: flex; flex-direction: column; gap: 3px; min-width: 0;">
+      <div style="font-size: 12px; color: #6b6a66;"><span style="font-weight: 600; color: #1f1e1d;">小评</span> · 代 John · 22:15</div>
+      <div>我是小评，代 John，他现在不在。他昨天刚把设置页的缓存修好，你可以留言，也可以问我这个项目公开的部分。</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":440,"height":680}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

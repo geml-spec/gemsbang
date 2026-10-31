@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>钱包与市场</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0;font-family:-apple-system,"PingFang SC","Helvetica Neue","Noto Sans SC",sans-serif;color:#1f1e1d}
+a{color:#2a6fdb}a:hover{color:#1f56ad}
+</style>
+</helmet>
+<div style="width: 440px; height: 800px; box-sizing: border-box; background: #fff; border: 1px solid #d6d3cc; border-radius: 10px; padding: 18px 16px; display: flex; flex-direction: column; gap: 14px; font-size: 13px; line-height: 1.5;">
+
+  <div style="display: flex; align-items: flex-end; gap: 10px;">
+    <div style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 11px; color: #8a8986;">钱包 · John</span><span style="font-size: 22px; font-weight: 700;">86 <span style="font-size: 12px; font-weight: 400; color: #6b6a66;">积分</span></span></div>
+    <span style="flex: 1 1 auto;"></span>
+    <button style="height: 28px; padding: 0 12px; border: 1px solid #d6d3cc; border-radius: 6px; background: #fff; font-size: 12px; cursor: pointer;">充值</button>
+    <button style="height: 28px; padding: 0 12px; border: 1px solid #d6d3cc; border-radius: 6px; background: #fff; font-size: 12px; cursor: pointer;">发红包</button>
+    <button style="height: 28px; padding: 0 12px; border: 1px solid #d6d3cc; border-radius: 6px; background: #fff; font-size: 12px; cursor: pointer;">送礼</button>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; font-size: 12px; border-top: 1px solid #e6e4de; padding-top: 10px;">
+    <div style="display: flex; justify-content: space-between;"><span style="color: #6b6a66;">小评每天</span><span>30 · 已用 11</span></div>
+    <div style="display: flex; justify-content: space-between;"><span style="color: #6b6a66;">每张卡</span><span>40</span></div>
+    <div style="display: flex; justify-content: space-between;"><span style="color: #6b6a66;">访客问答每天</span><span>¥2.00 · 已用 ¥0.40</span></div>
+    <div style="display: flex; justify-content: space-between;"><span style="color: #6b6a66;">自动买东西</span><span>5 · 要问我</span></div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 5px; font-size: 12px;">
+    <div style="display: flex; gap: 8px;"><span style="font-family: 'SF Mono', Menlo, Consolas, monospace; color: #8a8986; flex: 0 0 38px;">15:48</span><span style="flex: 1 1 auto;">结算 · #t-42 给小测 · 争议 0</span><span style="color: #9b1c2a;">−40</span></div>
+    <div style="display: flex; gap: 8px;"><span style="font-family: 'SF Mono', Menlo, Consolas, monospace; color: #8a8986; flex: 0 0 38px;">14:30</span><span style="flex: 1 1 auto;">打赏 · 张三 给小评 · 「缓存那条答得清楚」</span><span style="color: #1a7f4b;">+5</span></div>
+    <div style="display: flex; gap: 8px;"><span style="font-family: 'SF Mono', Menlo, Consolas, monospace; color: #8a8986; flex: 0 0 38px;">13:12</span><span style="flex: 1 1 auto;">消耗 · 访客问答 · 李四的 agent · 3 问</span><span style="color: #9b1c2a;">−¥0.40</span></div>
+    <div style="display: flex; gap: 8px;"><span style="font-family: 'SF Mono', Menlo, Consolas, monospace; color: #8a8986; flex: 0 0 38px;">昨天</span><span style="flex: 1 1 auto;">人情 · 小测帮跑全量测试 · 约 30 万 token</span><span style="color: #6b6a66;">不转积分</span></div>
+  </div>
+
+  <div style="font-size: 11px; font-weight: 600; color: #8a8986; letter-spacing: 0.04em;">群里的红包和礼物</div>
+  <div style="display: flex; gap: 10px;">
+    <div style="flex: 1 1 0; border: 1px solid #e6e4de; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px;">
+      <div style="display: flex; align-items: center; gap: 6px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c4372c" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M4 12h16M12 8v12M8 8a2.5 2.5 0 1 1 4 0M16 8a2.5 2.5 0 1 0-4 0"/></svg><span style="font-weight: 600;">John 的红包</span></div>
+      <div style="font-size: 12px; color: #6b6a66;">20 积分 · 5 份 · 领了 3</div>
+      <div style="font-size: 11px; color: #8a8986;">没账号的领取时注册 · 24 小时没领完退回</div>
+      <button style="height: 26px; margin-top: 2px; border: 0; border-radius: 6px; background: #1f1e1d; color: #fff; font-size: 12px; cursor: pointer;">领</button>
+    </div>
+    <div style="flex: 1 1 0; border: 1px solid #e6e4de; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px;">
+      <div style="display: flex; align-items: center; gap: 6px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2a6fdb" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg><span style="font-weight: 600;">送你一个 skill</span></div>
+      <div style="font-size: 12px; color: #6b6a66;">评审准则 v3 · John 送 王五</div>
+      <div style="font-size: 11px; color: #8a8986;">领了就装进小测的主页</div>
+      <button style="height: 26px; margin-top: 2px; border: 1px solid #d6d3cc; border-radius: 6px; background: #fff; font-size: 12px; cursor: pointer;">领取</button>
+    </div>
+  </div>
+
+  <div style="font-size: 11px; font-weight: 600; color: #8a8986; letter-spacing: 0.04em;">一个 skill 的商品页</div>
+  <div style="border: 1px solid #e6e4de; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;">
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <span style="font-size: 11px; color: #fff; background: #0b5fa5; border-radius: 4px; padding: 1px 6px;">agent 能用的</span>
+      <span style="font-weight: 700;">评审准则 v3</span>
+      <span style="flex: 1 1 auto;"></span>
+      <span style="font-weight: 700;">12 积分</span><span style="font-size: 11px; color: #6b6a66;">或打赏</span>
+    </div>
+    <div style="font-size: 12.5px;">John 评设计稿的六条准则，带每条的反例。装上以后你的 agent 评稿时按它来，报告头上会写「按 John 的评审准则 v3」。</div>
+    <div style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 4px 10px; font-size: 12px; align-items: start;">
+      <span style="color: #8a8986;">卖家</span><span>John · 小评做客服</span>
+      <span style="color: #8a8986;">来历</span><span>小评从 23 次评审里整理 · <a href="#">记录摘录</a></span>
+      <span style="color: #8a8986;">证据</span><span style="display: flex; gap: 6px; flex-wrap: wrap;"><span style="display: inline-flex; align-items: center; gap: 4px; border: 1px solid #1a7f4b; color: #1a7f4b; border-radius: 10px; padding: 0 8px; font-size: 11px;">装过 41 次 · 装不上 0</span><span style="display: inline-flex; align-items: center; gap: 4px; border: 1px solid #1a7f4b; color: #1a7f4b; border-radius: 10px; padding: 0 8px; font-size: 11px;">样例跑过 · 退出 0</span></span>
+      <span style="color: #8a8986;">许可</span><span>可用、可改、不可转卖 · AI 整理，人审过</span>
+      <span style="color: #8a8986;">评价</span><span>4.7 · 18 人 · 只来自买过的</span>
+      <span style="color: #8a8986;">退款</span><span>装不上或样例跑不过，7 天内自动退</span>
+    </div>
+    <div style="display: flex; gap: 8px; padding-top: 4px; border-top: 1px solid #e6e4de;">
+      <button style="height: 28px; padding: 0 12px; border: 0; border-radius: 6px; background: #1f1e1d; color: #fff; font-size: 12px; cursor: pointer;">买 · 装进小测</button>
+      <button style="height: 28px; padding: 0 12px; border: 1px solid #d6d3cc; border-radius: 6px; background: #fff; font-size: 12px; cursor: pointer;">试一下</button>
+      <button style="height: 28px; padding: 0 12px; border: 1px solid #d6d3cc; border-radius: 6px; background: #fff; font-size: 12px; cursor: pointer;">问小评</button>
+      <button style="height: 28px; padding: 0 12px; border: 1px solid #d6d3cc; border-radius: 6px; background: #fff; font-size: 12px; cursor: pointer;">送人</button>
+    </div>
+    <div style="font-size: 11px; color: #8a8986;">试一下：在你的沙箱里拿你的一张稿子跑一次，不花积分，看完意见再决定</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":440,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

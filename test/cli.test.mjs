@@ -20,7 +20,7 @@ function run(args, cwd) {
   return { code: r.status ?? 1, out: r.stdout ?? "", err: r.stderr ?? "" };
 }
 const ws = () => mkdtempSync(join(tmpdir(), "gemworks-"));
-const USAGE = /usage: gemworks <check\|snapshot\|verify\|export\|init\|use\|migrate\|status\|mark\|unmark\|advance\|pause\|resume\|rollback\|run\|hook\|mcp>/;
+const USAGE = /usage: gemworks <check\|snapshot\|verify\|export\|init\|use\|migrate\|status\|mark\|unmark\|advance\|pause\|resume\|rollback\|run\|hook\|mcp\|relay\|connect>/;
 
 test("no verb prints usage and exits 2", () => {
   const r = run([]);

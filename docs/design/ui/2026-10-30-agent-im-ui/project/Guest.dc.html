@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>访客网页：分享卡与问作者的 agent</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0;font-family:-apple-system,"PingFang SC","Helvetica Neue","Noto Sans SC",sans-serif;color:#1f1e1d}
+a{color:#2a6fdb}a:hover{color:#1f56ad}
+</style>
+</helmet>
+<div style="width: 1000px; height: 920px; box-sizing: border-box; background: #e4e2dc; padding: 20px; display: flex;">
+  <div style="flex: 1 1 auto; display: flex; flex-direction: column; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 8px 28px rgba(0,0,0,0.14); border: 1px solid #d6d3cc;">
+    <div style="height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 14px; font-size: 12px; color: #6b6a66; border-bottom: 1px solid #e6e4de; background: #f0eee9;">
+      <span style="display: inline-flex; gap: 5px;"><span style="width: 10px; height: 10px; border-radius: 50%; background: #d6d3cc;"></span><span style="width: 10px; height: 10px; border-radius: 50%; background: #d6d3cc;"></span><span style="width: 10px; height: 10px; border-radius: 50%; background: #d6d3cc;"></span></span>
+      <span style="flex: 1 1 auto; text-align: center; font-family: 'SF Mono', Menlo, Consolas, monospace;">gemsbang.im/c/7f3a</span>
+      <span style="width: 40px;"></span>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 10px; padding: 12px 24px; border-bottom: 1px solid #e6e4de;">
+      <svg viewBox="0 0 64 64" width="20" height="20" role="img" aria-label="Gemsbang"><defs><linearGradient id="gb" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="64"><stop offset="0" stop-color="#42b4f4"/><stop offset="1" stop-color="#0a74c0"/></linearGradient></defs><circle cx="32" cy="32" r="32" fill="url(#gb)"/><path d="M20 16H44A6 6 0 0 1 50 22V38A6 6 0 0 1 44 44H28L17 53L19 44H20A6 6 0 0 1 14 38V22A6 6 0 0 1 20 16Z" fill="#fff"/><path d="M26 23H38L43 29L32 40L21 29Z" fill="url(#gb)"/><path d="M21 29H43M26 23l6 6 6-6M32 29v11" fill="none" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><circle cx="52" cy="12" r="8" fill="#ef3b3f" stroke="#fff" stroke-width="2.5"/></svg>
+      <span style="font-weight: 700; font-size: 14px;">Gemsbang</span>
+      <span style="flex: 1 1 auto;"></span>
+      <span style="font-size: 12px; color: #6b6a66;">不用注册就能看、能问</span>
+      <button style="height: 30px; padding: 0 12px; border: 1px solid #d6d3cc; border-radius: 6px; background: #fff; font-size: 12px; cursor: pointer;">登录</button>
+      <button style="height: 30px; padding: 0 12px; border: 0; border-radius: 6px; background: #1f1e1d; color: #fff; font-size: 12px; cursor: pointer;">要一个自己的 agent</button>
+    </div>
+
+    <div style="flex: 1 1 auto; display: flex; min-height: 0;">
+      <div style="flex: 1 1 auto; min-width: 0; padding: 24px 28px; display: flex; flex-direction: column; gap: 16px; overflow: hidden; border-right: 1px solid #e6e4de;">
+        <div style="display: flex; gap: 12px; align-items: center;">
+          <span style="flex: 0 0 40px; width: 40px; height: 40px; border-radius: 10px; background: #1f1e1d; color: #fff; font-size: 17px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; position: relative;">评<span style="position: absolute; right: -5px; bottom: -5px; width: 17px; height: 17px; border-radius: 50%; background: #0077be; color: #fff; font-size: 9px; display: inline-flex; align-items: center; justify-content: center; border: 2px solid #fff;">J</span></span>
+          <div style="display: flex; flex-direction: column; gap: 2px;">
+            <div style="font-size: 18px; font-weight: 700;">设置页导出 PDF，能跑的</div>
+            <div style="font-size: 12px; color: #6b6a66;">John 的作品 · 小评做的 · 63 轮 · 2026-10-30 · <span style="display: inline-flex; align-items: center; gap: 3px; color: #1a7f4b;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4 4 10-10"/></svg>有凭据</span></div>
+          </div>
+        </div>
+
+        <div style="height: 240px; border-radius: 10px; background: #e9e7e1; display: flex; align-items: center; justify-content: center; color: #6b6a66; position: relative;">
+          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l5.5-3.5z"/></svg>
+          <span style="position: absolute; left: 12px; bottom: 10px; font-size: 11px; background: rgba(255,255,255,0.9); border-radius: 5px; padding: 2px 8px;">demo.mp4 · 38 秒 · 在你的浏览器里也能试：打开 demo</span>
+        </div>
+
+        <div style="font-size: 13.5px; line-height: 1.6; color: #3d3c38;">今天把设置页的缓存写路径修好了，顺手补了导出 PDF。字体加载失败时会回退，不会整页空白。有人要看缓存键是怎么设计的，问小评。<span style="font-size: 11px; color: #8a8986; margin-left: 6px;">小评起草 · John 改过</span></div>
+
+        <div style="font-size: 11px; font-weight: 600; color: #8a8986; letter-spacing: 0.04em;">怎么做出来的 · 回放</div>
+        <div style="display: flex; align-items: center; gap: 0; font-size: 11.5px; color: #6b6a66;">
+          <span style="display: flex; flex-direction: column; align-items: center; gap: 3px; width: 120px;"><span style="width: 10px; height: 10px; border-radius: 50%; background: #1f1e1d;"></span><span>第 1 轮 · 读代码</span></span><span style="flex: 1 1 auto; height: 1px; background: #c9c6bf;"></span>
+          <span style="display: flex; flex-direction: column; align-items: center; gap: 3px; width: 120px;"><span style="width: 10px; height: 10px; border-radius: 50%; background: #0b5fa5;"></span><span>第 14 轮 · 计划</span></span><span style="flex: 1 1 auto; height: 1px; background: #c9c6bf;"></span>
+          <span style="display: flex; flex-direction: column; align-items: center; gap: 3px; width: 120px;"><span style="width: 10px; height: 10px; border-radius: 50%; background: #c4372c;"></span><span>第 38 轮 · 测试挂了</span></span><span style="flex: 1 1 auto; height: 1px; background: #c9c6bf;"></span>
+          <span style="display: flex; flex-direction: column; align-items: center; gap: 3px; width: 120px;"><span style="width: 10px; height: 10px; border-radius: 50%; background: #1a7f4b;"></span><span>第 41 轮 · 全过 ✓</span></span><span style="flex: 1 1 auto; height: 1px; background: #c9c6bf;"></span>
+          <span style="display: flex; flex-direction: column; align-items: center; gap: 3px; width: 120px;"><span style="width: 10px; height: 10px; border-radius: 50%; background: #0b5fa5;"></span><span>第 63 轮 · 交付</span></span>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 6px 10px; font-size: 12.5px; border-top: 1px solid #e6e4de; padding-top: 12px;">
+          <span style="color: #8a8986;">公开范围</span><span>src/settings/* 和这 63 轮的记录 · 其余不在此，小评不会讲</span>
+          <span style="color: #8a8986;">证据</span><span style="display: flex; gap: 6px; flex-wrap: wrap;"><span style="display: inline-flex; align-items: center; gap: 4px; border: 1px solid #1a7f4b; color: #1a7f4b; border-radius: 10px; padding: 0 8px; font-size: 11px;">npm test 退出 0 · 598 条</span><span style="display: inline-flex; align-items: center; gap: 4px; border: 1px solid #1a7f4b; color: #1a7f4b; border-radius: 10px; padding: 0 8px; font-size: 11px;">out/*.pdf 存在</span></span>
+          <span style="color: #8a8986;">拿去用</span><span><a href="#">仓库 deliver/t-42 @ a1b2c3</a> · 许可：MIT · AI 生成，人审过</span>
+          <span style="color: #8a8986;">打赏</span><span style="display: flex; gap: 6px;"><button style="height: 24px; padding: 0 9px; border: 1px solid #d6d3cc; border-radius: 6px; background: #fff; font-size: 11px; cursor: pointer;">2 积分</button><button style="height: 24px; padding: 0 9px; border: 1px solid #d6d3cc; border-radius: 6px; background: #fff; font-size: 11px; cursor: pointer;">5 积分</button><span style="font-size: 11px; color: #8a8986; align-self: center;">打赏要登录</span></span>
+        </div>
+      </div>
+
+      <div style="width: 340px; flex: 0 0 340px; display: flex; flex-direction: column; background: #fafaf8;">
+        <div style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid #e6e4de; font-size: 13px;">
+          <span style="flex: 0 0 24px; width: 24px; height: 24px; border-radius: 6px; background: #1f1e1d; color: #fff; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; position: relative;">评<span style="position: absolute; right: -4px; bottom: -4px; width: 12px; height: 12px; border-radius: 50%; background: #0077be; color: #fff; font-size: 7px; display: inline-flex; align-items: center; justify-content: center; border: 1.5px solid #fafaf8;">J</span></span>
+          <span style="font-weight: 600;">问作者的 agent</span>
+          <span style="flex: 1 1 auto;"></span>
+          <span style="font-size: 11px; color: #6b6a66;">小评 · 空闲</span>
+        </div>
+        <div style="flex: 1 1 auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; font-size: 13px; line-height: 1.5; overflow: hidden;">
+          <div style="align-self: center; font-size: 11px; color: #8a8986; text-align: center;">你是访客，不用注册 · 今天还能问 3 句 · 这几句的 token John 请客</div>
+          <div style="display: flex; gap: 8px;">
+            <span style="flex: 0 0 24px; width: 24px; height: 24px; border-radius: 50%; background: #c9c6bf; color: #fff; font-size: 11px; display: inline-flex; align-items: center; justify-content: center;">客</span>
+            <div style="min-width: 0;">缓存键为什么不用 URL 直接当键？</div>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <span style="flex: 0 0 24px; width: 24px; height: 24px; border-radius: 6px; background: #1f1e1d; color: #fff; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; position: relative;">评<span style="position: absolute; right: -4px; bottom: -4px; width: 12px; height: 12px; border-radius: 50%; background: #0077be; color: #fff; font-size: 7px; display: inline-flex; align-items: center; justify-content: center; border: 1.5px solid #fafaf8;">J</span></span>
+            <div style="display: flex; flex-direction: column; gap: 4px; min-width: 0;">
+              <div>因为同一个 URL 带不同的用户态会出不同的配置。第 14 轮定的是「用户 id 加 URL 的哈希」，决策记在 <a href="#">#decision-17</a>。</div>
+              <div style="font-size: 11px; color: #8a8986;">小评 · 代 John · 只讲公开范围内的</div>
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <span style="flex: 0 0 24px; width: 24px; height: 24px; border-radius: 50%; background: #c9c6bf; color: #fff; font-size: 11px; display: inline-flex; align-items: center; justify-content: center;">客</span>
+            <div style="min-width: 0;">你们生产环境用的是哪家对象存储？</div>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <span style="flex: 0 0 24px; width: 24px; height: 24px; border-radius: 6px; background: #1f1e1d; color: #fff; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; position: relative;">评<span style="position: absolute; right: -4px; bottom: -4px; width: 12px; height: 12px; border-radius: 50%; background: #0077be; color: #fff; font-size: 7px; display: inline-flex; align-items: center; justify-content: center; border: 1.5px solid #fafaf8;">J</span></span>
+            <div style="display: flex; flex-direction: column; gap: 4px; min-width: 0;">
+              <div>这个不在公开范围里，我不讲。想问的话可以给 John 留言。</div>
+            </div>
+          </div>
+        </div>
+        <div style="padding: 10px 16px 14px 16px; border-top: 1px solid #e6e4de; display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <div style="flex: 1 1 auto; height: 36px; border: 1px solid #d6d3cc; border-radius: 9px; background: #fff; display: flex; align-items: center; padding: 0 12px; font-size: 13px; color: #8a8986;">问小评…</div>
+            <button style="height: 36px; padding: 0 12px; border: 0; border-radius: 8px; background: #1f1e1d; color: #fff; font-size: 12px; cursor: pointer;">问</button>
+          </div>
+          <div style="font-size: 11px; color: #8a8986; text-align: center;">想要一个知道你自己项目的 agent？<a href="#">注册，先给你一个托管的</a></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1000,"height":920}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

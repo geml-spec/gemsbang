@@ -51,7 +51,8 @@ export interface BoardQuery {
 const FILTERS: readonly JournalFilter[] = ["all", "artifacts", "evidence", "moves", "refusals", "depends"];
 
 /** The tabs on this host: every tab but the sessions tab. */
-export const DSH_TABS: readonly BoardTab[] = TAB_IDS.filter((id) => id !== "sessions");
+/** The tabs this host draws: not the sessions tab (dsh keeps its own sessions), not the 消息 page (the IM lives in the Claude Code shell's bridge, plan D). */
+export const DSH_TABS: readonly BoardTab[] = TAB_IDS.filter((id) => id !== "sessions" && id !== "messages");
 
 /** The presses this host runs; a button for any other op is not drawn. */
 const HOST_OPS: ReadonlySet<string> = new Set(["advance", "mark", "pause", "resume", "learn", "tab", "filter", "expand", "refresh"]);

@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>任务卡</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0;font-family:-apple-system,"PingFang SC","Helvetica Neue","Noto Sans SC",sans-serif;color:#1f1e1d}
+a{color:#2a6fdb}a:hover{color:#1f56ad}
+</style>
+</helmet>
+<div style="width: 440px; height: 860px; box-sizing: border-box; background: #fff; border: 1px solid #d6d3cc; border-radius: 10px; padding: 18px 16px; display: flex; flex-direction: column; gap: 14px; font-size: 13px; line-height: 1.5;">
+
+  <div style="display: flex; align-items: center; gap: 8px;">
+    <span style="font-size: 11px; color: #fff; background: #1f1e1d; border-radius: 4px; padding: 1px 6px;">任务卡</span>
+    <span style="font-weight: 700; font-size: 14px;">#t-42 给设置页加导出 PDF</span>
+    <span style="flex: 1 1 auto;"></span>
+    <span style="font-size: 11px; color: #6b6a66; border: 1px solid #d6d3cc; border-radius: 4px; padding: 0 5px;">外包</span>
+  </div>
+
+  <div style="display: flex; align-items: center; gap: 0; font-size: 11px; color: #8a8986;">
+    <span style="display: flex; align-items: center; gap: 4px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: #1a7f4b;"></span>草拟</span><span style="flex: 1 1 auto; height: 1px; background: #1a7f4b; margin: 0 4px;"></span>
+    <span style="display: flex; align-items: center; gap: 4px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: #1a7f4b;"></span>发布</span><span style="flex: 1 1 auto; height: 1px; background: #1a7f4b; margin: 0 4px;"></span>
+    <span style="display: flex; align-items: center; gap: 4px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: #1a7f4b;"></span>待放行</span><span style="flex: 1 1 auto; height: 1px; background: #1a7f4b; margin: 0 4px;"></span>
+    <span style="display: flex; align-items: center; gap: 4px; color: #1f1e1d; font-weight: 700;"><span style="width: 10px; height: 10px; border-radius: 50%; background: #1f1e1d;"></span>进行中</span><span style="flex: 1 1 auto; height: 1px; background: #e6e4de; margin: 0 4px;"></span>
+    <span>已交付</span><span style="flex: 1 1 auto; height: 1px; background: #e6e4de; margin: 0 4px;"></span>
+    <span>验收中</span><span style="flex: 1 1 auto; height: 1px; background: #e6e4de; margin: 0 4px;"></span>
+    <span>已接受</span>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px 10px; align-items: start; font-size: 12.5px; border-top: 1px solid #e6e4de; padding-top: 12px;">
+    <span style="color: #8a8986;">去办</span><span>设置页右上角一个按钮，把当前配置导出成 PDF</span>
+    <span style="color: #8a8986;">验收</span>
+    <div style="display: flex; flex-direction: column; gap: 5px;">
+      <div style="display: flex; align-items: center; gap: 6px;"><span style="width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid #c9c6bf;"></span><span>1 单元测试通过</span><span style="font-size: 11px; color: #6b6a66; border: 1px solid #d6d3cc; border-radius: 4px; padding: 0 5px;">命令 · npm test</span></div>
+      <div style="display: flex; align-items: center; gap: 6px;"><span style="width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid #c9c6bf;"></span><span>2 导出的文件能打开</span><span style="font-size: 11px; color: #6b6a66; border: 1px solid #d6d3cc; border-radius: 4px; padding: 0 5px;">文件 · out/*.pdf</span></div>
+      <div style="display: flex; align-items: center; gap: 6px;"><span style="width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid #c9c6bf;"></span><span>3 按钮位置和样式对</span><span style="font-size: 11px; color: #6b6a66; border: 1px solid #d6d3cc; border-radius: 4px; padding: 0 5px;">审读 · ui-rubric</span></div>
+      <div style="font-size: 11px; color: #8a8986;">前两条小评在你的沙箱里重跑，第三条审读完进「验收」等你勾</div>
+    </div>
+    <span style="color: #8a8986;">带去</span><span>src/settings/* · 决策 #17 <span style="font-size: 11px; color: #8a8986;">· 排除：private</span></span>
+    <span style="color: #8a8986;">谁干</span>
+    <div style="display: flex; align-items: center; gap: 8px;"><span style="width: 22px; height: 22px; border-radius: 6px; background: #5b5a57; color: #fff; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; position: relative;">测<span style="position: absolute; right: -4px; bottom: -4px; width: 12px; height: 12px; border-radius: 50%; background: #8a4fb0; color: #fff; font-size: 7px; display: inline-flex; align-items: center; justify-content: center; border: 1.5px solid #fff;">王</span></span><span>小测 · 代 王五</span><span style="font-size: 11px; color: #1a7f4b; border: 1px solid #1a7f4b; border-radius: 4px; padding: 0 5px;">API · 可接单</span></div>
+    <span style="color: #8a8986;">在哪干</span><span>小测的客房 · 读、改、测 · 不联网</span>
+    <span style="color: #8a8986;">上限</span><span>40 积分已托管，用了 18 · 6 小时，用了 1 小时 20 分</span>
+    <span style="color: #8a8986;">心跳</span><span style="display: flex; align-items: center; gap: 6px;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #1a7f4b;"></span>3 分钟前写了记录</span>
+  </div>
+
+  <div style="font-size: 11px; font-weight: 600; color: #8a8986; letter-spacing: 0.04em; margin-top: 2px;">记录 · 挂在卡上</div>
+  <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12px;">
+    <div style="display: flex; gap: 8px;"><span style="font-family: 'SF Mono', Menlo, Consolas, monospace; color: #8a8986; flex: 0 0 38px;">14:02</span><span style="color: #1a7f4b;">●</span><span>凭据 · npm test 退出 1 · 2 条失败</span></div>
+    <div style="display: flex; gap: 8px;"><span style="font-family: 'SF Mono', Menlo, Consolas, monospace; color: #8a8986; flex: 0 0 38px;">14:11</span><span>→</span><span>verify → implement · 「导出用的字体没打包」</span></div>
+    <div style="display: flex; gap: 8px;"><span style="font-family: 'SF Mono', Menlo, Consolas, monospace; color: #8a8986; flex: 0 0 38px;">14:19</span><span style="color: #0b5fa5;">◆</span><span>产物 · src/settings/export.ts · 第 3 版</span></div>
+  </div>
+
+  <div style="display: flex; gap: 8px; border-top: 1px solid #e6e4de; padding-top: 12px;">
+    <button style="height: 28px; padding: 0 12px; border: 1px solid #d6d3cc; border-radius: 6px; background: #fff; font-size: 12px; cursor: pointer;">问一句</button>
+    <button style="height: 28px; padding: 0 12px; border: 1px solid #d6d3cc; border-radius: 6px; background: #fff; font-size: 12px; cursor: pointer;">要求交回</button>
+    <button style="height: 28px; padding: 0 12px; border: 1px solid #d6d3cc; border-radius: 6px; background: #fff; font-size: 12px; cursor: pointer; color: #9b1c2a;">争议</button>
+  </div>
+
+  <div style="font-size: 11px; font-weight: 600; color: #8a8986; letter-spacing: 0.04em; margin-top: 8px;">同一张卡的另外两种走法</div>
+
+  <div style="border: 1px solid #e6e4de; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px;">
+    <div style="display: flex; align-items: center; gap: 8px;"><span style="font-weight: 600;">接力</span><span style="font-size: 11px; color: #6b6a66;">小测额度用完，交回半成品</span></div>
+    <div style="display: flex; align-items: center; gap: 0; font-size: 11px; color: #8a8986;">
+      <span style="color: #1f1e1d;">进行中</span><span style="margin: 0 6px;">→</span><span style="color: #1f1e1d;">发布</span><span style="margin: 0 6px;">→</span><span>下一个接单方从第 3 版和记录接着干</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px; border: 1px dashed #c9c6bf; border-radius: 6px; padding: 6px 10px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b6a66" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg><span style="font-size: 12px;">半成品 v0.3 · 带记录 · 只能当接力的输入</span></div>
+  </div>
+
+  <div style="border: 1px solid #e6e4de; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px;">
+    <div style="display: flex; align-items: center; gap: 8px;"><span style="font-weight: 600;">竞赛</span><span style="font-size: 11px; color: #6b6a66;">三个槽，只对机器验法的卡开放</span></div>
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <div style="display: flex; align-items: center; gap: 8px;"><span style="width: 18px; height: 18px; border-radius: 5px; background: #5b5a57; color: #fff; font-size: 9px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;">测</span><span>小测 · 代 王五</span><span style="flex: 1 1 auto;"></span><span style="font-size: 11px; color: #1a7f4b;">已交付 · 1 ✓ 2 ✓</span></div>
+      <div style="display: flex; align-items: center; gap: 8px;"><span style="width: 18px; height: 18px; border-radius: 5px; background: #5b5a57; color: #fff; font-size: 9px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;">码</span><span>小码 · 代 赵六</span><span style="flex: 1 1 auto;"></span><span style="font-size: 11px; color: #6b6a66;">进行中 · 52 分钟</span></div>
+      <div style="display: flex; align-items: center; gap: 8px;"><span style="width: 18px; height: 18px; border-radius: 5px; background: #5b5a57; color: #fff; font-size: 9px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;">托</span><span>托管 agent · 代 孙七</span><span style="flex: 1 1 auto;"></span><span style="font-size: 11px; color: #6b6a66;">进行中 · 40 分钟</span></div>
+    </div>
+    <div style="font-size: 11px; color: #8a8986;">验收中按通过情况选一份接受，其余关闭；奖金只给那一份，参与补偿 2 积分</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":440,"height":860}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

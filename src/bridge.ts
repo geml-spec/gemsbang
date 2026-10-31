@@ -49,13 +49,20 @@ import { newTurns, queuedMessages, readTranscript, slugOf, transcriptEvents, typ
 import { branchesElsewhere, markOpen } from "./session-store.js";
 import { statSync } from "node:fs";
 import type { HostInfo } from "./hosts/claude-code/env.js";
+import { answer as imAnswer, answerGrant, dropDraft, nextPrompt, markRead, reportPresence, say, sendDraft } from "./daemon/deliver.js";
+import { homeDir, readConfig, readDraft, readMirror, writeDraft } from "./daemon/home.js";
+import { readForTool, statusView, threadView } from "./daemon/view.js";
+import { cardCall } from "./daemon/cards.js";
+import { isCardAction } from "./core/im/card.js";
+import { parseAddress } from "./core/im/address.js";
+import type { ImStatus } from "./daemon/view.js";
 import { mediaTodoCount } from "./media-todo.js";
 import { addWorkflow, bundledWorkflows, importWorkflow, projectWorkflows, suggestWorkflow, useWorkflow } from "./project.js";
 import { timelineOf } from "./timeline.js";
 import { flowPicture } from "./core/picture.js";
 import { runVerb } from "./verbs.js";
 import { dependsOf, fileUnitOf, itemProgress, loadWorkspace, openWorkspace, resolveWorkflow, sideFlows, workflowNameOf, type FlowCache, type Opened, type ShellView, type Workspace } from "./workspace.js";
-import type { Backfill, BoardData, BoardItem, BridgeRequest, BridgeResponse, Made, MadeEntry, Artifacts, ShellStatus, TimelineEntry, TodoCount } from "./hosts/claude-code/protocol.js";
+import type { Backfill, BoardData, BoardItem, BridgeOp, BridgeRequest, BridgeResponse, Made, MadeEntry, Artifacts, ShellStatus, TimelineEntry, TodoCount } from "./hosts/claude-code/protocol.js";
 
 type Answered = Extract<BridgeResponse, { ok: true }>;
 
@@ -718,7 +725,17 @@ function moveEarlierLayout(root: string): void {
 
 /** One request, answered. A throw — from opening the workspace or from the op — becomes an error answer with no shell: the last good one stays. */
 export async function handleRequest(req: BridgeRequest): Promise<BridgeResponse> {
+  // A card's verb (plan G) waits on the relay; every other op is answered from the files.
+  if (req.op === "im-card") return answerCard(req);
   return answerRequest(req);
+}
+
+/** `im-card`: one verb to the relay with the home's token (daemon/cards.ts); a relay out of reach, or its refusal, is the error. */
+async function answerCard(req: BridgeRequest & { op: "im-card" }): Promise<BridgeResponse> {
+  const shell = shellAt(req);
+  if (!isCardAction(req.action)) return { v: 1, ok: false, error: `gemworks: 不认识的动作：${String(req.action)}`, shell };
+  const r = await cardCall(imHome(), { action: req.action, ...(req.owner !== undefined ? { owner: req.owner } : {}), ...(req.id !== undefined ? { id: req.id } : {}), ...(req.body !== undefined ? { body: req.body } : {}), ...(req.as !== undefined ? { as: req.as } : {}) });
+  return r.ok ? { v: 1, ok: true, shell, card: r.answer } : { v: 1, ok: false, error: `gemworks: ${r.reason}`, shell };
 }
 
 /** handleRequest, answered at once: every op is answered without waiting on anything but the files and git. */
@@ -732,6 +749,120 @@ export function answerRequest(req: BridgeRequest): BridgeResponse {
     return { v: 1, ok: false, error: `gemworks: ${message}` };
   } finally {
     endGitRequest();
+  }
+}
+
+const imHome = (): string => homeDir(undefined, process.env);
+const nowIso = (): string => new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+
+/** The IM for an answer that carries it (status, refresh, attention): nothing when the daemon's home is not set up. */
+function imOf(req: BridgeRequest): { im?: ImStatus } {
+  const home = imHome();
+  return readConfig(home) === undefined ? {} : { im: statusView(home, req.imSeen ?? {}, nowIso()) };
+}
+
+/** The agent an IM request signs as: the one named, else the first the home lists. */
+function imAgentOf(home: string, named: string | undefined): string | undefined {
+  const agents = Object.keys(readConfig(home)?.agents ?? {});
+  return named !== undefined && named !== "" ? named : agents[0];
+}
+
+/** A need's button (§6.9) acted on: an ask answered as a reply, a request granted or refused, 重试 left to the daemon. */
+function answerNeed(home: string, key: string, action: string, text: string | undefined, now: string): { ok: true } | { ok: false; reason: string } {
+  if (key.startsWith("offline:")) return { ok: true };
+  const a = parseAddress(key);
+  const c = readConfig(home);
+  if (a === undefined || a.block === undefined || c === undefined) return { ok: false, reason: `不认识这件事：${key}` };
+  const venue = /^venues\/([^/]+)\.geml$/.exec(a.doc);
+  if (venue !== null) {
+    const reply = action === "自己写" ? text?.trim() ?? "" : action;
+    if (reply === "") return { ok: false, reason: "自己写：缺正文" };
+    say(home, { as: "person", owner: a.owner, venue: venue[1]!, text: reply, replyTo: a.block }, now);
+    return { ok: true };
+  }
+  if (/^people\/[^/]+\.geml$/.test(a.doc)) {
+    const request = readMirror(home, c.relay.name, a.owner, a.doc).blocks.find((b) => b.id === a.block);
+    const from = typeof request?.value["from"] === "string" ? request.value["from"] : undefined, block = typeof request?.value["block"] === "string" ? request.value["block"] : undefined;
+    const person = from?.replace(/^person:/, "").replace(/^agent:[^@]+@/, "");
+    if (person === undefined || block === undefined) return { ok: false, reason: `没镜像到这个申请：${key}` };
+    const which = action === "允许一次" ? "allow-once" : action === "允许此人" ? "allow-person" : action === "拒绝" ? "refuse" : undefined;
+    if (which === undefined) return { ok: false, reason: `放行没有这个答复：${action}` };
+    answerGrant(home, { request: a.block, person, block, action: which }, now);
+    return { ok: true };
+  }
+  return { ok: false, reason: `不认识这件事：${key}` };
+}
+
+/** The IM's ops, by their prefix: a type the switch below leaves out, so `answer`'s own switch stays exhaustive. */
+type ImOp = Extract<BridgeOp, { op: `im-${string}` }>;
+const isImRequest = (req: BridgeRequest): req is BridgeRequest & ImOp => req.op.startsWith("im-");
+
+/** The IM ops: over the daemon's home, before any workspace opens (a project without a workflow still has its messages). */
+function answerIm(req: BridgeRequest & ImOp): BridgeResponse {
+  const home = imHome();
+  const now = nowIso();
+  const shell = (): ShellStatus => shellAt(req);
+  const yes = (extra: Omit<Answered, "v" | "ok" | "shell"> = {}): BridgeResponse => ({ v: 1, ok: true, shell: shell(), ...extra });
+  const no = (reason: string): BridgeResponse => ({ v: 1, ok: false, error: `gemworks: ${reason}`, shell: shell() });
+  try {
+    switch (req.op) {
+      case "im-status": return yes(imOf(req));
+      case "im-venue": {
+        const thread = threadView(home, req.owner, req.id, req.limit ?? 50, now);
+        return thread === undefined ? no(`没有这个场所的镜像：${req.owner}/${req.id}`) : yes({ thread });
+      }
+      case "im-say": {
+        const as = req.as === undefined || req.as === "person" ? "person" : `agent:${req.as.replace(/^agent:/, "")}`;
+        const e = say(home, { as, owner: req.owner, venue: req.venue, text: req.text, ...(req.kind !== undefined ? { kind: req.kind } : {}), ...(req.ask !== undefined ? { ask: req.ask } : {}), ...(req.evidence !== undefined ? { evidence: req.evidence } : {}), ...(req.parts !== undefined ? { parts: req.parts } : {}), ...(req.opinion !== undefined ? { opinion: req.opinion } : {}), ...(req.turn !== undefined ? { turn: req.turn } : {}), ...(req.replyTo !== undefined ? { replyTo: req.replyTo } : {}), ...(req.session !== undefined ? { session: req.session } : {}) }, now);
+        return yes({ text: `排入待发 ${e.id}` });
+      }
+      case "im-next": {
+        const d = nextPrompt(home, req.agent, now);
+        if (d === undefined) return yes();
+        if (req.take === true) markRead(home, req.agent, d.item, now);
+        return yes({ delivered: d });
+      }
+      case "im-answer": {
+        const answered = imAnswer(home, req.agent, req.item, req.text, now, { ...(req.kind !== undefined ? { kind: req.kind } : {}), ...(req.evidence !== undefined ? { evidence: req.evidence } : {}), ...(req.session !== undefined ? { session: req.session } : {}) });
+        return yes({ answered });
+      }
+      case "im-draft": {
+        if (!req.send) return dropDraft(home, req.id, now) ? yes() : no(`没有这份草稿：${req.id}`);
+        if (req.text !== undefined) { const d = readDraft(home, req.id); if (d === undefined) return no(`没有这份草稿：${req.id}`); writeDraft(home, { ...d, body: { ...d.body, text: req.text } }); }
+        const sent = sendDraft(home, req.id, now);
+        return sent === undefined ? no(`没有这份草稿：${req.id}`) : yes({ answered: sent });
+      }
+      case "im-presence": {
+        reportPresence(home, req.agent, req.session, { host: "claude-code", login: req.login ?? "subscription", presence: req.presence, ...(req.task !== undefined ? { task: req.task } : {}) }, now);
+        return yes();
+      }
+      case "im-need": {
+        const r = answerNeed(home, req.key, req.action, req.text, now);
+        return r.ok ? yes() : no(r.reason);
+      }
+      case "im-card": return no("卡的动作走 handleRequest，不走同步的答复");
+      case "im-read": {
+        if (req.owner === undefined && req.venue === undefined && req.src === undefined) {
+          const s = statusView(home, {}, now);
+          return yes({ text: s.venues.length === 0 ? "没有场所" : s.venues.map((v) => `${v.kindWord}「${v.name}」（${v.owner}/${v.id}）· ${v.status}`).join("\n") });
+        }
+        return yes({ text: readForTool(home, { ...(req.owner !== undefined ? { owner: req.owner } : {}), ...(req.venue !== undefined ? { venue: req.venue } : {}), ...(req.src !== undefined ? { src: req.src } : {}), ...(req.limit !== undefined ? { limit: req.limit } : {}) }) });
+      }
+      case "im-forward": {
+        const c = readConfig(home);
+        if (c === undefined) return no("没有 connect.json：先 gemworks connect setup");
+        const short = /^([^/#\s]+)\/([^/#\s]+)#([^\s#]+)$/.exec(req.from);
+        const src = short !== null ? `https://${c.relay.name}/${short[1]}/venues/${short[2]}.geml#${short[3]}` : req.from;
+        if (parseAddress(src) === undefined) return no(`不是地址，也不是 owner/venue#message：${req.from}`);
+        const to = /^([^/#\s]+)\/([^/#\s]+)$/.exec(req.to);
+        if (to === null) return no(`要转去哪个场所（owner/id）：${req.to}`);
+        const as = req.as === undefined || req.as === "person" ? "person" : `agent:${req.as.replace(/^agent:/, "")}`;
+        const e = say(home, { as, owner: to[1]!, venue: to[2]!, text: req.note ?? "转发", parts: [{ src }], ...(req.session !== undefined ? { session: req.session } : {}) }, now);
+        return yes({ text: `排入待发 ${e.id}` });
+      }
+    }
+  } catch (e) {
+    return no(e instanceof Error ? e.message : String(e));
   }
 }
 
@@ -756,12 +887,13 @@ function answer(req: BridgeRequest): BridgeResponse {
     if (!r.ok) return { v: 1, ok: false, error: r.reason, shell: shellAt(req) };
     return { v: 1, ok: true, shell: shellAt(req), workflows: bundledWorkflows(), installed: projectWorkflows(root), added: { name: r.name, activated: r.activated } };
   }
+  if (isImRequest(req)) return answerIm(req);
   if (req.op === "status" && req.migrate === true) moveEarlierLayout(root);
   const opened = openFor(req);
   if (!opened.ok) {
     const shell = notOpened(opened, req.root);
     const asks = req.op === "verb" || req.op === "mark" || req.op === "advance" || req.op === "bind" || req.op === "learn" || req.op === "pause" || req.op === "resume" || req.op === "rollback" || req.op === "export";
-    return asks ? { v: 1, ok: false, error: opened.reason, shell } : { v: 1, ok: true, shell };
+    return asks ? { v: 1, ok: false, error: opened.reason, shell } : { v: 1, ok: true, shell, ...(req.op === "status" || req.op === "refresh" || req.op === "attention" ? imOf(req) : {}) };
   }
   const ws = opened.ws;
   /** The answer: the view after the op, and the new stage text when the op changed the stage. */
@@ -771,12 +903,12 @@ function answer(req: BridgeRequest): BridgeResponse {
   switch (req.op) {
     case "status":
       // The shared session logs' directory too: a session's first prompt is written before the slower facts come.
-      return ok(ws.view(), { sessions: join(journalBaseOf(root), GEML_DIR, SESSIONS_DIR) });
+      return ok(ws.view(), { sessions: join(journalBaseOf(root), GEML_DIR, SESSIONS_DIR), ...imOf(req) });
     case "refresh": {
       // The workspace opened for this request: git's facts it read are this moment's.
       const change = ws.refresh({ reread: false });
       const view = ws.view();
-      return ok(view, { entered: change.entered, todo: todoOf(ws, root, view) }, change.context);
+      return ok(view, { entered: change.entered, todo: todoOf(ws, root, view), ...imOf(req) }, change.context);
     }
     case "before": {
       const { view, refusal, recorded } = attributionFor(req, ws).before(req.tool, req.callId, req.input, resolve(root, req.cwd), req.waived);
@@ -851,7 +983,7 @@ function answer(req: BridgeRequest): BridgeResponse {
       // This session marked open; the branches the other open sessions work on, whose steps are theirs to take.
       const host = hostOf(root);
       const elsewhere = req.session !== undefined ? branchesElsewhere(markOpen(root, TRANSCRIPT_HOST, req.session), host.branch) : [];
-      return ok(view, { attention: { ahead: ahead ?? [], prs: open ?? [], ...(unread.length > 0 ? { unread } : {}), ...(bump !== undefined ? { bump: { version: bump.version, path: bump.path } } : {}), ...(elsewhere.length > 0 ? { elsewhere } : {}) }, host, sessions: join(journalBaseOf(root), GEML_DIR, SESSIONS_DIR) });
+      return ok(view, { attention: { ahead: ahead ?? [], prs: open ?? [], ...(unread.length > 0 ? { unread } : {}), ...(bump !== undefined ? { bump: { version: bump.version, path: bump.path } } : {}), ...(elsewhere.length > 0 ? { elsewhere } : {}) }, host, sessions: join(journalBaseOf(root), GEML_DIR, SESSIONS_DIR), ...imOf(req) });
     }
     case "artifacts": {
       syncArtifacts(ws, root, req.elsewhere, req.notMade);

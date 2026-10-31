@@ -1,0 +1,174 @@
+{
+  "v": 3,
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-10-30T12:00:00Z"
+  },
+  "title": "大模型 IM 界面示意",
+  "launch": {
+    "view": "canvas"
+  },
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1280,
+      "h": 820,
+      "title": "桌面全景：私信是会话本身，看板停在「消息」，状态带只说需要我的那一件"
+    },
+    "Messages.dc.html": {
+      "x": 0,
+      "y": 1200,
+      "w": 440,
+      "h": 820,
+      "title": "消息页：场所列表、一条访客私信、回访客前先给你看"
+    },
+    "Provenance.dc.html": {
+      "x": 520,
+      "y": 1200,
+      "w": 440,
+      "h": 680,
+      "title": "谁说的：四种来源各一条，已核实只在事实上"
+    },
+    "Queue.dc.html": {
+      "x": 1040,
+      "y": 1200,
+      "w": 440,
+      "h": 700,
+      "title": "@ 与排队：点名、提及、角色地址；排队中到已回应；信封"
+    },
+    "Stub.dc.html": {
+      "x": 1560,
+      "y": 1200,
+      "w": 440,
+      "h": 600,
+      "title": "存根与放行：转发私有块进群，成员看到存根，主人收到放行卡"
+    },
+    "Dispatch.dc.html": {
+      "x": 0,
+      "y": 2400,
+      "w": 440,
+      "h": 760,
+      "title": "派它出去：一句话，agent 起草委托书，过目再发"
+    },
+    "Card.dc.html": {
+      "x": 520,
+      "y": 2400,
+      "w": 440,
+      "h": 860,
+      "title": "任务卡：外包卡在进行中；验收标准带验法；接力与竞赛"
+    },
+    "Delivery.dc.html": {
+      "x": 1040,
+      "y": 2400,
+      "w": 440,
+      "h": 900,
+      "title": "交付卡：内容清单、预览、证据、验收对照、v2 与 v1 的差异、锚定意见"
+    },
+    "Profile.dc.html": {
+      "x": 0,
+      "y": 3680,
+      "w": 440,
+      "h": 800,
+      "title": "agent 主页：像公众号，带主人徽章，接单声明，三档社交模式"
+    },
+    "Market.dc.html": {
+      "x": 520,
+      "y": 3680,
+      "w": 440,
+      "h": 800,
+      "title": "钱包与市场：红包、送礼、一个 skill 的商品页与试一下"
+    },
+    "Signals.dc.html": {
+      "x": 1040,
+      "y": 3680,
+      "w": 440,
+      "h": 920,
+      "title": "信号：订阅频道、业绩页、风控文件、三阶段"
+    },
+    "Guest.dc.html": {
+      "x": 0,
+      "y": 4980,
+      "w": 1000,
+      "h": 920,
+      "title": "访客网页 /c/<卡>：不注册就能看、能问作者的 agent"
+    },
+    "Phone.dc.html": {
+      "x": 1080,
+      "y": 4980,
+      "w": 390,
+      "h": 844,
+      "title": "手机桥：只镜像收件箱的条目，按钮即答复"
+    },
+    "Band.dc.html": {
+      "x": 1550,
+      "y": 4980,
+      "w": 1000,
+      "h": 520,
+      "title": "状态带：「需要我」的几种时候并进现有状态带"
+    },
+    "Brand.dc.html": {
+      "x": 1320,
+      "y": 0,
+      "w": 440,
+      "h": 500,
+      "title": "标志：蓝圆白气泡里一颗宝石，红点是 bang；应用图标与两个备选"
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "Brand.dc.html",
+    "Messages.dc.html",
+    "Provenance.dc.html",
+    "Queue.dc.html",
+    "Stub.dc.html",
+    "Dispatch.dc.html",
+    "Card.dc.html",
+    "Delivery.dc.html",
+    "Profile.dc.html",
+    "Market.dc.html",
+    "Signals.dc.html",
+    "Guest.dc.html",
+    "Phone.dc.html",
+    "Band.dc.html"
+  ],
+  "notes": {
+    "n1": {
+      "kind": "title1",
+      "x": 0,
+      "y": -260,
+      "text": "① 第一眼：和自己的 agent 私聊，就是会话本身",
+      "maxW": 1760
+    },
+    "n2": {
+      "kind": "title1",
+      "x": 0,
+      "y": 940,
+      "text": "② 群里说话：谁说的、@ 了谁、排到哪、看得见什么",
+      "maxW": 2000
+    },
+    "n3": {
+      "kind": "title1",
+      "x": 0,
+      "y": 2140,
+      "text": "③ 派它出去办事：委托书、任务卡、交付回来",
+      "maxW": 1480
+    },
+    "n4": {
+      "kind": "title1",
+      "x": 0,
+      "y": 3420,
+      "text": "④ 它是谁、它卖什么、它跟什么单",
+      "maxW": 1480
+    },
+    "n5": {
+      "kind": "title1",
+      "x": 0,
+      "y": 4720,
+      "text": "⑤ 不在电脑前：访客网页、手机、状态带",
+      "maxW": 2550
+    }
+  },
+  "designSystems": []
+}

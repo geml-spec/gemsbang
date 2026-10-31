@@ -3,7 +3,7 @@
 // (src/hosts/claude-code/protocol.ts) and the board's (actions.ts, inbox.ts,
 // sessions.ts, settings.ts).
 export type GemworksJson = null | boolean | number | string | readonly GemworksJson[] | { readonly [key: string]: GemworksJson }
-export type GemworksTab = 'sessions' | 'flow' | 'items' | 'journal' | 'tools'
+export type GemworksTab = 'messages' | 'sessions' | 'flow' | 'items' | 'journal' | 'tools'
 
 declare module 'claude-code' {
   interface PluginState {
@@ -138,6 +138,19 @@ declare module 'claude-code' {
       openSession: string | null
       /** The time of the newest other session's decision already put beside a prompt. */
       decisionsSeen: string | null
+      /** The IM (plan D): the daemon's home as the bridge last carried it (ImStatus); null, not read or not set up. */
+      im: GemworksJson
+      /** The thread open on the 消息 page ({ owner, id, thread? }); null, the list. */
+      imThread: GemworksJson
+      /** The message the page's box answers (its id), or null. */
+      imReply: string | null
+      /** The turn a queue item started (ImTurn), while it runs; null otherwise. */
+      imTurn: GemworksJson
+      /** Per venue (owner/id), the last message id the page showed. */
+      imSeen: GemworksJson
+      imCardWords: GemworksJson
+      /** The presence last reported (`<presence>` or `<presence>:<task>`), so a repeat costs no bridge call. */
+      imPresence: string | null
       /** A command in this turn made a commit: the turn's end records the commits. */
       committed: boolean
       /** The turn unfolded on the session tab: { id, answer } — answer null while the record is read, "" when it holds none. */

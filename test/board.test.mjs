@@ -87,13 +87,13 @@ const flow = (over = {}) => flowRows({ board: BOARD, status: status(), columns: 
 const pic = (rows) => rows.find((r) => r.kind === "flow");
 const items = (over = {}) => itemRows({ board: BOARD, status: status(), inbox: [], columns: 80, t: wordsFor("zh"), now: NOW, doneOpen: false, ...over });
 
-test("the board's id, the dialog's, and its five tabs in order, opening on the work items (spec §8.2)", () => {
+test("the board's id, the dialog's, and its six tabs in order, opening on the work items (spec §8.2)", () => {
   assert.equal(BOARD_ID, "gemworks-board");
   assert.equal(DIALOG_ID, "gemworks-dialog");
-  assert.deepEqual(TAB_IDS, ["sessions", "items", "journal", "flow", "tools"]);
+  assert.deepEqual(TAB_IDS, ["messages", "sessions", "items", "journal", "flow", "tools"]);
   assert.equal(HOME_TAB, "items");
-  assert.deepEqual(tabs().map((x) => [x.id, x.label]), [["sessions", "会话"], ["items", "工作项"], ["journal", "记录"], ["flow", "流程"], ["tools", "工具"]]);
-  assert.deepEqual(tabs(wordsFor("en")).map((x) => x.label), ["Session", "Items", "Journal", "Flow", "Tools"]);
+  assert.deepEqual(tabs().map((x) => [x.id, x.label]), [["messages", "消息"], ["sessions", "会话"], ["items", "工作项"], ["journal", "记录"], ["flow", "流程"], ["tools", "工具"]]);
+  assert.deepEqual(tabs(wordsFor("en")).map((x) => x.label), ["Messages", "Session", "Items", "Journal", "Flow", "Tools"]);
 });
 
 test("流程: the flow by its title, the picture, a row of its states, and the one picked — its uses and their tools, what it may not use, what runs everywhere", () => {

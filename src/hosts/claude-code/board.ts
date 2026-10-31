@@ -20,7 +20,7 @@ import { groupOf, guessUse, keyWords, type ToolGroup } from "./usage.js";
 export const BOARD_ID = "gemworks-board";
 export const DIALOG_ID = "gemworks-dialog";
 
-export const TAB_IDS: readonly BoardTab[] = ["sessions", "items", "journal", "flow", "tools"];
+export const TAB_IDS: readonly BoardTab[] = ["messages", "sessions", "items", "journal", "flow", "tools"];
 
 /** The tab the board opens on: the work items, what waits on the person on top. */
 export const HOME_TAB: BoardTab = "items";
@@ -29,6 +29,7 @@ export const HOME_TAB: BoardTab = "items";
 export function tabs(t: T = ZH): { id: BoardTab; label: string }[] {
   const label = (id: BoardTab): string => {
     switch (id) {
+      case "messages": return t("消息");
       case "sessions": return t("会话");
       case "flow": return t("流程");
       case "items": return t("工作项");
@@ -40,7 +41,7 @@ export function tabs(t: T = ZH): { id: BoardTab; label: string }[] {
 }
 
 /** What a field's text means when submitted. */
-export type InputField = "add-tool" | "import-workflow" | "tool-search" | "new-use" | "memory-hook";
+export type InputField = "add-tool" | "import-workflow" | "tool-search" | "new-use" | "memory-hook" | "im-say" | "im-draft" | "im-card";
 
 export type BoardRow =
   | { kind: "text"; text: string; tone: Tone }
@@ -114,6 +115,7 @@ export const ICON_SVG: Readonly<Record<Icon, string>> = { ask: iconSvg("ask"), d
  */
 export type Glyph = BoardTab | "share" | "settings" | "upgrade" | "about" | "artifact" | "evidence" | "move" | "refused" | "start" | "waits" | "done" | "board" | "split" | "delete" | "locate" | "unfold" | "fold" | "box" | "boxon" | "go";
 const GLYPH_PATH: Readonly<Record<Glyph, string>> = {
+  messages: '<path d="M4 6h16v10H10l-5 4z"/><path d="M8 11h8"/>',
   sessions: '<path d="M4 5h16v11H9l-5 4z"/>',
   flow: '<rect x="3" y="3" width="7" height="5" rx="1"/><rect x="14" y="16" width="7" height="5" rx="1"/><path d="M6.5 8v5h11v3"/>',
   items: '<path d="M10 6h10M10 12h10M10 18h10M3.5 6l1.5 1.5L7.5 5M3.5 12l1.5 1.5L7.5 11M3.5 18l1.5 1.5L7.5 17"/>',
@@ -206,6 +208,9 @@ export function inputAction(field: InputField, typed: string, target?: string): 
   if (field === "import-workflow") return { op: "import", path: s };
   if (field === "new-use") return target === undefined ? undefined : { op: "learn", lessons: [{ kind: "use", key: target, use: s }] };
   if (field === "memory-hook") return target === undefined ? undefined : { op: "memory-set", file: target, hook: s };
+  if (field === "im-say") return { op: "im-say", text: s };
+  if (field === "im-draft") return target === undefined ? undefined : { op: "im-draft", id: target, send: true, text: s };
+  if (field === "im-card") return target === undefined ? undefined : { op: "im-card-words", card: target, text: s };
   const [tool, use] = s.split("|").map((x) => x.trim());
   if (tool === undefined || tool === "") return undefined;
   return { op: "learn", lessons: use !== undefined && use !== "" ? [{ kind: "use", key: tool, use }] : [{ kind: "allow", key: tool, where: "*" }] };
