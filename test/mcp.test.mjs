@@ -67,7 +67,7 @@ test("gemworks mcp in a project with no workflow says so in the tool result", ()
 });
 
 test("the skill tells MCP-only hosts to read the stage every turn, that tool evidence is never written there, and to leave a person's verbs alone", () => {
-  const skill = readFileSync(new URL("../skills/gemworks-mcp/SKILL.md", import.meta.url), "utf8");
+  const skill = readFileSync(new URL("../host-skills/gemworks-mcp/SKILL.md", import.meta.url), "utf8");
   assert.match(skill, /^---\r?\nname: gemworks-mcp\r?\n/); // a Windows checkout may turn the newlines into CRLF
   for (const needle of [".geml/context.geml", "`status`", "`move`", "`set`", "gemworks advance", "gemworks mcp", "shows Gemworks no tool calls", "tools.geml"]) assert.ok(skill.includes(needle), needle);
   assert.doesNotMatch(skill, /flow_status|flow_context|flow_transition|only-in|signal/);

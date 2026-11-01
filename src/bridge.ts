@@ -56,6 +56,10 @@ import { cardCall } from "./daemon/cards.js";
 import { briefCall } from "./daemon/brief.js";
 import { answerExecNeed, commandConnector, objectToSignal } from "./daemon/exec.js";
 import { RelayClient, reasonOf } from "./daemon/client.js";
+import { Daemon } from "./daemon/sync.js";
+import { phoneCode } from "./daemon/phone-code.js";
+import { gbHome } from "./gemsbang/home.js";
+import { runGb } from "./gemsbang/ops.js";
 import { performanceLine, signalFaults, signalInput, signalText, type Performance, type Signal } from "./core/im/signal.js";
 import { isCardAction } from "./core/im/card.js";
 import { parseAddress } from "./core/im/address.js";
@@ -125,6 +129,12 @@ function problemShell(text: string, quiet: boolean): ShellStatus {
 }
 
 /** The shell for a workspace that did not open: quiet when the project simply has no workflow. */
+/** The shell of a bare request: no status and no policy; the CLI's locale and versions, for the IM's words and its header. */
+function bareShell(): ShellStatus {
+  const locale = localeOf();
+  return { status: null, policy: null, contextKey: null, ...(locale !== undefined ? { locale } : {}), versions: { gemworks: gemworksVersion(), parser: PARSER_VERSION } };
+}
+
 function notOpened(opened: Extract<Opened, { ok: false }>, root: string): ShellStatus {
   const shell = problemShell(opened.reason, opened.kind === "none");
   // No workflow: which bundled one fits this project, so the band can offer it.
@@ -153,6 +163,8 @@ function attributionFor(req: BridgeRequest, ws: Workspace): Attribution {
 
 /** The shell after a change made beside the workspace (use, add). */
 function shellAt(req: BridgeRequest): ShellStatus {
+  // A bare request (the gemsbang plugin) opens no workspace: the project's .geml/ is gemworks's, never started from here.
+  if (req.bare === true) return bareShell();
   const opened = openFor(req);
   return opened.ok ? shellOf(opened.ws.view(), req.root) : notOpened(opened, req.root);
 }
@@ -733,6 +745,9 @@ export async function handleRequest(req: BridgeRequest): Promise<BridgeResponse>
   if (req.op === "im-card") return answerCard(req);
   if (req.op === "im-brief") return answerBrief(req);
   if (req.op === "im-signal") return answerSignal(req);
+  if (req.op === "im-sync") return answerSync(req);
+  if (req.op === "im-phone-code") return answerPhoneCode(req);
+  if (req.op === "gb") return answerGb(req);
   // A press on the local execution module's ask or 卡住 (§10.5) may place an order: it waits on the connector.
   if (req.op === "im-need" && /^exec(-stuck)?:/.test(req.key)) return answerExecPress(req);
   return answerRequest(req);
@@ -751,6 +766,31 @@ async function answerBrief(req: BridgeRequest & { op: "im-brief" }): Promise<Bri
   const shell = shellAt(req);
   const r = await briefCall(imHome(), { text: req.text, ...(req.agent !== undefined ? { agent: req.agent } : {}), ...(req.card !== undefined ? { card: req.card } : {}) }, new Date().toISOString());
   return r.ok ? { v: 1, ok: true, shell, brief: { venue: r.venue } } : { v: 1, ok: false, error: `gemworks: ${r.reason}`, shell };
+}
+
+/** `im-sync` (重连): one round of the daemon's sync from here (daemon/sync.ts), the state it writes the band's 断了 or not; the IM after it. */
+async function answerSync(req: BridgeRequest & { op: "im-sync" }): Promise<BridgeResponse> {
+  const shell = shellAt(req);
+  const home = imHome();
+  if (readConfig(home) === undefined) return { v: 1, ok: false, error: "gemworks: 没有 connect.json：先 gemworks connect setup", shell };
+  const r = await new Daemon({ home }).syncOnce();
+  if (!r.connected) return { v: 1, ok: false, error: `gemworks: 连不上中继：${r.error ?? ""}`, shell };
+  return { v: 1, ok: true, shell, im: statusView(home, req.imSeen ?? {}, nowIso()), text: `同步过：${r.docs} 份文档${r.pushed > 0 ? `，推出 ${r.pushed} 条` : ""}${r.left > 0 ? `，还有 ${r.left} 条待发` : ""}` };
+}
+
+/** `gb`: one call of gemsbang's client (gemsbang/ops.ts) at its home, in this machine's zone; a refusal is the call's own result, not the bridge's. */
+async function answerGb(req: BridgeRequest & { op: "gb" }): Promise<BridgeResponse> {
+  const shell = shellAt(req);
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+  const gb = await runGb(req.call, req.args ?? {}, { home: gbHome(), now, zoneMinutes: -new Date().getTimezoneOffset() });
+  return { v: 1, ok: true, shell, gb };
+}
+
+/** `im-phone-code`: a one-time code from the relay (daemon/phone-code.ts) for the phone's /bind. */
+async function answerPhoneCode(req: BridgeRequest & { op: "im-phone-code" }): Promise<BridgeResponse> {
+  const shell = shellAt(req);
+  const r = await phoneCode(imHome());
+  return r.ok ? { v: 1, ok: true, shell, phoneCode: r.code } : { v: 1, ok: false, error: `gemworks: ${r.reason}`, shell };
 }
 
 /** `im-need` on an `exec:` key: the module answers (daemon/exec.ts), an order through the risk file's connector command. */
@@ -913,6 +953,8 @@ function answerIm(req: BridgeRequest & ImOp): BridgeResponse {
       case "im-card": return no("卡的动作走 handleRequest，不走同步的答复");
       case "im-brief": return no("起草走 handleRequest，不走同步的答复");
       case "im-signal": return no("信号走 handleRequest，不走同步的答复");
+      case "im-sync": return no("同步走 handleRequest，不走同步的答复");
+      case "im-phone-code": return no("绑定码走 handleRequest，不走同步的答复");
       case "im-read": {
         if (req.owner === undefined && req.venue === undefined && req.src === undefined) {
           const s = statusView(home, {}, now);
@@ -960,6 +1002,8 @@ function answer(req: BridgeRequest): BridgeResponse {
     return { v: 1, ok: true, shell: shellAt(req), workflows: bundledWorkflows(), installed: projectWorkflows(root), added: { name: r.name, activated: r.activated } };
   }
   if (isImRequest(req)) return answerIm(req);
+  // gemsbang's client waits on its relay: handleRequest answers it; the files alone cannot.
+  if (req.op === "gb") return { v: 1, ok: false, error: "gemworks: gemsbang 的调用走 handleRequest", shell: shellAt(req) };
   if (req.op === "status" && req.migrate === true) moveEarlierLayout(root);
   const opened = openFor(req);
   if (!opened.ok) {

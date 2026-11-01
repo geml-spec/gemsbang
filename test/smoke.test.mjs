@@ -14,29 +14,25 @@ test("package identity: the renamed bundle", () => {
   assert.deepEqual([lock.version, lock.packages[""].version, claude.version, codex.version], Array(4).fill(pkg.version), "every manifest names the package's version: the board shows the plugin's, so a bump that missed one would say the wrong version");
   assert.equal(pkg.bin["gemworks"], "dist/cli.js");
   assert.equal(pkg.dsh.bundle.patch, "./cordis.patch.yml");
-  assert.deepEqual([...pkg.files].sort(), [".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".codexignore", "LICENSE", "THIRD_PARTY_NOTICES.md", "client.js", "coach", "codex", "cordis.patch.yml", "dist", "examples", "hooks", "host-skills", "skills", "spec", "types", "workflows"]);
+  assert.deepEqual([...pkg.files].sort(), [".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".codexignore", "LICENSE", "THIRD_PARTY_NOTICES.md", "client.js", "coach", "codex", "cordis.patch.yml", "dist", "examples", "hooks", "host-skills", "spec", "types", "workflows"]);
   assert.equal(pkg.scripts.postinstall, undefined, "no lifecycle scripts: installing must never need allowBuilds");
 });
 
-test("the split-session skill ships with the plugin: the board's 从这里拆分 and 删除 hand the model its script", () => {
-  const skill = readFileSync(new URL("../skills/split-session/SKILL.md", here), "utf8");
+test("the split-session skill ships to the hosts that read host-skills/: their board's 从这里拆分 and 删除 hand the model its script", () => {
+  const skill = readFileSync(new URL("../host-skills/split-session/SKILL.md", here), "utf8");
   assert.match(skill, /^name: split-session$/m);
   assert.match(skill, /split-session\.mjs/);
-  const script = readFileSync(new URL("../skills/split-session/split-session.mjs", here), "utf8");
+  const script = readFileSync(new URL("../host-skills/split-session/split-session.mjs", here), "utf8");
   assert.match(script, /^import fs from 'node:fs';$/m, "plain Node, no dependencies");
   assert.match(script, /if \(cmd === 'list'\) cmdList\(\);/);
   assert.match(script, /else if \(cmd === 'split'\) cmdSplit\(\);/);
 });
 
-test("the skills: Claude Code reads gemworks's own from skills/ and depends on the geml plugin for its two; the hosts that read one folder read host-skills/, gemworks's two word for word and the geml plugin's two as copies", () => {
+test("the skills: the Claude Code plugin (gemsbang, the IM alone) loads none and needs no other plugin; the hosts that read one folder read host-skills/, gemworks's two and the geml plugin's two", () => {
   const claude = JSON.parse(readFileSync(new URL("../.claude-plugin/plugin.json", here), "utf8"));
-  assert.deepEqual(claude.dependencies, ["geml@geml"]);
-  assert.ok(!existsSync(new URL("../skills/geml", here)) && !existsSync(new URL("../skills/geml-code-graph", here)), "no copy where Claude Code loads skills");
-  assert.ok(existsSync(new URL("../host-skills/geml/SKILL.md", here)));
-  assert.ok(existsSync(new URL("../host-skills/geml-code-graph/SKILL.md", here)));
-  for (const f of ["gemworks-mcp/SKILL.md", "split-session/SKILL.md", "split-session/split-session.mjs"]) {
-    assert.equal(readFileSync(new URL(`../host-skills/${f}`, here), "utf8"), readFileSync(new URL(`../skills/${f}`, here), "utf8"), `${f}: the same in both`);
-  }
+  assert.equal(claude.dependencies, undefined);
+  assert.ok(!existsSync(new URL("../skills", here)), "nothing where Claude Code loads a plugin's skills: gemworks's own stay gemworks's");
+  for (const f of ["geml/SKILL.md", "geml-code-graph/SKILL.md", "gemworks-mcp/SKILL.md", "split-session/SKILL.md", "split-session/split-session.mjs"]) assert.ok(existsSync(new URL(`../host-skills/${f}`, here)), f);
   assert.deepEqual(pkg.pi.skills, ["./host-skills"]);
   assert.equal(JSON.parse(readFileSync(new URL("../.codex-plugin/plugin.json", here), "utf8")).skills, "./host-skills/");
   assert.match(readFileSync(new URL("../cordis.patch.yml", here), "utf8"), /new URL\('host-skills\/', baseUrl\)/);

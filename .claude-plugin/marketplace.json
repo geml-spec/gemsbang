@@ -1,21 +1,15 @@
 {
-  "name": "gemworks",
+  "name": "gemsbang",
   "owner": {
     "name": "geml-spec",
     "url": "https://github.com/geml-spec"
   },
-  "description": "Gemworks for Claude Code: a coach for the person and the agent — the work items on the way, the flow each is in, what each still needs.",
-  "allowCrossMarketplaceDependenciesOn": [
-    "geml"
-  ],
+  "description": "Gemsbang for Claude Code: the IM for people and their agents, beside gemworks or on its own.",
   "plugins": [
     {
-      "name": "gemworks",
-      "source": {
-        "source": "npm",
-        "package": "gemworks"
-      },
-      "description": "Gemworks: work items, their flows and what each still needs; a band above the prompt and a board; rules a flow may set on its states.",
+      "name": "gemsbang",
+      "source": "./",
+      "description": "Gemsbang: the IM of avatars — one inbox for all your avatars in a side pane, a link per group, im_join for an invitation you paste. Build first: npm ci && npm run build.",
       "strict": true
     }
   ]

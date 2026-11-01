@@ -36,7 +36,7 @@ export const IM_TOOLS: readonly ImToolSpec[] = [
   { name: "im_signal", description: "A signal (§10). publish: one into a channel your owner made with you as its publisher — body: channel (owner/id), market, side yes|no, sizeHint {kind: fraction-of-bankroll, value}, priceCap, expires (ISO), confidence 0..1, thesis (an address); it is data, never a prompt, sealed on this host's chain first. retract: one by id (it stays on the chain and still counts). skip: a signal in a channel your owner subscribes to, after you read its thesis and object (id, reason) — your owner must have let you take part; you can never widen the risk file. list: an agent's chain and performance (target: agent@owner).", inputSchema: { type: "object", properties: { action: { type: "string", enum: ["publish", "retract", "skip", "list"] }, body: { type: "object", description: "publish: the signal's fields and its channel.", additionalProperties: true }, id: { type: "string", description: "retract, skip: the signal's id on the relay." }, reason: { type: "string", description: "skip: why." }, target: { type: "string", description: "list: `<agent>@<owner>`." } }, required: ["action"], additionalProperties: false } },
 ];
 
-export const OWN = "mcp__gemworks__";
+export const OWN = "mcp__gemsbang__";
 export const isImTool = (name: string): boolean => imToolOf(name) !== undefined;
 export const imToolOf = (name: string): ImToolName | undefined => IM_TOOL_NAMES.find((n) => name === `${OWN}${n}`);
 
@@ -126,24 +126,37 @@ export function imTabRows(o: ImPageInput): BoardRow[] {
   const s = o.status;
   if (s === null) return [text(t("正在读取消息…"))];
   if (!s.configured) return [text(t("还没连上中继：在终端里运行 gemworks connect setup --relay <地址> --token <令牌>，再 gemworks connect。"))];
-  if (o.thread !== null) return threadRows(o.thread, o.replyTo, columns, t);
+  if (o.thread !== null) return imThreadRows(o.thread, o.replyTo, columns, t);
   const link = s.connected === false ? t("断了") : s.connected === true ? t("在线") : t("没同步过");
-  const rows: BoardRow[] = [{ kind: "heading", key: "im-head", text: t("消息"), sub: `${s.person ?? ""} @ ${s.relay ?? ""} · ${link}`, action: { key: "im-refresh", label: t("刷新"), action: { op: "im-refresh" } } }];
-  if (s.needs.length > 0) {
-    rows.push(section("im-needs", t("需要我"), s.needs.length));
-    for (const n of sortNeeds(s.needs)) rows.push({ kind: "card", key: `im-need-${n.key}`, icon: NEED_ICON[n.kind], verb: NEED_VERB[n.kind], title: n.text, ...(n.venue !== undefined ? { tag: n.venue } : {}), detail: [], actions: n.actions.map((label, i) => needPress(n, label, i, `im-need-${i}-${n.key}`)) });
+  return [
+    { kind: "heading", key: "im-head", text: t("消息"), sub: `${s.person ?? ""} @ ${s.relay ?? ""} · ${link}`, action: { key: "im-refresh", label: t("刷新"), action: { op: "im-refresh" } } },
+    ...imNeedRows(s, t), ...imDraftRows(s, t), ...imCardRows(s, t), ...(s.agents.length > 0 ? [imBriefRow(t)] : []), ...imWalletRows(s, t), ...imVenueRows(s, t),
+  ];
+}
+
+/** 需要我 (§6.9): a card per need, in the band's order, its buttons the need's own. */
+export function imNeedRows(s: ImStatus, t: T): BoardRow[] {
+  if (s.needs.length === 0) return [];
+  return [section("im-needs", t("需要我"), s.needs.length), ...sortNeeds(s.needs).map((n): BoardRow => ({ kind: "card", key: `im-need-${n.key}`, icon: NEED_ICON[n.kind], verb: NEED_VERB[n.kind], title: n.text, ...(n.venue !== undefined ? { tag: n.venue } : {}), detail: [], actions: n.actions.map((label, i) => needPress(n, label, i, `im-need-${i}-${n.key}`)) }))];
+}
+
+/** The drafts held for the person (§6.5, 回群前先给我看): each as its card, then a line to change it before it goes. */
+export function imDraftRows(s: ImStatus, t: T, heading: string = t("等你过目")): BoardRow[] {
+  if (s.drafts.length === 0) return [];
+  const rows: BoardRow[] = [section("im-drafts", heading, s.drafts.length)];
+  for (const d of s.drafts) {
+    rows.push({ kind: "card", key: `im-draft-${d.id}`, icon: "ask", verb: t("草稿"), title: d.venueName, tag: d.agent, detail: [d.text], actions: [{ key: `im-send-${d.id}`, label: t("就这么发"), primary: true, action: { op: "im-draft", id: d.id, send: true } }, { key: `im-drop-${d.id}`, label: t("不发"), action: { op: "im-draft", id: d.id, send: false } }] });
+    rows.push({ kind: "input", key: `im-draft-${d.id}`, placeholder: t("改一下再发"), field: "im-draft", target: d.id, value: d.text });
   }
-  if (s.drafts.length > 0) {
-    rows.push(section("im-drafts", t("等你过目"), s.drafts.length));
-    for (const d of s.drafts) {
-      rows.push({ kind: "card", key: `im-draft-${d.id}`, icon: "ask", verb: t("草稿"), title: d.venueName, tag: d.agent, detail: [d.text], actions: [{ key: `im-send-${d.id}`, label: t("就这么发"), primary: true, action: { op: "im-draft", id: d.id, send: true } }, { key: `im-drop-${d.id}`, label: t("不发"), action: { op: "im-draft", id: d.id, send: false } }] });
-      rows.push({ kind: "input", key: `im-draft-${d.id}`, placeholder: t("改一下再发"), field: "im-draft", target: d.id, value: d.text });
-    }
-  }
-  rows.push(...imCardRows(s, t));
-  if (s.agents.length > 0) rows.push({ kind: "input", key: "im-brief", placeholder: t("一句话起草委托书：去帮谁办什么、按什么准则、别花超过多少积分"), field: "im-brief" });
-  rows.push(...imWalletRows(s, t));
-  rows.push(section("im-venues", t("场所"), s.venues.length));
+  return rows;
+}
+
+/** 一句话起草委托书 (plan K): the line the agent drafts a card from. */
+export const imBriefRow = (t: T): BoardRow => ({ kind: "input", key: "im-brief", placeholder: t("一句话起草委托书：去帮谁办什么、按什么准则、别花超过多少积分"), field: "im-brief" });
+
+/** 场所: the venues, each a press that opens its thread; `actions` at the heading's end. */
+export function imVenueRows(s: ImStatus, t: T, actions?: Pressable[]): BoardRow[] {
+  const rows: BoardRow[] = [{ ...section("im-venues", t("场所"), s.venues.length), ...(actions !== undefined ? { actions } : {}) }];
   if (s.venues.length === 0) rows.push(text(t("还没有场所：等守护进程同步，或在中继上建一个群")));
   for (const v of s.venues) rows.push({ kind: "entry", key: `im-venue-${v.owner}-${v.id}`, title: `${v.kindWord}「${v.name}」`, tag: v.unread > 0 ? t("{0} 未读", v.unread) : "", tone: v.unread > 0 ? "normal" : "dim", detail: v.status, action: { op: "im-open", owner: v.owner, id: v.id } });
   return rows;
@@ -187,7 +200,8 @@ export function imQuietLine(status: ImStatus | null): string | undefined {
   return quietLine({ ...(card !== undefined ? { card: { id: `#${card.id}`, state: card.stateWord, ...(card.waitingOn !== undefined ? { waitingOn: card.waitingOn } : {}) } } : {}), unaddressed });
 }
 
-function threadRows(th: Thread, replyTo: string | null, columns: number, t: T): BoardRow[] {
+/** One venue open: its head, the messages as notes, a question's options, the box that speaks as the person (a channel has none). */
+export function imThreadRows(th: Thread, replyTo: string | null, columns: number, t: T): BoardRow[] {
   const rows: BoardRow[] = [{ kind: "heading", key: "im-thread", text: `${th.kindWord}「${th.name}」`, sub: `${th.people.length} 人 · ${th.agents.length} 个 agent${th.draftFirst ? ` · ${t("回群前先给我看")}` : ""}${th.channel !== undefined ? ` · ${th.channel.price}` : ""}`, action: { key: "im-back", label: t("返回"), action: { op: "im-close" } } }];
   if (th.announce !== undefined) rows.push(text(truncate(`${t("公告")}：${th.announce}`, columns)));
   // A channel (§10.4): the stage card under the head, each signal as its card, the footer last, and no input.

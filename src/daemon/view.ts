@@ -21,7 +21,7 @@ import { MODE_WORDS, modeOf } from "../core/im/social.js";
 import { localAccess } from "./deliver.js";
 import { channelView, execNeeds, signalsIn } from "./exec.js";
 import { signalLines, type Signal } from "../core/im/signal.js";
-import { listDrafts, listSessions, readConfig, readInbox, readMirror, readState, type Config } from "./home.js";
+import { listDrafts, listOutbox, listSessions, readConfig, readInbox, readMirror, readState, type Config } from "./home.js";
 
 export interface VenueRow { owner: string; id: string; kind: VenueKind; kindWord: string; name: string; status: string; unread: number; last?: string }
 export interface DraftRow { id: string; agent: string; venueName: string; text: string; at: string }
@@ -61,6 +61,8 @@ export interface ImStatus {
   cards: CardRow[];
   /** The wallet (§9.1), once the ledger is mirrored. */
   wallet?: WalletRow;
+  /** What waits in the outbox for the relay (待发), when anything does. */
+  outbox?: number;
   presence: Record<string, Presence>;
 }
 
@@ -142,6 +144,8 @@ export function statusView(home: string, seen: Readonly<Record<string, string>> 
   const drafts: DraftRow[] = listDrafts(home).map((d) => ({ id: d.id, agent: d.agent, venueName: d.venueName, text: typeof d.body["text"] === "string" ? d.body["text"] : "", at: d.at }));
   const wallet = walletView(home, now);
   const out: ImStatus = { configured: true, person: c.person, relay: c.relay.name, agents: Object.keys(c.agents), needs: sortNeeds(needs), venues: venues.map(({ at: _at, ...v }) => v), drafts, cards: cardsView(home, now), presence, ...(wallet !== undefined ? { wallet } : {}) };
+  const outbox = listOutbox(home).length;
+  if (outbox > 0) out.outbox = outbox;
   if (state !== undefined) { out.connected = state.connected; out.at = state.at; if (state.error !== undefined) out.error = state.error; }
   return out;
 }

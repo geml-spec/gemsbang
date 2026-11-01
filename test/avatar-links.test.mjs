@@ -1,0 +1,30 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { DEFAULT_LINK_RULES, expiresAt, LINK_ALPHABET, LINK_CODE, LINK_TTL_MS, linkPath, linkStatus, makeCode, mayHandOut, withLinkRules } from "../dist/core/avatar/links.js";
+
+test("a group's link (spec §6.1): eight letters nobody misreads, seven days, swapped means stopped; members pass it on unless the owner says no; the page's path carries who passed it on and what they call you", () => {
+  assert.equal(LINK_TTL_MS, 7 * 86_400_000);
+  for (const c of "01ilo") assert.equal(LINK_ALPHABET.includes(c), false, `${c} is easy to misread`);
+  const code = makeCode(Uint8Array.from([0, 1, 2, 3, 30, 31, 255, 128]));
+  assert.equal(code, "abcd9ahe", "a byte past the alphabet wraps round");
+  assert.match(code, LINK_CODE);
+  assert.throws(() => makeCode(new Uint8Array(7)), /eight random bytes/);
+  assert.equal(expiresAt("2026-11-01T09:00:00Z"), "2026-11-08T09:00:00Z");
+  const link = { code: "abcd9abp", expires: "2026-11-08T09:00:00Z" };
+  assert.equal(linkStatus(link, "abcd9abp", "2026-11-08T08:59:59Z"), "ok");
+  assert.equal(linkStatus(link, "abcd9abp", "2026-11-08T09:00:00Z"), "expired");
+  assert.equal(linkStatus(link, "zzzz2222", "2026-11-02T09:00:00Z"), "replaced", "the owner swapped it: it stops at once");
+  assert.equal(linkStatus(link, undefined, "2026-11-02T09:00:00Z"), "replaced");
+  assert.deepEqual(DEFAULT_LINK_RULES, { forward: true, approve: false });
+  assert.equal(mayHandOut({ forward: true, approve: false }, false), true);
+  assert.equal(mayHandOut({ forward: false, approve: false }, false), false);
+  assert.equal(mayHandOut({ forward: false, approve: false }, true), true, "the owner always may");
+  assert.deepEqual(withLinkRules(DEFAULT_LINK_RULES, { as: "a-0123456789", approve: true }), { forward: true, approve: true }, "`as` names who asks, not a rule");
+  assert.deepEqual(withLinkRules(DEFAULT_LINK_RULES, { forward: false }), { forward: false, approve: false });
+  assert.equal(withLinkRules(DEFAULT_LINK_RULES, { forward: "no" }), undefined);
+  assert.equal(withLinkRules(DEFAULT_LINK_RULES, { open: true }), undefined);
+  assert.equal(withLinkRules(DEFAULT_LINK_RULES, null), undefined);
+  assert.equal(linkPath("abcd9abp"), "/i/abcd9abp");
+  assert.equal(linkPath("abcd9abp", { by: "a-0123456789", call: " 小李 " }), "/i/abcd9abp?by=a-0123456789&call=%E5%B0%8F%E6%9D%8E");
+  assert.equal(linkPath("abcd9abp", { call: "  " }), "/i/abcd9abp", "an empty name is no name");
+});

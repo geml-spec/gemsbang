@@ -1,6 +1,6 @@
 {
   "name": "gemworks",
-  "version": "0.4.0",
+  "version": "0.5.6",
   "description": "Gemworks: GEML workflows for coding agents — stages, signals and a journal per work item. A Claude Code plugin (a band above the prompt, a board), DeepSeek Harness and Pi adapters, an MCP server for other hosts, and a CLI.",
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -32,7 +32,7 @@
     "journal",
     "mcp"
   ],
-  "files": ["dist", "spec", "skills", "examples", "workflows", "coach", "host-skills", "THIRD_PARTY_NOTICES.md", ".claude-plugin/plugin.json", "hooks", "types", "cordis.patch.yml", "LICENSE", ".codex-plugin/plugin.json", "codex", ".codexignore", "client.js"],
+  "files": ["dist", "spec", "examples", "workflows", "coach", "host-skills", "THIRD_PARTY_NOTICES.md", ".claude-plugin/plugin.json", "hooks", "types", "cordis.patch.yml", "LICENSE", ".codex-plugin/plugin.json", "codex", ".codexignore", "client.js"],
   "scripts": {
     "build": "tsc && node scripts/bundle.mjs",
     "test": "npm run build && node --test test/*.test.mjs",

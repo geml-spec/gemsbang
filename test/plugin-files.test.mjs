@@ -5,14 +5,15 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 const at = (p) => new URL(`../${p}`, import.meta.url);
 const json = (p) => JSON.parse(readFileSync(at(p), "utf8"));
 
-test("the plugin manifest names gemworks, keeps the package's version and points at the state contract", () => {
+test("the plugin manifest names gemsbang, keeps the package's version, points at the state contract and depends on no other plugin", () => {
   const plugin = json(".claude-plugin/plugin.json");
   const pkg = json("package.json");
-  assert.equal(plugin.name, "gemworks");
+  assert.equal(plugin.name, "gemsbang");
+  assert.equal(plugin.dependencies, undefined);
   assert.equal(plugin.version, pkg.version);
   assert.equal(plugin.types, "./types/index.d.ts");
   assert.ok(existsSync(at("types/index.d.ts")));
-  assert.equal(plugin.mcpServers, undefined, "the hooks module serves the flow_* tools; a manifest MCP server would list them twice");
+  assert.equal(plugin.mcpServers, undefined, "the hooks module serves the im_* tools; a manifest MCP server would list them twice");
 });
 
 test("hooks.json names the one hooks module", () => {
@@ -26,8 +27,8 @@ test("no skill shares its name with a command the hooks module registers", () =>
   // a skill named gemworks kept /gemworks from registering.
   const hooks = readFileSync(at("hooks/register.tsx"), "utf8");
   const commands = [...hooks.matchAll(/\$\.command\.register\(\{\s*name:\s*'([^']+)'/g)].map((m) => m[1]);
-  assert.ok(commands.includes("gemworks"), "the hooks module registers /gemworks");
-  for (const dir of readdirSync(at("skills"))) {
+  assert.deepEqual(commands, ["gemsbang"], "the hooks module registers /gemsbang");
+  for (const dir of existsSync(at("skills")) ? readdirSync(at("skills")) : []) {
     const name = readFileSync(at(`skills/${dir}/SKILL.md`), "utf8").match(/^name:\s*(\S+)\s*$/m)?.[1];
     assert.ok(name !== undefined, `skills/${dir} names itself`);
     assert.ok(!commands.includes(name), `skill ${name} takes the name of /${name}`);

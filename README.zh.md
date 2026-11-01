@@ -459,6 +459,21 @@ npm run walkthrough
 
 ### Claude Code
 
+这个检出的 Claude Code 插件是 **gemsbang**：只管 IM，可以和 gemworks 自己的插件（在
+[geml-spec/gemworks](https://github.com/geml-spec/gemworks)）并排装，也可以单独装。gemworks 管流程和它在输入框上方的那一行；
+gemsbang 在它下面加自己的一行——需要你的事，没有就是这个会话的 agent 在干什么——再加一个看板（消息、任务、钱包）、七个 `im_*`
+工具，以及 agent 按发件人的权限处理它队列里的事。它用 bare 请求问打包的 CLI，只读写守护进程的家（`~/.gemworks/im`），
+从不碰项目的 `.geml/`。`dist/` 是构建出来的、不进 git：先构建这个检出，再把它加成 marketplace。
+
+```sh
+npm ci && npm run build
+claude plugin marketplace add /path/to/gemsbang
+claude plugin install gemsbang@gemsbang
+```
+
+`/gemsbang` 打开看板（`/gemsbang tasks`、`/gemsbang wallet` 直接到那一页），`/gemsbang settings` 打开设置：这个会话代哪个
+agent 说话、中继和重连、给手机 bot 的绑定码、语言。这一节下面讲的是 gemworks 的插件。
+
 ```text
 /plugin install gemworks --marketplace geml-spec/geml
 ```

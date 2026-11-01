@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const SCRIPT = fileURLToPath(new URL("../skills/split-session/split-session.mjs", import.meta.url));
+const SCRIPT = fileURLToPath(new URL("../host-skills/split-session/split-session.mjs", import.meta.url));
 const ID = "0f6a2c1e-3b7d-4e55-9a10-6c2d8e4f1b23";
 
 /** A Claude home with one session of a few turns (three by default), each a prompt and its answer. */

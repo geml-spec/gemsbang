@@ -541,6 +541,24 @@ shape of constraint is one you want.
 
 ### Claude Code
 
+This checkout's Claude Code plugin is **gemsbang**: the IM alone, installed beside gemworks's own plugin (from
+[geml-spec/gemworks](https://github.com/geml-spec/gemworks)) or without it. gemworks keeps the workflow and its line
+above the prompt; gemsbang adds its own line under it — what needs you, else where this session's agent is — a board
+with 消息, 任务 and 钱包, the seven `im_*` tools, and the agent taking what waits in its queue within each sender's
+permissions. It asks the bundled CLI with bare requests, which read and write only the daemon's home
+(`~/.gemworks/im`), never the project's `.geml/`. `dist/` is built, not committed: build the checkout, then add it as a
+marketplace.
+
+```sh
+npm ci && npm run build
+claude plugin marketplace add /path/to/gemsbang
+claude plugin install gemsbang@gemsbang
+```
+
+`/gemsbang` opens the board (`/gemsbang tasks`, `/gemsbang wallet` on those tabs) and `/gemsbang settings` the
+settings: the agent this session speaks for, the relay with 重连, a code for the phone's bot, the language. The rest
+of this section describes gemworks's plugin.
+
 ```text
 /plugin install gemworks --marketplace geml-spec/geml
 ```

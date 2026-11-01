@@ -8,8 +8,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import { appendSealed, readDoc, RELAY_OWNER } from "./store.js";
 
-export type Scope = "person" | "agent" | "guest" | "inbox";
-const SCOPES: ReadonlySet<string> = new Set(["person", "agent", "guest", "inbox"]);
+/** gemsbang adds two (relay/avatars.ts): an avatar's, which speaks as `avatar:<id>`, and a device's, the agent a person attached on one machine, which speaks as the person but may only ask for an avatar's token. */
+export type Scope = "person" | "agent" | "guest" | "inbox" | "avatar" | "device";
+const SCOPES: ReadonlySet<string> = new Set(["person", "agent", "guest", "inbox", "avatar", "device"]);
 export interface TokenRecord { id: string; speaker: string; scope: Scope; at: string; by: string }
 const TOKENS = "tokens.geml";
 

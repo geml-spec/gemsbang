@@ -21,6 +21,9 @@ import { runCodex } from "./codex.js";
 import { installAntigravity, runAntigravity } from "./antigravity.js";
 import { serveMcp } from "./mcp.js";
 import { startRelay } from "./relay/server.js";
+import { startAvatarRelay } from "./relay/avatar-server.js";
+import { avatarCommandRunner } from "./relay/avatar-hosted.js";
+import { commandTexter } from "./relay/text.js";
 import { commandMailer } from "./relay/mail.js";
 import { commandRunner } from "./relay/hosted.js";
 import { Bridge } from "./phone/bridge.js";
@@ -36,6 +39,7 @@ import { RelayClient, reasonOf } from "./daemon/client.js";
 import { DIRECTION_WORDS, STATE_WORDS, VERIFY_WORDS, waitingOn, type Card, type VerifyKind } from "./core/im/card.js";
 import { homeDir, listOutbox, readConfig, readState, writeConfig } from "./daemon/home.js";
 import { Daemon } from "./daemon/sync.js";
+import { phoneCode } from "./daemon/phone-code.js";
 import { decodeRequest, type BridgeResponse } from "./hosts/claude-code/protocol.js";
 import { docReader, openWorkspace, resolvePromptRef, resolveWorkflow, type Workspace } from "./workspace.js";
 
@@ -60,6 +64,8 @@ const USAGE = [
   "  mcp [--host h] [--root dir]             the three model tools over stdio MCP (host default: mcp)",
   "  relay [--root dir] [--port N] [--name host] [--host addr] [--federation open|closed] [--free-credits N] [--mail-command cmd]  the IM relay, until it is stopped (root: ~/.gemworks/relay; login codes go to <root>/_relay/mail/ unless a command takes them: MAIL_TO and MAIL_SUBJECT in its environment, the text on stdin)",
   "  relay … [--hosted-command cmd] [--hosted-credits N]   also run the hosted agents' rounds (transport §6): the command gets the prompt on stdin and HOSTED_* in its environment, answers on stdout; a round costs the owner N credits (1)",
+  "  relay serve [--root dir] [--port N] [--name host] [--host addr] [--public-url url] [--text-command cmd]   gemsbang's relay: avatars, groups, links, the pages /i/<code>, /g/<group>, /login (root: ~/.gemworks/gemsbang; login codes go to <root>/_relay/texts/ unless a command takes them: TEXT_TO in its environment, the text on stdin)",
+  "  relay serve … [--hosted-command cmd] [--free-days N] [--free-replies N]   also play every avatar (spec §7.7): the command gets a round's prompt on stdin and HOSTED_* in its environment (HOSTED_API_KEY when the person pays with their own key), answers on stdout; the free quota is N days or N replies (7, 50)",
   "  relay token <person> [--root dir]       issue a person's token on that relay and print it",
   "  relay topup <person> <credits> [--note s] [--root dir]   credit a person's wallet on that relay (the platform's top-up, §9.1) and print the balance",
   "  relay price <market> <price> [--at iso] [--root dir]   a price point from a public source, on the relay's chain (§10.3)",
@@ -264,8 +270,33 @@ async function runPhone(rest: string[]): Promise<number> {
   return 0;
 }
 
+/** `gemworks relay serve`: gemsbang's relay (avatars, groups, links and their pages) until it is stopped. */
+async function serveAvatars(rest: string[]): Promise<number> {
+  if (positionals("relay serve", rest, [], ["--root", "--port", "--name", "--host", "--public-url", "--text-command", "--hosted-command", "--free-days", "--free-replies"]).length > 0) fail(USAGE, 2);
+  const root = resolve(flag(rest, "--root") ?? join(homedir(), ".gemworks", "gemsbang"));
+  const port = Number(flag(rest, "--port") ?? "7710");
+  if (!Number.isInteger(port) || port < 0 || port > 65535) fail("gemworks relay serve: --port needs a number from 0 to 65535", 2);
+  const publicUrl = flag(rest, "--public-url");
+  if (publicUrl !== undefined && !/^https?:\/\/[^/\s]+$/.test(publicUrl)) fail("gemworks relay serve: --public-url is http(s)://host, with no path", 2);
+  const host = flag(rest, "--host") ?? "127.0.0.1";
+  const name = flag(rest, "--name") ?? "localhost";
+  const text = flag(rest, "--text-command");
+  const hostedCommand = flag(rest, "--hosted-command"), days = flag(rest, "--free-days"), replies = flag(rest, "--free-replies");
+  for (const [f, v] of [["--free-days", days], ["--free-replies", replies]] as const) if (v !== undefined && !/^\d+$/.test(v)) fail(`gemworks relay serve: ${f} needs a whole number`, 2);
+  const hosted = hostedCommand === undefined ? undefined : { runner: avatarCommandRunner(hostedCommand), ...(days !== undefined ? { days: Number(days) } : {}), ...(replies !== undefined ? { replies: Number(replies) } : {}) };
+  const s = await startAvatarRelay({ root, name, port, host, version: packageVersion(), ...(publicUrl !== undefined ? { publicUrl } : {}), ...(text !== undefined ? { texter: commandTexter(text) } : {}), ...(hosted !== undefined ? { hosted } : {}) });
+  console.log(`gemsbang relay ${name} listening on ${s.url} · documents under ${root}${hostedCommand !== undefined ? ` · hosted by "${hostedCommand}"` : ""}`);
+  await new Promise<void>((done) => {
+    const stop = (): void => { void s.close().then(done); };
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+  });
+  return 0;
+}
+
 /** `gemworks relay`: the relay until it is stopped; `gemworks relay token <person>`: a person's token, printed once. */
 async function runRelay(rest: string[]): Promise<number> {
+  if (rest[0] === "serve") return serveAvatars(rest.slice(1));
   const root = resolve(flag(rest, "--root") ?? join(homedir(), ".gemworks", "relay"));
   if (rest[0] === "token") {
     const pos = positionals("relay token", rest.slice(1), [], ["--root"]);
@@ -842,13 +873,10 @@ async function runConnect(rest: string[]): Promise<number> {
     if (positionals("connect phone-code", args, [], ["--home"]).length > 0) fail("gemworks connect phone-code takes no argument", 2);
     const c = readConfig(home);
     if (c === undefined) return fail("gemworks connect phone-code: no connect.json here; run gemworks connect setup first", 1);
-    try {
-      const r = await new RelayClient(c.relay.url, c.token).post("/phone/code", {});
-      if (r.status !== 201) return fail(`gemworks connect phone-code: ${reasonOf(r)}`, 1);
-      const code = (r.body as { code: string }).code;
-      console.log(`绑定码 ${code} · 十分钟内在 bot 里发 /bind ${code}`);
-      return 0;
-    } catch (e) { return fail(`gemworks connect phone-code: ${e instanceof Error ? e.message : String(e)}`, 1); }
+    const r = await phoneCode(home);
+    if (!r.ok) return fail(`gemworks connect phone-code: ${r.reason}`, 1);
+    console.log(`绑定码 ${r.code} · 十分钟内在 bot 里发 /bind ${r.code}`);
+    return 0;
   }
   if (sub === "share") {
     if (positionals("connect share", args, ["--drafted"], ["--home", "--title", "--agent", "--scope", "--summary", "--turns", "--demo", "--open", "--repo", "--commit", "--license", "--evidence", "--replay"]).length > 0) fail(USAGE, 2);

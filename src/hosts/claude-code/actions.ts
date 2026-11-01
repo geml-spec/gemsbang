@@ -156,6 +156,10 @@ export type BoardAction =
   | { op: "im-card-words"; card: string; text: string }
   /** 一句话起草委托书 (plan K): the line under the cards. */
   | { op: "im-brief"; text: string }
+  /** The gemsbang pane (plan O): one of its three tabs; 重连 (one round of the daemon's sync); a code to bind the phone's bot with. */
+  | { op: "im-tab"; tab: "messages" | "tasks" | "wallet" }
+  | { op: "im-sync" }
+  | { op: "im-phone-code" }
   | { op: "share"; what: ShareWhat; how: ShareHow; strip: boolean };
 
 /** A button as the pure modules describe it: its address, its label, whether it is the main one, and what it does. */

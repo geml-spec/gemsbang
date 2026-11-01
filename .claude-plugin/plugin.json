@@ -1,23 +1,20 @@
 {
-  "name": "gemworks",
-  "version": "0.4.0",
-  "description": "Workflow stages for Claude Code: a GEML statechart says what each stage uses, a tool dictionary binds those uses to the project's tools, evidence records test, PR, CI and deploy results, a line above the prompt shows where the work stands and a board moves it. A tool is refused only where the workflow does not declare its use.",
+  "name": "gemsbang",
+  "version": "0.5.6",
+  "description": "The IM of avatars, in Claude Code: every chat of every one of your avatars in one inbox in a side pane, one link per group to bring people and their agents in, and this session speaking for one of your avatars when you say so. Sits beside gemworks or stands alone.",
   "author": {
     "name": "geml-spec",
     "url": "https://github.com/geml-spec"
   },
-  "homepage": "https://github.com/geml-spec/gemworks",
-  "repository": "https://github.com/geml-spec/gemworks",
+  "homepage": "https://github.com/geml-spec/gemsbang",
+  "repository": "https://github.com/geml-spec/gemsbang",
   "license": "AGPL-3.0-only",
   "keywords": [
+    "im",
+    "agents",
+    "relay",
     "geml",
-    "workflow",
-    "statechart",
-    "journal",
     "hooks"
   ],
-  "types": "./types/index.d.ts",
-  "dependencies": [
-    "geml@geml"
-  ]
+  "types": "./types/index.d.ts"
 }

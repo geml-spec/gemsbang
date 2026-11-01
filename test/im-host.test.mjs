@@ -36,9 +36,9 @@ test("the six tools, how they are named, and the one line a call answers with", 
   for (const x of IM_TOOLS) { assert.equal(x.inputSchema.type, "object"); assert.equal(x.inputSchema.additionalProperties, false); assert.ok(x.description.length > 20, x.name); }
   assert.deepEqual(IM_TOOLS.find((x) => x.name === "im_ask").inputSchema.required, ["venue", "question", "options", "who"]);
   assert.deepEqual(IM_TOOLS.find((x) => x.name === "im_card").inputSchema.required, ["action"]);
-  assert.equal(isImTool("mcp__gemworks__im_say"), true);
+  assert.equal(isImTool("mcp__gemsbang__im_say"), true);
   assert.equal(isImTool("mcp__gemworks__say"), false);
-  assert.equal(imToolOf("mcp__gemworks__im_read"), "im_read");
+  assert.equal(imToolOf("mcp__gemsbang__im_read"), "im_read");
   assert.equal(imToolOf("Bash"), undefined);
   assert.equal(toolLine("im_read", "群「前端周会」", "最近 12 条"), "im_read · 群「前端周会」· 最近 12 条");
   assert.equal(venueKey("john", "g-7"), "john/g-7");
@@ -46,9 +46,9 @@ test("the six tools, how they are named, and the one line a call answers with", 
 
 test("the scope over a delivered turn: a guest's turn reads and answers, never writes or runs; a sandbox is refused for now; the owner's own turn passes", () => {
   const guest = { agent: "xiaoping", item: ITEM, scope: DEFAULT_SCOPES.guest, draftFirst: false, refused: 0 };
-  assert.deepEqual([toolClassOf("Read"), toolClassOf("Grep"), toolClassOf("Edit"), toolClassOf("Write"), toolClassOf("NotebookEdit"), toolClassOf("Bash"), toolClassOf("mcp__gemworks__im_say")], ["read", "read", "write", "write", "write", "run", "read"]);
+  assert.deepEqual([toolClassOf("Read"), toolClassOf("Grep"), toolClassOf("Edit"), toolClassOf("Write"), toolClassOf("NotebookEdit"), toolClassOf("Bash"), toolClassOf("mcp__gemsbang__im_say")], ["read", "read", "write", "write", "write", "run", "read"]);
   assert.equal(scopeRefusal(guest, "Read"), undefined);
-  assert.equal(scopeRefusal(guest, "mcp__gemworks__im_report"), undefined);
+  assert.equal(scopeRefusal(guest, "mcp__gemsbang__im_report"), undefined);
   assert.equal(scopeRefusal(guest, "Write"), "IM：这一轮来自 访客 g-1（访客），权限：只读；Write 不在范围内，没有执行。要更多权限，在回复里说明，由主人放行。");
   assert.equal(scopeRefusal(guest, "Bash"), "IM：这一轮来自 访客 g-1（访客），权限：只读；Bash 不在范围内，没有执行。要更多权限，在回复里说明，由主人放行。");
   const trusted = { ...guest, item: { ...ITEM, senderName: "李四", level: "trusted" }, scope: DEFAULT_SCOPES.trusted };
@@ -144,7 +144,7 @@ test("the call rule in a card's turn (§7.5): reads pass; writes only in the roo
   const item = { ...ITEM, card: { id: "t-42", address: "https://relay.test/john/cards/t-42.geml", title: "导出 PDF", tools: ["read", "edit", "test"], venueOfWork: "worker-sandbox", credits: 40 } };
   const turn = { agent: "xiaoce", item, scope: { write: true, run: "sandbox", budget: 40 }, draftFirst: false, refused: 0, room: "/h/im/rooms/t-42" };
   assert.equal(callRule(turn, "Read", { file_path: "/work/app/x.ts" }), undefined);
-  assert.equal(callRule(turn, "mcp__gemworks__im_card", { action: "note" }), undefined);
+  assert.equal(callRule(turn, "mcp__gemsbang__im_card", { action: "note" }), undefined);
   assert.equal(callRule(turn, "Write", { file_path: "/h/im/rooms/t-42/src/x.ts" }), undefined);
   assert.deepEqual(callRule(turn, "Write", { file_path: "/work/app/x.ts" }), { deny: "IM：这一轮是任务卡 #t-42 的客房，只能写到 /h/im/rooms/t-42 里；Write 写的是 /work/app/x.ts，没有执行。" });
   assert.deepEqual(callRule(turn, "Edit", { file_path: "/h/im/rooms/t-42-other/x.ts" }), { deny: "IM：这一轮是任务卡 #t-42 的客房，只能写到 /h/im/rooms/t-42 里；Edit 写的是 /h/im/rooms/t-42-other/x.ts，没有执行。" }, "a sibling that shares the prefix is outside");

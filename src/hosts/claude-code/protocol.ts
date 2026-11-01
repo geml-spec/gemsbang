@@ -21,6 +21,7 @@ import type { CardAction } from "../../core/im/card.js";
 import type { CardAnswer } from "../../daemon/cards.js";
 import type { ImStatus, Thread } from "../../daemon/view.js";
 import type { Transcript } from "../../core/transcript.js";
+import type { GbResult } from "../../gemsbang/ops.js";
 
 export type { VerbName } from "../../core/verb-specs.js";
 
@@ -90,6 +91,12 @@ export type BridgeOp =
   | { op: "im-brief"; text: string; agent?: string; card?: string }
   /** A signal (plan L, §10): publish (the fields and the channel in `body`), retract or skip one by `id` (skip with the agent's `reason`), or list an agent's chain by `target` (`<agent>@<owner>`); `as` names the agent whose token signs. */
   | { op: "im-signal"; action: "publish" | "retract" | "skip" | "list"; as?: string; body?: Record<string, unknown>; id?: string; reason?: string; target?: string }
+  /** 重连: one round of the daemon's sync from here — the outbox pushed, what the person follows mirrored; the IM after it. */
+  | { op: "im-sync" }
+  /** A one-time code to bind the phone's bot with (transport §7.2). */
+  | { op: "im-phone-code" }
+  /** gemsbang's client (gemsbang/ops.ts): one call by name, with its arguments; the answer is its result, a refusal too. */
+  | { op: "gb"; call: string; args?: Record<string, unknown> }
   | { op: "board" }
   /**
    * What the repository says for the band (attention.ts): branches ahead of their upstream, open pull requests and their
@@ -140,8 +147,12 @@ export type Backfill =
   | { uuids: string[]; messages?: QueuedMessage[] }
   | { id: string; turns: number; files: number; links: number; skipped?: boolean; transcript?: Transcript };
 
-/** `imSeen`: per venue (owner/id), the last message id the 消息 page showed, for the unread counts. */
-export type BridgeRequest = { v: 1; root: string; lastFile?: string; gh?: GhSeen; imSeen?: Record<string, string> } & BridgeOp;
+/**
+ * `imSeen`: per venue (owner/id), the last message id the 消息 page showed, for the unread counts.
+ * `bare`: the IM alone (the gemsbang plugin) — no workspace is opened, so nothing under the project's .geml/ is read or
+ * started; the shell carries the CLI's locale and versions only.
+ */
+export type BridgeRequest = { v: 1; root: string; lastFile?: string; gh?: GhSeen; imSeen?: Record<string, string>; bare?: boolean } & BridgeOp;
 
 export interface ShellStatus {
   status: Status | null;
@@ -339,6 +350,10 @@ export type BridgeResponse =
       brief?: { venue: string };
       /** im-signal: the line the tool prints. */
       signal?: { line: string };
+      /** im-phone-code: the code, good for ten minutes. */
+      phoneCode?: string;
+      /** gb: the call's result, a refusal with its code and words. */
+      gb?: GbResult;
     }
   /** No shell only when the request itself failed — it threw, or did not decode: the hooks module keeps the last shell and shows the error. */
   | { v: 1; ok: false; error: string; shell?: ShellStatus };
@@ -374,7 +389,7 @@ export function unreadableText(exitCode: number, stderr: string, pluginRoot: str
   return `gemworks：桥接的应答无法解析（退出码 ${exitCode}${said ? `：${said}` : ""}）`;
 }
 
-const OPS = new Set(["status", "refresh", "before", "after", "verb", "learn", "mark", "advance", "pause", "resume", "rollback", "new-item", "bind", "use", "add", "import", "board", "attention", "export", "artifacts", "artifact", "backfill-list", "backfill-one", "turn-ids", "memory", "memory-set", "memory-delete", "im-status", "im-venue", "im-say", "im-next", "im-answer", "im-draft", "im-presence", "im-need", "im-read", "im-forward", "im-card", "im-brief", "im-signal"]);
+const OPS = new Set(["status", "refresh", "before", "after", "verb", "learn", "mark", "advance", "pause", "resume", "rollback", "new-item", "bind", "use", "add", "import", "board", "attention", "export", "artifacts", "artifact", "backfill-list", "backfill-one", "turn-ids", "memory", "memory-set", "memory-delete", "im-status", "im-venue", "im-say", "im-next", "im-answer", "im-draft", "im-presence", "im-need", "im-read", "im-forward", "im-card", "im-brief", "im-signal", "im-sync", "im-phone-code", "gb"]);
 const EXPORT_KINDS = new Set(["journal", "workflow", "text"]);
 const EXPORT_FORMATS = new Set(["geml", "md", "json"]);
 const VERBS = new Set(["status", "move", "set"]);
@@ -404,6 +419,7 @@ export function decodeRequest(text: string): BridgeRequest | { error: string } {
   if (v === null || typeof v !== "object" || Array.isArray(v)) return { error: "the request is not an object" };
   if (v["v"] !== PROTOCOL_VERSION) return { error: `protocol version ${String(v["v"])}; this CLI speaks ${PROTOCOL_VERSION}` };
   if (typeof v["root"] !== "string" || v["root"] === "") return { error: "root is required" };
+  if (v["bare"] !== undefined && typeof v["bare"] !== "boolean") return { error: "bare is a boolean" };
   const op = v["op"];
   if (typeof op !== "string" || !OPS.has(op)) return { error: `unknown op ${String(op)}` };
   const str = (k: string): boolean => typeof v[k] === "string";
@@ -447,6 +463,7 @@ export function decodeRequest(text: string): BridgeRequest | { error: string } {
     "im-card": () => str("action"),
     "im-brief": () => str("text"),
     "im-signal": () => str("action"),
+    gb: () => str("call") && (v["args"] === undefined || obj("args")),
   };
   const check = fields[op];
   if (check !== undefined && !check()) return { error: `op ${op}: missing or mistyped fields` };
