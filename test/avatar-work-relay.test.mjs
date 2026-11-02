@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AvatarRelay, BODY_WAIT_MS } from "../dist/relay/avatars.js";
+import { AvatarRelay } from "../dist/relay/avatars.js";
 
 const BASE = Date.UTC(2026, 10, 1, 9, 0, 0);
 function relay() {
@@ -93,21 +93,17 @@ test("the computer moves a job on (spec §7.4): takes it once; done, its words g
   bad(w.r.setWork(w.john.by, w.me.id, "work-99", { state: "taken" }), 404, "没有这件活");
 });
 
-test("a computer not online (spec §7.4): a job left waiting two minutes — the avatar says once in the chat that it will come back to it, never whose computer, and the person gets an 出错 card; a queued job, or none, is no error", () => {
+test("a job waits for the computer however long it takes (spec §7.4; architecture §6.3): nothing is said in the chat and nothing is an error while it waits; the computer takes it when it comes", () => {
   const w = world();
   const n = w.asks("设置页的缓存写错了");
   ok(w.r.answerNeed(w.john.by, w.me.id, n.id, { choice: 0 }));
   const q = w.asks("登录页也看看");
   ok(w.r.answerNeed(w.john.by, w.me.id, q.id, { choice: 1 }));
-  w.r.sweep();
-  assert.equal(w.lines().at(-1).value.text, "登录页也看看", "not yet");
-  w.r.advance(BODY_WAIT_MS);
-  w.r.sweep();
-  const said = w.lines().filter((b) => b.value.speaker === `avatar:${w.me.id}`);
-  assert.deepEqual(said.map((b) => [b.value.text, b.value.by]), [["这件事要在电脑上做，晚点回。", "agent"]]);
-  assert.deepEqual(w.r.needsOf(w.john.person).map((x) => [x.kind, x.summary]), [["error", "「John」的电脑那层不在线，有活在等它：修设置页缓存的写路径"]]);
-  w.r.advance(BODY_WAIT_MS);
-  w.r.sweep();
-  assert.equal(w.lines().filter((b) => b.value.speaker === `avatar:${w.me.id}`).length, 1, "once");
-  assert.equal(w.r.worksOf(w.john.person)[0].told, true);
+  w.r.advance(3 * 86_400_000);
+  assert.equal(w.r.sweep(), 0);
+  assert.equal(w.lines().filter((b) => b.value.speaker === `avatar:${w.me.id}`).length, 0, "no line in the chat");
+  assert.deepEqual(w.r.needsOf(w.john.person), [], "no 出错 card");
+  assert.deepEqual(w.r.worksOf(w.john.person).map((x) => x.state), ["waiting", "queued"]);
+  const job = w.r.worksOf(w.john.person)[0];
+  assert.equal(ok(w.r.setWork(w.john.by, w.me.id, job.id, { state: "taken" })).work.state, "taken", "three days on, the computer takes it");
 });

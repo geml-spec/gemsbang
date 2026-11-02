@@ -1,16 +1,17 @@
 // 需要你 (spec §7.3): what an avatar brings to its person, and nothing else —
 // five kinds: a promise asked of them (答应事情, a newcomer at a group they
-// let in by hand among them), money (花钱), taking a side (表态), their
-// computer (借电脑), something gone wrong (出错). A card says which avatar,
-// which kind, from which chat, what it checked, the words it would send, the
-// options — each a short form of those words — and when it stops waiting:
-// twelve hours unless the asker says sooner. Errors come first, then the
-// soonest to expire; two are shown whole, more fold. Pure.
+// let in by hand among them), money (花钱), taking a side (表态), a task sent
+// to them that needs their computer (任务), something gone wrong (出错). A
+// card says which avatar, which kind, from which chat, what it checked, the
+// words it would send, the options — each a short form of those words. IM is
+// asynchronous (architecture §6.3): a card waits until the person answers it,
+// unless the matter has a deadline of its own, which the asker gives as its
+// expiry. Errors come first, then the newest; the expired last; two are shown
+// whole, more fold. Pure.
 import { say, type Lang } from "./words.js";
 
 export const NEED_KINDS = ["promise", "pay", "stance", "borrow", "error"] as const;
 export type NeedKind = (typeof NEED_KINDS)[number];
-export const NEED_TTL_MS = 12 * 3_600_000;
 export const NEED_MAX_MS = 7 * 86_400_000;
 export const SUMMARY_MAX = 400, OPTION_MAX = 24, DRAFT_MAX = 4000;
 
@@ -18,7 +19,9 @@ export const SUMMARY_MAX = 400, OPTION_MAX = 24, DRAFT_MAX = 4000;
 export interface NeedOption { label: string; text?: string }
 export type NeedState = "open" | "answered" | "expired";
 export interface Need {
-  id: string; avatar: string; kind: NeedKind; summary: string; options: NeedOption[]; expires: string; at: string; state: NeedState;
+  id: string; avatar: string; kind: NeedKind; summary: string; options: NeedOption[]; at: string; state: NeedState;
+  /** The matter's own deadline, when it has one; without it the card waits until it is answered. */
+  expires?: string;
   venue?: { owner: string; id: string }; message?: string; checked?: string; draft?: string;
   /** A newcomer waiting at a group of the owner's (spec §6.1): the answer lets them in or not. */
   request?: string;
@@ -57,19 +60,16 @@ export function needFault(body: unknown, now: string): { code: string; params?: 
   return undefined;
 }
 
-/** When a card made at `at` stops waiting: the asker's time, else twelve hours on. */
-export const expiryOf = (at: string, given?: string): string => given ?? new Date(Date.parse(at) + NEED_TTL_MS).toISOString().replace(/\.\d{3}Z$/, "Z");
-
-/** Errors first, then the soonest to expire; the expired after the open. */
-export function orderNeeds<T extends Pick<Need, "kind" | "expires" | "state">>(needs: readonly T[]): T[] {
+/** Errors first, then the newest; the expired after the open. */
+export function orderNeeds<T extends Pick<Need, "kind" | "at" | "state">>(needs: readonly T[]): T[] {
   const rank = (n: T): number => (n.state === "expired" ? 2 : n.kind === "error" ? 0 : 1);
-  return [...needs].sort((a, b) => rank(a) - rank(b) || (a.expires < b.expires ? -1 : a.expires > b.expires ? 1 : 0));
+  return [...needs].sort((a, b) => rank(a) - rank(b) || (a.at > b.at ? -1 : a.at < b.at ? 1 : 0));
 }
 
-/** Two shown whole; more, the first whole and the rest counted (spec §7.1). */
+/** Two shown whole; more, the rest counted (spec §7.1). */
 export function foldNeeds<T>(needs: readonly T[], open = false): { shown: T[]; folded: number } {
   if (open || needs.length <= 2) return { shown: [...needs], folded: 0 };
-  return { shown: needs.slice(0, 1), folded: needs.length - 1 };
+  return { shown: needs.slice(0, 2), folded: needs.length - 2 };
 }
 
 /** How long a card still waits, in words: hours, minutes, or 已过期. */

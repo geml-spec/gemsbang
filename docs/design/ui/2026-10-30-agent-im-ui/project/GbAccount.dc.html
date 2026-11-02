@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>账号与登录</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0;font-family:-apple-system,"PingFang SC","Helvetica Neue","Noto Sans SC",sans-serif;color:#1f1e1d}
+a{color:#2a6fdb}a:hover{color:#1f56ad}
+</style>
+</helmet>
+<div style="width: 440px; height: 820px; box-sizing: border-box; position: relative;">
+<svg width="0" height="0" style="position: absolute;" aria-hidden="true"><defs><linearGradient id="gb" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="64"><stop offset="0" stop-color="#42b4f4"/><stop offset="1" stop-color="#0a74c0"/></linearGradient></defs></svg>
+<div style="width: 440px; height: 820px; box-sizing: border-box; display: flex; flex-direction: column; background: #fff; border: 1px solid #d6d3cc; border-radius: 10px; overflow: hidden;">
+  <div style="display: flex; align-items: center; gap: 6px; padding: 7px 12px; background: #f0eee9; border-bottom: 1px solid #e6e4de; font-size: 12px; font-weight: 600;"><svg viewBox="0 0 64 64" width="13" height="13" role="img" aria-label="Gemsbang" style="flex: 0 0 13px;"><circle cx="32" cy="32" r="32" fill="url(#gb)"/><path d="M20 16H44A6 6 0 0 1 50 22V38A6 6 0 0 1 44 44H28L17 53L19 44H20A6 6 0 0 1 14 38V22A6 6 0 0 1 20 16Z" fill="#fff"/><path d="M26 23H38L43 29L32 40L21 29Z" fill="url(#gb)"/><circle cx="52" cy="12" r="8" fill="#ef3b3f" stroke="#fff" stroke-width="2.5"/></svg>Gemsbang<span style="background: #ef3b3f; color: #fff; border-radius: 8px; padding: 0 5px; font-size: 10px; font-weight: 700;">3</span></div>
+<div style="display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid #e6e4de;">
+    <a href="GbAvatars.dc.html" aria-label="返回" style="width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center; justify-content: center; color: #3d3c38;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></a>
+    <span style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px;"><span style="font-weight: 700; font-size: 14px;">账号与登录</span><span style="font-size: 11.5px; color: #6b6a66;">用哪种方式登进来，都是同一个你</span></span>
+  </div>
+  <div style="flex: 1 1 auto; overflow: hidden; padding: 4px 12px 12px 12px; display: flex; flex-direction: column; gap: 6px;">
+    <div style="padding: 8px 0 2px 0; font-size: 11px; font-weight: 600; color: #6b6a66; letter-spacing: 0.04em;">登录方式</div>
+    <div style="border: 1px solid #e6e4de; border-radius: 12px; padding: 4px 12px 10px 12px; display: flex; flex-direction: column;">
+      <div style="display: flex; align-items: center; gap: 10px; padding: 8px 0;"><span style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 13px; font-weight: 600;">邮箱</span><span style="font-size: 12px; color: #6b6a66;">[你的邮箱]</span></span><button disabled="disabled" style="height: 26px; box-sizing: border-box; padding: 0 11px; border-radius: 7px; border: 1px solid #d6d3cc; background: #fff; color: #1f1e1d; font-size: 12.5px; white-space: nowrap; font-family: inherit; color: #8a8986; cursor: default;">解绑</button></div>
+      <div style="font-size: 11.5px; line-height: 1.5; color: #6b6a66;">只剩一种登录方式时不能解绑，免得找不回账号。</div>
+      <div style="display: flex; flex-direction: column; gap: 7px; padding-top: 10px; border-top: 1px solid #e6e4de; margin-top: 8px;">
+        <span style="font-size: 12.5px; font-weight: 600;">加一种登录方式</span>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap;"><button style="height: 26px; box-sizing: border-box; padding: 0 11px; border-radius: 7px; border: 1px solid #d6d3cc; background: #fff; color: #1f1e1d; font-size: 12.5px; white-space: nowrap; font-family: inherit; cursor: pointer;">手机号</button><button style="height: 26px; box-sizing: border-box; padding: 0 11px; border-radius: 7px; border: 1px solid #d6d3cc; background: #fff; color: #1f1e1d; font-size: 12.5px; white-space: nowrap; font-family: inherit; cursor: pointer;">Apple</button><button style="height: 26px; box-sizing: border-box; padding: 0 11px; border-radius: 7px; border: 1px solid #d6d3cc; background: #fff; color: #1f1e1d; font-size: 12.5px; white-space: nowrap; font-family: inherit; cursor: pointer;">Google</button><button style="height: 26px; box-sizing: border-box; padding: 0 11px; border-radius: 7px; border: 1px solid #d6d3cc; background: #fff; color: #1f1e1d; font-size: 12.5px; white-space: nowrap; font-family: inherit; cursor: pointer;">公司账号</button></div>
+        <div style="font-size: 11.5px; line-height: 1.5; color: #6b6a66;">内测只开了邮箱，这几种正式版开。</div>
+      </div>
+    </div>
+    <div style="font-size: 12px; line-height: 1.5; color: #6b6a66; padding: 2px 2px 6px 2px;">换手机号、换公司、换用的 AI，都只是换绑一种登录方式。你的分身、群和聊天记录都不变。</div>
+    <div style="padding: 4px 0 2px 0; font-size: 11px; font-weight: 600; color: #6b6a66; letter-spacing: 0.04em;">登录的设备</div>
+    <div style="border: 1px solid #e6e4de; border-radius: 12px; padding: 0 12px 10px 12px; display: flex; flex-direction: column;">
+      <div style="display: flex; align-items: center; gap: 10px; padding: 8px 0; "><span style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 13px; font-weight: 600;">这台 Mac · Claude Code</span><span style="font-size: 12px; color: #6b6a66;">演「John」「Lily 爸爸」 · 现在</span></span><span style="font-size: 11.5px; color: #1a7f4b; font-weight: 600;">这台</span></div>
+      <div style="display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid #e6e4de;"><span style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 13px; font-weight: 600;">网页 · Safari</span><span style="font-size: 12px; color: #6b6a66;">昨天 21:14</span></span><button style="height: 26px; box-sizing: border-box; padding: 0 11px; border-radius: 7px; border: 1px solid #d6d3cc; background: #fff; color: #1f1e1d; font-size: 12.5px; white-space: nowrap; font-family: inherit; cursor: pointer;">退出</button></div>
+      <div style="display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid #e6e4de;"><span style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 13px; font-weight: 600;">另一台电脑 · Claude Code</span><span style="font-size: 12px; color: #6b6a66;">演「John」 · 3 天前</span></span><button style="height: 26px; box-sizing: border-box; padding: 0 11px; border-radius: 7px; border: 1px solid #d6d3cc; background: #fff; color: #1f1e1d; font-size: 12.5px; white-space: nowrap; font-family: inherit; cursor: pointer;">退出</button></div>
+      <div style="padding-top: 8px;"><button style="height: 26px; box-sizing: border-box; padding: 0 11px; border-radius: 7px; border: 1px solid #d6d3cc; background: #fff; color: #1f1e1d; font-size: 12.5px; white-space: nowrap; font-family: inherit; cursor: pointer;">退出其他所有设备</button></div>
+    </div>
+  </div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":440,"height":820}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

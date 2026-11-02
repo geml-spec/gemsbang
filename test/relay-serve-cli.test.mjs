@@ -38,22 +38,8 @@ test("gemworks relay serve: gemsbang's relay until it is stopped, saying where; 
   assert.match(run([]).err, /relay serve/, "the usage says it");
 });
 
-test("gemworks relay serve --hosted-command: the relay plays every avatar with that command, says so where it listens; the free quota's flags are whole numbers", async () => {
+test("gemworks relay serve plays no avatar (architecture §7): models run only in each person's own agents, so the hosted flags are gone from the usage and refused", () => {
   const dir = root();
-  const child = spawn(process.execPath, [BUNDLE, "relay", "serve", "--root", dir, "--port", "0", "--name", "relay.test", "--hosted-command", "cat", "--free-days", "3", "--free-replies", "10"], { stdio: ["ignore", "pipe", "pipe"] });
-  const exited = new Promise((done) => child.on("exit", (code, signal) => done({ code, signal })));
-  let out = "";
-  try {
-    const line = await new Promise((done, failed) => {
-      child.stdout.on("data", (c) => { out += c; const m = /^gemsbang relay relay\.test listening on (http:\/\/127\.0\.0\.1:\d+) · documents under .* · hosted by "cat"$/m.exec(out); if (m) done(m); });
-      child.on("exit", (code) => failed(new Error(`exited ${code} before listening: ${out}`)));
-      setTimeout(() => failed(new Error(`no listening line in time: ${out}`)), 20_000);
-    });
-    assert.equal((await fetch(`${line[1]}/me/quota`)).status, 401);
-  } finally {
-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
-    await exited;
-  }
-  assert.equal(run(["relay", "serve", "--free-days", "x", "--root", dir]).code, 2);
-  assert.match(run(["relay", "serve", "--free-replies", "1.5", "--root", dir]).err, /--free-replies needs a whole number/);
+  assert.doesNotMatch(run([]).err, /--free-days|--free-replies|relay serve … \[--hosted-command/, "the usage no longer offers them");
+  for (const f of ["--hosted-command", "--free-days", "--free-replies"]) assert.match(run(["relay", "serve", f, "1", "--root", dir]).err, new RegExp(`unknown option ${f}`), f);
 });

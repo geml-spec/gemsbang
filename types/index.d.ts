@@ -24,8 +24,11 @@ declare module 'claude-code' {
       /** The pane's page and the avatar the inbox is narrowed to. */
       page: string
       filter: string | null
-      /** The phone a code was sent to, until the code is in. */
-      phone: string | null
+      /** The email a sign-in code was sent to, until the code is in; an email being added to the account, the same. */
+      address: string | null
+      adding: string | null
+      /** The account as last read for its page (GbAccount). */
+      account: GemsbangJson
       /** The avatar a new group is made as ('new' for a new one), and the new one's name. */
       groupAs: string
       groupAvatar: string | null
@@ -37,6 +40,8 @@ declare module 'claude-code' {
       allow: GemsbangJson
       /** The agents this session started for jobs on this computer (spec §7.4), by agent id: whose job, its worktree, its commands, the facts seen. */
       borrowing: GemsbangJson
+      /** The agents this session started to answer calls (architecture §6.3), by agent id: where the answer goes, replying to which line with how many hops. */
+      rounds: GemsbangJson
     }
   }
 }

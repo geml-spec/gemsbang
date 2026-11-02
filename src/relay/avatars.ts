@@ -1,7 +1,8 @@
 // gemsbang's relay (spec §4, §5; transport §2): people, the avatars that are
 // their accounts, the groups and two-person talks the avatars are in, and
-// what they say there. A person lives under `_relay` only: their phone as a
-// salted hash, their default name, which avatars are theirs. No answer to a
+// what they say there. A person lives under `_relay` only: their ways in (an
+// email, a phone number) as salted hashes, the devices they signed in on,
+// their default name, which avatars are theirs. No answer to a
 // client ever names the person behind an avatar (§5 rule 4). An avatar's card
 // (`<avatar>/avatar.geml`) is public; its rules and its list of venues are
 // its own and its person's; a venue is its members'. Every message is
@@ -11,33 +12,39 @@
 // older Relay (relay.ts) and touches none of that one's documents. A refusal
 // is a code and its parameters (§7.6), with its words in Chinese beside it
 // for whoever has no language to ask in; words.ts says it in the others.
+// Everything appended that a person should know goes into their box too
+// (architecture §5.1): a line in a chat of theirs as they may see it, their
+// avatars' cards, jobs, rules and lists, a name changed, their own record.
 import { createHash, randomBytes, randomInt } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { normalizeText, type DataBlock } from "../core/im/chain.js";
 import type { JsonValue } from "../core/schema.js";
 import { factsOf } from "../core/avatar/borrow.js";
-import { defaultOptions, expiryOf, isKind, needFault, wordsOf, type Need, type NeedKind, type NeedOption } from "../core/avatar/needs.js";
+import { defaultOptions, isKind, needFault, wordsOf, type Need, type NeedKind, type NeedOption } from "../core/avatar/needs.js";
 import { DEFAULT_LINK_RULES, expiresAt, linkPath, linkStatus, LINK_CODE, makeCode, mayHandOut, withLinkRules, type LinkRules } from "../core/avatar/links.js";
 import { nameFault, randomName } from "../core/avatar/names.js";
 import { suggestions, type Suggestion } from "../core/avatar/naming.js";
 import { pickAvatar, type Pick } from "../core/avatar/pick.js";
-import { CODE_MISSES, CODE_RE, CODE_TTL_MS, CODES_PER_IP_HOUR, CODES_PER_PHONE, codeText, hashPhone, normalizePhone, tailOf } from "../core/avatar/phone.js";
+import { DIFFERENCE_LIMIT, differenceOf, type Difference, type Update } from "../core/avatar/updates.js";
+import { addressFault, addressOf, codeMail, hashAddress, keyOf, maskAddress, type Address, type AddressKind } from "../core/avatar/address.js";
+import { CODE_MISSES, CODE_RE, CODE_TTL_MS, CODES_PER_IP_HOUR, CODES_PER_PHONE, codeText, tailOf } from "../core/avatar/phone.js";
 import { DEFAULT_RULES, withRules, type Rules } from "../core/avatar/rules.js";
 import { AVATAR_ID, avatarSpeaker, parseWho, VENUE_ID, type By } from "../core/avatar/who.js";
 import { DEFAULT_LANG, isLang, say, type Fault, type Lang } from "../core/avatar/words.js";
-import { appendBlock, appendSealed, BLOCK_ID, DOC, nextId, readDoc, RELAY_OWNER, sealed } from "./store.js";
+import { BLOCK_ID, DOC, nextId, RELAY_OWNER, sealed } from "./store.js";
+import { appendSealed, fileStore, type DocStore } from "./doc-store.js";
 import type { PushAdapter } from "./push.js";
+import { fileMailer, type Mailer } from "./mail.js";
 import { fileTexter, type Texter } from "./text.js";
-import { hashToken, issueToken, verifyToken, type TokenRecord } from "./tokens.js";
+import { hashToken, issueToken, liveTokens, revokeToken, verifyToken, type TokenRecord } from "./tokens.js";
 
-export interface AvatarRelayOptions { root: string; name: string; now?: () => string; texter?: Texter; rand?: () => number; /** The push channels the relay offers (spec §7.3); none unless given. */ push?: PushAdapter[] }
+/** Where its documents live: a folder (`root`, files as the Node shell keeps them) or a store (doc-store.ts: memory, SQLite). */
+export interface AvatarRelayOptions { root?: string; store?: DocStore; name: string; now?: () => string; texter?: Texter; /** Where an email's code goes, and the address it says it comes from (the relay's name unless given). */ mailer?: Mailer; mailFrom?: string; rand?: () => number; /** The push channels the relay offers (spec §7.3); none unless given. */ push?: PushAdapter[] }
 /** A refusal: the status, the code and its parameters, and the code's words in Chinese. */
 export type Fail = { ok: false; status: number; code: string; params?: Record<string, string | number>; reason: string };
 export type Result<T> = ({ ok: true } & T) | Fail;
 export type Issued = { token: string; record: TokenRecord };
-/** An avatar as anyone sees it: its id and name; `away` while its hosted body only receives (spec §8.3: 本人在时才回). */
-export interface AvatarCard { id: string; name: string; away?: true }
+/** An avatar as anyone sees it: its id and name. */
+export interface AvatarCard { id: string; name: string }
 export type VenueKind = "group" | "dm";
 export interface VenueView { owner: string; id: string; kind: VenueKind; name: string; members: AvatarCard[] }
 /** A venue as one of the person's avatars is in it. */
@@ -48,6 +55,10 @@ export interface Pushed { owner: string; doc: string; block: DataBlock }
 export interface LinkView { code: string; expires: string; path: string; forward: boolean; approve: boolean }
 /** What a link's page shows (spec §6.2): the group, a few of its members, its owner; to a person, which avatar would go in and the names offered. */
 export interface LinkInfo { group: { id: string; name: string; count: number; members: AvatarCard[] }; owner: AvatarCard | undefined; expires: string; approve: boolean; suggestions: Suggestion[]; you?: { avatars: AvatarCard[]; pick: Pick } }
+/** A way in as its person sees it (architecture §3.1): its key in the login index, its kind, the address masked, when it was added. */
+export interface Method { id: string; kind: AddressKind; shown: string; at: string }
+/** Where the person is signed in: the sign-in's token id, the name the device gave, when, whether it is the one asking, the avatars the agents it attached play. */
+export interface Device { id: string; name: string; at: string; current: boolean; avatars: AvatarCard[] }
 /** In through a link: the avatar that went in, or waits for the owner; an agent's join carries the avatar's token. */
 export interface Joined { venue: VenueView; avatar: AvatarCard; already: boolean; pending?: string; token?: string }
 
@@ -58,38 +69,62 @@ const str = (v: unknown): string | undefined => (typeof v === "string" ? v : und
 const obj = (v: unknown): Record<string, unknown> | undefined => (typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined);
 const hex = (bytes: number): string => randomBytes(bytes).toString("hex");
 const ONE_HOUR_MS = 3_600_000;
-/** The relay's own records, under `_relay`: the phone→person map, the codes, the avatar→person map, the salt. */
-const PHONES = "avatar-phones.geml", CODES = "avatar-codes.geml", OWNERS = "avatar-owners.geml", SALT = "avatar-salt.txt";
+/** The relay's own records, under `_relay`: the login index (each address's binds and unbinds), the phone→person map from before it, the codes, the avatar→person map, the salt. */
+const LOGINS = "avatar-logins.geml", PHONES = "avatar-phones.geml", CODES = "avatar-codes.geml", OWNERS = "avatar-owners.geml", SALT = "avatar-salt.txt";
+/** The name a device gives itself, at most this long. */
+const DEVICE_NAME_MAX = 60;
 const peopleDoc = (person: string): string => `people/${person}.geml`;
+const PEOPLE_DOC = /^people\/(p-[0-9a-f]{10})\.geml$/;
+/** A person's box (architecture §5.1), under `_relay`: one block `u-<pts>` per update. */
+const boxDoc = (person: string): string => `boxes/${person}.geml`;
+const num = (v: unknown): number => (typeof v === "number" ? v : 0);
+const lastPts = (d: { blocks: readonly DataBlock[] }): number => num(d.blocks[d.blocks.length - 1]?.value["pts"]);
 const venueDoc = (venue: string): string => `venues/${venue}.geml`;
 const VENUE_DOC = /^venues\/([gd]-[0-9a-f]{10})\.geml$/;
 /** Ids the relay writes in a venue; a client's message may not take one. */
 const RESERVED = /^(venue|member|msg|sys|link|request|answer)(-|$)/;
 export const TEXT_MAX = 4000;
-/** How long a job waits for the avatar's computer before the chat and the person are told (spec §7.4). */
-export const BODY_WAIT_MS = 2 * 60_000;
 const WORK_DOC = "work.geml";
 /** Where a job of the person's computer stands (spec §7.4). */
 export type WorkState = "waiting" | "queued" | "taken" | "done" | "failed";
 const WORK_STATES: readonly WorkState[] = ["waiting", "queued", "taken", "done", "failed"];
 const WORK_FAULTS = ["borrow.noRepo", "borrow.wrongRepo", "borrow.failed"];
 /** A job for the avatar's computer, from a borrow card: what it is, where it came from, where it stands. */
-export interface Work { id: string; avatar: string; need: string; summary: string; state: WorkState; at: string; since: string; told: boolean; venue?: { owner: string; id: string }; message?: string; from?: string; auto?: true }
+export interface Work { id: string; avatar: string; need: string; summary: string; state: WorkState; at: string; since: string; venue?: { owner: string; id: string }; message?: string; from?: string; auto?: true }
 export const GROUP_NAME_MAX = 40;
 
 export class AvatarRelay {
-  readonly root: string;
+  /** The folder of a relay on files; none on another store. */
+  readonly root: string | undefined;
+  /** The relay's documents: every append also goes into the boxes of the people it concerns. */
+  readonly store: DocStore;
+  private readonly base: DocStore;
+  private readonly boxWaiters = new Map<string, Set<() => void>>();
   readonly name: string;
   private readonly clock: () => string;
   private readonly texter: Texter;
+  private readonly mailer: Mailer;
+  private readonly mailFrom: string;
   private readonly rand: () => number;
   private readonly listeners = new Set<(p: Pushed) => void>();
   private readonly push: PushAdapter[];
 
   constructor(o: AvatarRelayOptions) {
+    if (o.store === undefined && o.root === undefined) throw new Error("a relay needs a root or a store");
     this.root = o.root;
+    const base = o.store ?? fileStore(o.root!);
+    this.base = base;
+    this.store = {
+      read: (owner, doc) => base.read(owner, doc),
+      list: (owner, dir) => base.list(owner, dir),
+      secret: (name, make) => base.secret(name, make),
+      append: (owner, doc, idOf, build) => { const a = base.append(owner, doc, idOf, build); if (!a.existed) this.route(owner, doc, a.block); return a; },
+    };
     this.name = o.name;
-    this.texter = o.texter ?? fileTexter(o.root);
+    // On files, a text the operator has no route for is a file; elsewhere it goes nowhere until they give one.
+    this.texter = o.texter ?? (o.root !== undefined ? fileTexter(o.root) : () => undefined);
+    this.mailer = o.mailer ?? (o.root !== undefined ? fileMailer(o.root) : () => undefined);
+    this.mailFrom = o.mailFrom ?? o.name;
     this.rand = o.rand ?? Math.random;
     this.clock = o.now ?? (() => new Date().toISOString().replace(/\.\d{3}Z$/, "Z"));
     this.push = o.push ?? [];
@@ -99,78 +134,293 @@ export class AvatarRelay {
   /** Hear of every block appended; the function given back stops it. */
   onAppend(fn: (p: Pushed) => void): () => void { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; }
   private emit(owner: string, doc: string, block: DataBlock): void { for (const fn of this.listeners) fn({ owner, doc, block }); }
-  verify(token: string): TokenRecord | undefined { return verifyToken(this.root, token); }
+  verify(token: string): TokenRecord | undefined { return verifyToken(this.store, token); }
 
   /** The salt of the phone hashes, made once: a hash of a phone number without it could be undone by trying every number. */
-  private salt(): string {
-    const dir = join(this.root, RELAY_OWNER), path = join(dir, SALT);
-    if (!existsSync(path)) {
-      mkdirSync(dir, { recursive: true });
-      try { writeFileSync(path, hex(16), { flag: "wx" }); } catch { /* another writer made it first */ }
-    }
-    return readFileSync(path, "utf8").trim();
+  private salt(): string { return this.store.secret(SALT, () => hex(16)); }
+
+  // --- login (spec §6.2; architecture §3) ---
+
+  /** A code sent to the address — mailed to an email, texted to a number — in the language asked in: three to an address in ten minutes, ten to a network in an hour; whether the address is someone's way in, where the code went (masked) and who it comes from. */
+  startLogin(body: unknown, ip?: string): Result<{ sent: true; known: boolean; to: string; from: string; tail?: string }> {
+    const sent = this.sendCode(obj(body) ?? {}, ip);
+    if (isFail(sent)) return sent;
+    return { ok: true, sent: true, known: this.personByKey(sent.key) !== undefined, to: maskAddress(sent.a), from: this.mailFrom, ...(sent.a.kind === "phone" ? { tail: tailOf(sent.a.value) } : {}) };
   }
 
-  // --- login (spec §6.2) ---
-
-  /** A code texted to the number, in the language asked in: three to a number in ten minutes, ten to a network in an hour; whether the number is known, and its last four digits. */
-  startLogin(body: unknown, ip?: string): Result<{ sent: true; known: boolean; tail: string }> {
-    const phone = normalizePhone(obj(body)?.["phone"]);
-    const asked = obj(body)?.["lang"];
+  /** A code made and sent to the body's address, unless `before` refuses its key or the address or the network asked too often. */
+  private sendCode(o: Record<string, unknown>, ip?: string, before?: (key: string) => Fail | undefined): { a: Address; key: string } | Fail {
+    const a = addressOf(o);
+    if (a === undefined) return refuse(400, addressFault(o)!);
+    const asked = o["lang"];
     const lang: Lang = isLang(asked) ? asked : DEFAULT_LANG;
-    if (phone === undefined) return fail(400, "phone.required");
-    const h = hashPhone(phone, this.salt());
+    const h = hashAddress(a, this.salt()), key = keyOf(a.kind, h);
+    const refused = before?.(key);
+    if (refused !== undefined) return refused;
     const now = this.now(), t = Date.parse(now);
     const age = (b: DataBlock): number => t - Date.parse(str(b.value["at"]) ?? "");
-    const recent = readDoc(this.root, RELAY_OWNER, CODES).blocks.filter((b) => /^code-\d+$/.test(b.id) && age(b) < ONE_HOUR_MS);
-    if (recent.filter((b) => b.value["phone"] === h && age(b) < CODE_TTL_MS).length >= CODES_PER_PHONE) return fail(429, "code.tooMany");
+    const recent = this.store.read(RELAY_OWNER, CODES).blocks.filter((b) => /^code-\d+$/.test(b.id) && age(b) < ONE_HOUR_MS);
+    if (recent.filter((b) => b.value["addr"] === h && age(b) < CODE_TTL_MS).length >= CODES_PER_PHONE) return fail(429, "code.tooMany");
     if (ip !== undefined && recent.filter((b) => b.value["ip"] === ip).length >= CODES_PER_IP_HOUR) return fail(429, "code.tooMany");
     const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
-    appendBlock(this.root, RELAY_OWNER, CODES, nextId("code"), (_d, prev, id) => sealed({ id, phone: h, code: hashToken(`${h}:${code}`), at: now, ...(ip !== undefined ? { ip } : {}) }, prev));
-    try { void Promise.resolve(this.texter({ to: phone, text: codeText(code, lang) })).catch(() => { /* the operator's route failed; the next code tries again */ }); } catch { /* the same */ }
-    return { ok: true, sent: true, known: this.personByPhone(h) !== undefined, tail: tailOf(phone) };
+    this.store.append(RELAY_OWNER, CODES, nextId("code"), (_d, prev, id) => sealed({ id, addr: h, code: hashToken(`${h}:${code}`), at: now, ...(ip !== undefined ? { ip } : {}) }, prev));
+    try {
+      const sending = a.kind === "email" ? this.mailer({ to: a.value, ...codeMail(code, lang) }) : this.texter({ to: a.value, text: codeText(code, lang) });
+      void Promise.resolve(sending).catch(() => { /* the operator's route failed; the next code tries again */ });
+    } catch { /* the same */ }
+    return { a, key };
   }
 
-  private personByPhone(h: string): string | undefined {
-    const b = readDoc(this.root, RELAY_OWNER, PHONES).blocks.find((x) => x.id === `phone-${h.slice(7, 31)}`);
-    return b === undefined ? undefined : str(b.value["person"]);
-  }
-
-  /** The code checked: a person's token; a number seen for the first time becomes a person in the language they logged in with, with no avatar yet (one grows with the first venue, §6.2). */
-  finishLogin(body: unknown): Result<{ token: string; person: string; new: boolean }> {
-    const p = this.checkCode(body);
-    if (isFail(p)) return p;
-    const { token } = issueToken(this.root, { speaker: `person:${p.person}`, scope: "person", by: "login", at: this.now() });
-    return { ok: true, token, person: p.person, new: p.new };
-  }
-
-  /** The code checked and spent: the person the number is, made the first time it is seen. */
-  private checkCode(body: unknown): { person: string; new: boolean } | Fail {
-    const o = obj(body) ?? {};
-    const phone = normalizePhone(o["phone"]);
-    if (phone === undefined) return fail(400, "phone.required");
+  /** The code checked and spent for the body's address: the address and its key. */
+  private spendCode(o: Record<string, unknown>): { a: Address; key: string } | Fail {
+    const a = addressOf(o);
+    if (a === undefined) return refuse(400, addressFault(o)!);
     const code = str(o["code"]);
     if (code === undefined || !CODE_RE.test(code)) return fail(400, "code.short");
-    const h = hashPhone(phone, this.salt()), now = this.now(), t = Date.parse(now);
-    const d = readDoc(this.root, RELAY_OWNER, CODES);
+    const h = hashAddress(a, this.salt()), now = this.now(), t = Date.parse(now);
+    const d = this.store.read(RELAY_OWNER, CODES);
     const recent = (b: DataBlock): boolean => t - Date.parse(str(b.value["at"]) ?? "") < CODE_TTL_MS;
-    // Six digits are a million guesses: five wrong ones stop the number's codes for ten minutes.
-    const misses = d.blocks.filter((b) => /^miss-\d+$/.test(b.id) && b.value["phone"] === h && recent(b)).length;
+    // Six digits are a million guesses: five wrong ones stop the address's codes for ten minutes.
+    const misses = d.blocks.filter((b) => /^miss-\d+$/.test(b.id) && b.value["addr"] === h && recent(b)).length;
     if (misses >= CODE_MISSES) return fail(429, "code.locked");
     const used = new Set(d.blocks.filter((b) => /^used-\d+$/.test(b.id)).map((b) => b.value["code"]));
     const want = hashToken(`${h}:${code}`);
-    const hit = d.blocks.find((b) => /^code-\d+$/.test(b.id) && b.value["phone"] === h && b.value["code"] === want && !used.has(b.id) && recent(b));
+    const hit = d.blocks.find((b) => /^code-\d+$/.test(b.id) && b.value["addr"] === h && b.value["code"] === want && !used.has(b.id) && recent(b));
     if (hit === undefined) {
-      appendBlock(this.root, RELAY_OWNER, CODES, nextId("miss"), (_d, prev, id) => sealed({ id, phone: h, at: now }, prev));
+      this.store.append(RELAY_OWNER, CODES, nextId("miss"), (_d, prev, id) => sealed({ id, addr: h, at: now }, prev));
       return misses + 1 >= CODE_MISSES ? fail(429, "code.locked") : fail(401, "code.wrong");
     }
-    appendBlock(this.root, RELAY_OWNER, CODES, nextId("used"), (_d, prev, id) => sealed({ id, code: hit.id, at: now }, prev));
-    const candidate = `p-${hex(5)}`;
-    const mapped = appendSealed(this.root, RELAY_OWNER, PHONES, `phone-${h.slice(7, 31)}`, { phone: h, person: candidate, at: now });
-    const person = str(mapped.block.value["person"]) ?? candidate;
-    const asked = o["lang"];
-    if (!mapped.existed) appendSealed(this.root, RELAY_OWNER, peopleDoc(person), "person", { phone: h, lang: isLang(asked) ? asked : DEFAULT_LANG, at: now });
-    return { person, new: !mapped.existed };
+    this.store.append(RELAY_OWNER, CODES, nextId("used"), (_d, prev, id) => sealed({ id, code: hit.id, at: now }, prev));
+    return { a, key: keyOf(a.kind, h) };
+  }
+
+  /** The person an address's key is a way in to: its last bind in the login index, unless unbound after; a number from before the index, the old map's. */
+  private personByKey(key: string): string | undefined {
+    let person: string | undefined, seen = false;
+    for (const b of this.store.read(RELAY_OWNER, LOGINS).blocks) {
+      if (b.value["key"] !== key) continue;
+      seen = true;
+      person = /^bind-\d+$/.test(b.id) ? str(b.value["person"]) : undefined;
+    }
+    if (seen || !key.startsWith("phone-")) return person;
+    const old = this.store.read(RELAY_OWNER, PHONES).blocks.find((x) => x.id === key);
+    return old === undefined ? undefined : str(old.value["person"]);
+  }
+
+  /** The address made one of the person's ways in: in the login index, and on the person, masked. */
+  private bind(person: string, a: Address, key: string): void {
+    const now = this.now();
+    this.store.append(RELAY_OWNER, LOGINS, nextId("bind"), (_d, prev, id) => sealed({ id, key, person, at: now }, prev));
+    this.store.append(RELAY_OWNER, peopleDoc(person), nextId("bind"), (_d, prev, id) => sealed({ id, key, kind: a.kind, shown: maskAddress(a), at: now }, prev));
+  }
+
+  /** The code checked: a person's token, named for the device that asked; an address seen for the first time becomes a person in the language they signed in with, with no avatar yet (one grows with the first venue, §6.2, or the name they give first). */
+  finishLogin(body: unknown): Result<{ token: string; person: string; new: boolean }> {
+    const p = this.checkCode(body);
+    if (isFail(p)) return p;
+    const { token, record } = issueToken(this.store, { speaker: `person:${p.person}`, scope: "person", by: "login", at: this.now() });
+    this.nameDevice(p.person, record.id, obj(body)?.["device"]);
+    return { ok: true, token, person: p.person, new: p.new };
+  }
+
+  /** The code checked and spent: the person the address is a way in to, made the first time it is seen. */
+  private checkCode(body: unknown): { person: string; new: boolean } | Fail {
+    const o = obj(body) ?? {};
+    const s = this.spendCode(o);
+    if (isFail(s)) return s;
+    const known = this.personByKey(s.key);
+    if (known !== undefined) return { person: known, new: false };
+    const person = `p-${hex(5)}`, asked = o["lang"];
+    appendSealed(this.store, RELAY_OWNER, peopleDoc(person), "person", { lang: isLang(asked) ? asked : DEFAULT_LANG, at: this.now() });
+    this.bind(person, s.a, s.key);
+    return { person, new: true };
+  }
+
+  /** The name a device gave itself at sign-in, kept with its token's id; control characters dropped, at most sixty characters, none when empty. */
+  private nameDevice(person: string, token: string, given: unknown): void {
+    const name = typeof given === "string" ? [...given.replace(/[\u0000-\u001f\u007f]/g, "").trim()].slice(0, DEVICE_NAME_MAX).join("") : "";
+    if (name !== "") this.store.append(RELAY_OWNER, peopleDoc(person), nextId("device"), (_d, prev, id) => sealed({ id, token, name, at: this.now() }, prev));
+  }
+
+  // --- the account (architecture §3.1) ---
+
+  /** The person's ways in, oldest first; a number from before the login index, if it is still theirs. */
+  methodsOf(person: string): Method[] {
+    const out = new Map<string, Method>();
+    for (const b of this.store.read(RELAY_OWNER, peopleDoc(person)).blocks) {
+      const key = str(b.value["key"]), kind = b.value["kind"];
+      if (b.id === "person" && typeof b.value["phone"] === "string") {
+        const old = keyOf("phone", b.value["phone"]);
+        if (this.personByKey(old) === person) out.set(old, { id: old, kind: "phone", shown: "••••", at: str(b.value["at"]) ?? "" });
+      } else if (/^bind-\d+$/.test(b.id) && key !== undefined && (kind === "email" || kind === "phone")) out.set(key, { id: key, kind, shown: str(b.value["shown"]) ?? "", at: str(b.value["at"]) ?? "" });
+      else if (/^unbind-\d+$/.test(b.id) && key !== undefined) out.delete(key);
+    }
+    return [...out.values()];
+  }
+
+  methods(by: TokenRecord): Result<{ methods: Method[] }> {
+    const person = this.onlyPerson(by);
+    return typeof person === "string" ? { ok: true, methods: this.methodsOf(person) } : person;
+  }
+
+  /** A code sent to an address the person adds as one more way in; an address that is already someone else's is refused before any code. */
+  startMethod(by: TokenRecord, body: unknown, ip?: string): Result<{ sent: true; to: string; from: string }> {
+    const person = this.onlyPerson(by);
+    if (typeof person !== "string") return person;
+    const sent = this.sendCode({ lang: this.languageOf(person), ...(obj(body) ?? {}) }, ip, (key) => { const owner = this.personByKey(key); return owner !== undefined && owner !== person ? fail(409, "login.taken") : undefined; });
+    if (isFail(sent)) return sent;
+    return { ok: true, sent: true, to: maskAddress(sent.a), from: this.mailFrom };
+  }
+
+  /** The code checked: the address is one more of the person's ways in; already theirs, it stays as it was; someone else's, refused. */
+  addMethod(by: TokenRecord, body: unknown): Result<{ methods: Method[] }> {
+    const person = this.onlyPerson(by);
+    if (typeof person !== "string") return person;
+    const s = this.spendCode(obj(body) ?? {});
+    if (isFail(s)) return s;
+    const owner = this.personByKey(s.key);
+    if (owner !== undefined && owner !== person) return fail(409, "login.taken");
+    if (owner === undefined) this.bind(person, s.a, s.key);
+    return { ok: true, methods: this.methodsOf(person) };
+  }
+
+  /** One way in taken off; the last one stays, so the person can always get back in. */
+  removeMethod(by: TokenRecord, key: string): Result<{ methods: Method[] }> {
+    const person = this.onlyPerson(by);
+    if (typeof person !== "string") return person;
+    const methods = this.methodsOf(person);
+    if (!methods.some((m) => m.id === key)) return fail(404, "login.missing");
+    if (methods.length <= 1) return fail(409, "login.last");
+    const now = this.now();
+    this.store.append(RELAY_OWNER, LOGINS, nextId("unbind"), (_d, prev, id) => sealed({ id, key, person, at: now }, prev));
+    this.store.append(RELAY_OWNER, peopleDoc(person), nextId("unbind"), (_d, prev, id) => sealed({ id, key, at: now }, prev));
+    return { ok: true, methods: this.methodsOf(person) };
+  }
+
+  /** The tokens issued under one, and under those, every one not revoked. */
+  private under(live: readonly TokenRecord[], id: string): TokenRecord[] {
+    return live.filter((t) => t.by === id).flatMap((t) => [t, ...this.under(live, t.id)]);
+  }
+
+  /** Where the person is signed in: the one asking first, then the newest; each with the name it gave and the avatars the agents it attached play. */
+  devicesOf(by: TokenRecord): Result<{ devices: Device[] }> {
+    const person = this.onlyPerson(by);
+    if (typeof person !== "string") return person;
+    const live = liveTokens(this.store);
+    const names = new Map<string, string>();
+    for (const b of this.store.read(RELAY_OWNER, peopleDoc(person)).blocks) if (/^device-\d+$/.test(b.id)) names.set(str(b.value["token"]) ?? "", str(b.value["name"]) ?? "");
+    const devices = live.filter((t) => t.by === "login" && t.speaker === `person:${person}`).map((t): Device => {
+      const played = new Set<string>();
+      for (const x of this.under(live, t.id)) { const w = parseWho(x.speaker); if (x.scope === "avatar" && w?.kind === "avatar") played.add(w.id); }
+      return { id: t.id, name: names.get(t.id) ?? "", at: t.at, current: t.id === by.id, avatars: [...played].map((a) => this.card(a)).filter((c): c is AvatarCard => c !== undefined) };
+    });
+    devices.sort((a, b) => (a.current !== b.current ? (a.current ? -1 : 1) : a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+    return { ok: true, devices };
+  }
+
+  /** Each sign-in's token and every token under it revoked; how many. */
+  private signOut(ids: readonly string[]): number {
+    const live = liveTokens(this.store), now = this.now();
+    let n = 0;
+    for (const id of ids) for (const t of [id, ...this.under(live, id).map((x) => x.id)]) if (revokeToken(this.store, t, now)) n++;
+    return n;
+  }
+
+  /** Signed out on one device of the person's: its sign-in and the avatars' tokens its agents held. */
+  revokeDevice(by: TokenRecord, id: string): Result<{ revoked: number }> {
+    const person = this.onlyPerson(by);
+    if (typeof person !== "string") return person;
+    if (!liveTokens(this.store).some((t) => t.id === id && t.by === "login" && t.speaker === `person:${person}`)) return fail(404, "device.missing");
+    return { ok: true, revoked: this.signOut([id]) };
+  }
+
+  /** Signed out everywhere but on the device asking. */
+  revokeOthers(by: TokenRecord): Result<{ revoked: number }> {
+    const person = this.onlyPerson(by);
+    if (typeof person !== "string") return person;
+    return { ok: true, revoked: this.signOut(liveTokens(this.store).filter((t) => t.by === "login" && t.speaker === `person:${person}` && t.id !== by.id).map((t) => t.id)) };
+  }
+
+  /** Signed out on the device asking: its own token and every one under it. */
+  logout(by: TokenRecord): Result<{ revoked: number }> {
+    if (this.personOf(by) === undefined) return fail(403, "person.only");
+    return { ok: true, revoked: this.signOut([by.id]) };
+  }
+
+  // --- the box (architecture §5) ---
+
+  /** The people a block appended to a document concerns, each with the block as they may see it: a chat's members, its lines' `by` left out where the speaker does not mark; an avatar's own documents, its person; its card, everyone in a chat with it too; a person's record, that person. */
+  private audience(owner: string, doc: string, block: DataBlock): Map<string, Record<string, JsonValue>> {
+    const out = new Map<string, Record<string, JsonValue>>();
+    if (owner === RELAY_OWNER) {
+      const p = PEOPLE_DOC.exec(doc);
+      if (p !== null) out.set(p[1]!, block.value);
+      return out;
+    }
+    if (!AVATAR_ID.test(owner)) return out;
+    const v = VENUE_DOC.exec(doc);
+    if (v !== null) {
+      const marks = new Map<string, boolean>();
+      const marked = (avatar: string): boolean => { if (!marks.has(avatar)) marks.set(avatar, this.rulesOf(avatar).mark); return marks.get(avatar)!; };
+      for (const m of this.venueState(owner, v[1]!)?.members ?? []) {
+        const person = this.ownerOf(m);
+        if (person !== undefined && !out.has(person)) out.set(person, this.shown(block, this.avatarsOf(person).map((a) => a.id), marked).value);
+      }
+      return out;
+    }
+    const mine = this.ownerOf(owner);
+    if (mine !== undefined) out.set(mine, block.value);
+    if (doc === "avatar.geml") {
+      for (const j of this.joinedOf(owner)) for (const m of this.venueState(j.owner, j.venue)?.members ?? []) {
+        const person = this.ownerOf(m);
+        if (person !== undefined && !out.has(person)) out.set(person, block.value);
+      }
+    }
+    return out;
+  }
+
+  /** A block appended, into the box of everyone it concerns, numbered there; whoever waits on a box hears of it. */
+  private route(owner: string, doc: string, block: DataBlock): void {
+    if (owner === RELAY_OWNER && !PEOPLE_DOC.test(doc)) return;
+    for (const [person, value] of this.audience(owner, doc, block)) {
+      const at = this.now();
+      this.base.append(RELAY_OWNER, boxDoc(person), (d) => `u-${lastPts(d) + 1}`, (d, prev, id) => sealed({ id, pts: lastPts(d) + 1, count: 1, at, owner, doc, block: { id: block.id, value } }, prev));
+      for (const fn of [...(this.boxWaiters.get(person) ?? [])]) fn();
+    }
+  }
+
+  /** The person's box, oldest first. */
+  private boxOf(person: string): Update[] {
+    return this.store.read(RELAY_OWNER, boxDoc(person)).blocks.filter((b) => /^u-\d+$/.test(b.id)).map((b) => {
+      const kept = obj(b.value["block"]) ?? {};
+      return { pts: num(b.value["pts"]), count: num(b.value["count"]), at: str(b.value["at"]) ?? "", owner: str(b.value["owner"]) ?? "", doc: str(b.value["doc"]) ?? "", block: { id: str(kept["id"]) ?? "", value: (obj(kept["value"]) ?? {}) as Record<string, JsonValue> } };
+    });
+  }
+
+  /** Where the person's box stands: its number, and the relay's time. */
+  updatesState(by: TokenRecord): Result<{ pts: number; date: string }> {
+    const person = this.personOf(by);
+    if (person === undefined) return fail(403, "person.only");
+    const box = this.boxOf(person);
+    return { ok: true, pts: box[box.length - 1]?.pts ?? 0, date: this.now() };
+  }
+
+  /** The updates after the number the client reached (`pts`), at most `limit` (a hundred); too far behind, said so. */
+  difference(by: TokenRecord, q: Readonly<Record<string, unknown>>): Result<Difference> {
+    const person = this.personOf(by);
+    if (person === undefined) return fail(403, "person.only");
+    const pts = Number(q["pts"]), limit = q["limit"] === undefined ? DIFFERENCE_LIMIT : Number(q["limit"]);
+    if (!Number.isInteger(pts) || pts < 0) return fail(400, "updates.pts");
+    if (!Number.isInteger(limit) || limit < 1) return fail(400, "updates.limit", { max: DIFFERENCE_LIMIT });
+    return { ok: true, ...differenceOf(this.boxOf(person), pts, this.now(), Math.min(limit, DIFFERENCE_LIMIT)) };
+  }
+
+  /** Hear when the person's box grows; the function given back stops it. */
+  onBox(person: string, fn: () => void): () => void {
+    const set = this.boxWaiters.get(person) ?? new Set<() => void>();
+    set.add(fn);
+    this.boxWaiters.set(person, set);
+    return () => { set.delete(fn); if (set.size === 0) this.boxWaiters.delete(person); };
   }
 
   // --- the person ---
@@ -190,7 +440,7 @@ export class AvatarRelay {
   /** The person's language (spec §7.6): the latest chosen, else the one they first logged in with. */
   languageOf(person: string): Lang {
     let lang: Lang = DEFAULT_LANG;
-    for (const b of readDoc(this.root, RELAY_OWNER, peopleDoc(person)).blocks) {
+    for (const b of this.store.read(RELAY_OWNER, peopleDoc(person)).blocks) {
       const v = b.value["lang"];
       if ((b.id === "person" || /^lang-\d+$/.test(b.id)) && isLang(v)) lang = v;
     }
@@ -202,14 +452,14 @@ export class AvatarRelay {
     if (typeof person !== "string") return person;
     const lang = obj(body)?.["lang"];
     if (!isLang(lang)) return fail(400, "lang.unknown");
-    appendBlock(this.root, RELAY_OWNER, peopleDoc(person), nextId("lang"), (_d, prev, id) => sealed({ id, lang, at: this.now() }, prev));
+    this.store.append(RELAY_OWNER, peopleDoc(person), nextId("lang"), (_d, prev, id) => sealed({ id, lang, at: this.now() }, prev));
     return { ok: true, lang };
   }
 
   /** The person's default name (spec §6.5), the latest set; null clears it. It is only ever offered as a suggestion. */
   defaultNameOf(person: string): string | undefined {
     let name: string | undefined;
-    for (const b of readDoc(this.root, RELAY_OWNER, peopleDoc(person)).blocks) if (/^default-\d+$/.test(b.id)) name = str(b.value["name"]);
+    for (const b of this.store.read(RELAY_OWNER, peopleDoc(person)).blocks) if (/^default-\d+$/.test(b.id)) name = str(b.value["name"]);
     return name;
   }
 
@@ -219,7 +469,7 @@ export class AvatarRelay {
     const v = obj(body)?.["name"];
     if (v !== null) { const f = nameFault(v); if (f !== undefined) return refuse(400, f); }
     const name = v === null ? null : (v as string).trim();
-    appendBlock(this.root, RELAY_OWNER, peopleDoc(person), nextId("default"), (_d, prev, id) => sealed({ id, name, at: this.now() }, prev));
+    this.store.append(RELAY_OWNER, peopleDoc(person), nextId("default"), (_d, prev, id) => sealed({ id, name, at: this.now() }, prev));
     return name === null ? { ok: true } : { ok: true, name };
   }
 
@@ -229,15 +479,15 @@ export class AvatarRelay {
   card(avatar: string): AvatarCard | undefined {
     if (!AVATAR_ID.test(avatar)) return undefined;
     let name: string | undefined;
-    for (const b of readDoc(this.root, avatar, "avatar.geml").blocks) if (b.id === "avatar" || /^name-\d+$/.test(b.id)) name = str(b.value["name"]) ?? name;
+    for (const b of this.store.read(avatar, "avatar.geml").blocks) if (b.id === "avatar" || /^name-\d+$/.test(b.id)) name = str(b.value["name"]) ?? name;
     if (name === undefined) return undefined;
-    return this.hostedOf(avatar).status === "receive-only" ? { id: avatar, name, away: true } : { id: avatar, name };
+    return { id: avatar, name };
   }
 
   /** The person's avatars, oldest first. */
   avatarsOf(person: string): AvatarCard[] {
     const out: AvatarCard[] = [];
-    for (const b of readDoc(this.root, RELAY_OWNER, peopleDoc(person)).blocks) {
+    for (const b of this.store.read(RELAY_OWNER, peopleDoc(person)).blocks) {
       if (!/^avatar-\d+$/.test(b.id)) continue;
       const c = this.card(str(b.value["avatar"]) ?? "");
       if (c !== undefined) out.push(c);
@@ -247,7 +497,7 @@ export class AvatarRelay {
 
   /** The person behind an avatar: the relay's own lookup, never answered to a client (§5 rule 4). */
   private ownerOf(avatar: string): string | undefined {
-    const b = readDoc(this.root, RELAY_OWNER, OWNERS).blocks.find((x) => x.id === `owner-${avatar}`);
+    const b = this.store.read(RELAY_OWNER, OWNERS).blocks.find((x) => x.id === `owner-${avatar}`);
     return b === undefined ? undefined : str(b.value["person"]);
   }
 
@@ -258,13 +508,21 @@ export class AvatarRelay {
     return this.grow(person, obj(body)?.["name"]);
   }
 
+  /** The person's first avatar, with the name they gave when they first signed in (architecture §3.2); after it, avatars grow by joining or making a group (spec §6.4). */
+  firstAvatar(by: TokenRecord, body: unknown): Result<{ avatar: AvatarCard }> {
+    const person = this.onlyPerson(by);
+    if (typeof person !== "string") return person;
+    if (this.avatarsOf(person).length > 0) return fail(409, "avatar.notFirst");
+    return this.grow(person, obj(body)?.["name"] ?? "");
+  }
+
   private grow(person: string, given: unknown): Result<{ avatar: AvatarCard }> {
     if (given !== undefined) { const f = nameFault(given); if (f !== undefined) return refuse(400, f); }
     const name = typeof given === "string" ? given.trim() : randomName(this.rand, this.languageOf(person));
     const avatar = `a-${hex(5)}`, now = this.now();
-    appendSealed(this.root, RELAY_OWNER, OWNERS, `owner-${avatar}`, { person, at: now });
-    appendBlock(this.root, RELAY_OWNER, peopleDoc(person), nextId("avatar"), (_d, prev, id) => sealed({ id, avatar, at: now }, prev));
-    const made = appendSealed(this.root, avatar, "avatar.geml", "avatar", { name, at: now });
+    appendSealed(this.store, RELAY_OWNER, OWNERS, `owner-${avatar}`, { person, at: now });
+    this.store.append(RELAY_OWNER, peopleDoc(person), nextId("avatar"), (_d, prev, id) => sealed({ id, avatar, at: now }, prev));
+    const made = appendSealed(this.store, avatar, "avatar.geml", "avatar", { name, at: now });
     this.emit(avatar, "avatar.geml", made.block);
     return { ok: true, avatar: { id: avatar, name } };
   }
@@ -283,7 +541,7 @@ export class AvatarRelay {
     const f = nameFault(v);
     if (f !== undefined) return refuse(400, f);
     const name = (v as string).trim();
-    const a = appendBlock(this.root, avatar, "avatar.geml", nextId("name"), (_d, prev, id) => sealed({ id, name, at: this.now() }, prev));
+    const a = this.store.append(avatar, "avatar.geml", nextId("name"), (_d, prev, id) => sealed({ id, name, at: this.now() }, prev));
     this.emit(avatar, "avatar.geml", a.block);
     return { ok: true, avatar: { id: avatar, name } };
   }
@@ -291,7 +549,7 @@ export class AvatarRelay {
   /** The avatar's rules (spec §8.1): the defaults, then each change in turn. */
   rulesOf(avatar: string): Rules {
     let rules = DEFAULT_RULES;
-    for (const b of readDoc(this.root, avatar, "rules.geml").blocks) {
+    for (const b of this.store.read(avatar, "rules.geml").blocks) {
       if (!/^rules-\d+$/.test(b.id)) continue;
       const next = withRules(rules, { mark: b.value["mark"], borrow: b.value["borrow"] });
       if (!("code" in next)) rules = next;
@@ -304,24 +562,24 @@ export class AvatarRelay {
     if (refused !== undefined) return refused;
     const next = withRules(this.rulesOf(avatar), body);
     if ("code" in next) return refuse(400, next);
-    appendBlock(this.root, avatar, "rules.geml", nextId("rules"), (_d, prev, id) => sealed({ id, mark: next.mark, borrow: next.borrow, at: this.now() }, prev));
+    this.store.append(avatar, "rules.geml", nextId("rules"), (_d, prev, id) => sealed({ id, mark: next.mark, borrow: next.borrow, at: this.now() }, prev));
     return { ok: true, rules: next };
   }
 
   // --- tokens ---
 
-  /** One of the person's avatars' token, for an agent that plays it (the hosted one, or one attached on a machine): it speaks as the avatar, `by` an agent. */
+  /** One of the person's avatars' token, for an agent that plays it on one of the person's machines: it speaks as the avatar, `by` an agent. */
   issueAvatar(by: TokenRecord, avatar: string): Result<Issued> {
     const refused = this.onlyOwner(by, avatar);
     if (refused !== undefined) return refused;
-    return { ok: true, ...issueToken(this.root, { speaker: avatarSpeaker(avatar), scope: "avatar", by: by.speaker, at: this.now() }) };
+    return { ok: true, ...issueToken(this.store, { speaker: avatarSpeaker(avatar), scope: "avatar", by: by.id, at: this.now() }) };
   }
 
   /** A device's token: the agent the person attached on one machine, which may only ask for an avatar's token once the person agrees (spec §6.3). */
   issueDevice(by: TokenRecord): Result<Issued> {
     const person = this.onlyPerson(by);
     if (typeof person !== "string") return person;
-    return { ok: true, ...issueToken(this.root, { speaker: by.speaker, scope: "device", by: by.speaker, at: this.now() }) };
+    return { ok: true, ...issueToken(this.store, { speaker: by.speaker, scope: "device", by: by.id, at: this.now() }) };
   }
 
   /** The avatar a token acts as and how: an avatar's token is that avatar's agent; a person's token names one of the person's avatars in `as`. */
@@ -353,7 +611,7 @@ export class AvatarRelay {
 
   private venueState(owner: string, venue: string): { kind: VenueKind; name: string; members: string[] } | undefined {
     if (!AVATAR_ID.test(owner) || !VENUE_ID.test(venue)) return undefined;
-    const d = readDoc(this.root, owner, venueDoc(venue));
+    const d = this.store.read(owner, venueDoc(venue));
     const meta = d.blocks.find((b) => b.id === "venue")?.value;
     const kind = str(meta?.["kind"]);
     if (meta === undefined || (kind !== "group" && kind !== "dm")) return undefined;
@@ -378,16 +636,16 @@ export class AvatarRelay {
   /** The avatar into the venue: a member block in the venue, a join block in the avatar's own list of venues. */
   private join(owner: string, venue: string, avatar: string, by: string): void {
     const now = this.now();
-    const m = appendBlock(this.root, owner, venueDoc(venue), nextId("member"), (_d, prev, id) => sealed({ id, avatar: avatarSpeaker(avatar), by, at: now }, prev));
+    const m = this.store.append(owner, venueDoc(venue), nextId("member"), (_d, prev, id) => sealed({ id, avatar: avatarSpeaker(avatar), by, at: now }, prev));
     this.emit(owner, venueDoc(venue), m.block);
-    const j = appendBlock(this.root, avatar, "joined.geml", nextId("join"), (_d, prev, id) => sealed({ id, owner, venue, at: now }, prev));
+    const j = this.store.append(avatar, "joined.geml", nextId("join"), (_d, prev, id) => sealed({ id, owner, venue, at: now }, prev));
     this.emit(avatar, "joined.geml", j.block);
   }
 
   /** The venues the avatar is in, from its own list. */
   joinedOf(avatar: string): { owner: string; venue: string }[] {
     const out: { owner: string; venue: string }[] = [];
-    for (const b of readDoc(this.root, avatar, "joined.geml").blocks) {
+    for (const b of this.store.read(avatar, "joined.geml").blocks) {
       const owner = str(b.value["owner"]), venue = str(b.value["venue"]);
       if (owner !== undefined && venue !== undefined && !out.some((x) => x.owner === owner && x.venue === venue)) out.push({ owner, venue });
     }
@@ -411,7 +669,7 @@ export class AvatarRelay {
     const a = this.acting(by, as);
     if (isFail(a)) return a;
     const venue = `g-${hex(5)}`;
-    const made = appendSealed(this.root, a.avatar, venueDoc(venue), "venue", { kind: "group", name, by: avatarSpeaker(a.avatar), at: this.now() });
+    const made = appendSealed(this.store, a.avatar, venueDoc(venue), "venue", { kind: "group", name, by: avatarSpeaker(a.avatar), at: this.now() });
     this.emit(a.avatar, venueDoc(venue), made.block);
     this.join(a.avatar, venue, a.avatar, avatarSpeaker(a.avatar));
     return { ok: true, venue: this.venueView(a.avatar, venue)! };
@@ -442,7 +700,7 @@ export class AvatarRelay {
     if (!shared) return fail(403, "dm.sharedGroup");
     const [first, second] = [a.avatar, other].sort() as [string, string];
     const venue = `d-${createHash("sha256").update(`${first}:${second}`, "utf8").digest("hex").slice(0, 10)}`;
-    const made = appendSealed(this.root, first, venueDoc(venue), "venue", { kind: "dm", by: avatarSpeaker(a.avatar), at: this.now() });
+    const made = appendSealed(this.store, first, venueDoc(venue), "venue", { kind: "dm", by: avatarSpeaker(a.avatar), at: this.now() });
     if (!made.existed) {
       this.emit(first, venueDoc(venue), made.block);
       this.join(first, venue, first, avatarSpeaker(a.avatar));
@@ -466,9 +724,12 @@ export class AvatarRelay {
     if (own !== undefined && (!BLOCK_ID.test(own) || RESERVED.test(own))) return fail(400, "message.badId");
     const doc = venueDoc(venue);
     const replyTo = str(o["replyTo"]);
-    if (replyTo !== undefined && !readDoc(this.root, owner, doc).blocks.some((b) => b.id === replyTo)) return fail(400, "message.badReply");
+    if (replyTo !== undefined && !this.store.read(owner, doc).blocks.some((b) => b.id === replyTo)) return fail(400, "message.badReply");
+    // Avatars calling avatars (§5 rule 7): an agent's line carries its hops, one more than the agent's line it answers.
+    const hops = o["hops"];
+    if (hops !== undefined && (a.by !== "agent" || typeof hops !== "number" || !Number.isInteger(hops) || hops < 0 || hops > 9)) return fail(400, "message.hops");
     const now = this.now();
-    const made = appendBlock(this.root, owner, doc, own !== undefined ? () => own : nextId("msg"), (_d, prev, id) => sealed({ id, speaker: avatarSpeaker(a.avatar), by: a.by, text: normalizeText(text), at: now, ...(replyTo !== undefined ? { replyTo } : {}) }, prev));
+    const made = this.store.append(owner, doc, own !== undefined ? () => own : nextId("msg"), (_d, prev, id) => sealed({ id, speaker: avatarSpeaker(a.avatar), by: a.by, text: normalizeText(text), at: now, ...(replyTo !== undefined ? { replyTo } : {}), ...(typeof hops === "number" ? { hops } : {}) }, prev));
     if (!made.existed) this.emit(owner, doc, made.block);
     return { ok: true, message: made.block.value, existed: made.existed };
   }
@@ -490,7 +751,7 @@ export class AvatarRelay {
   /** A document as the token may see it: an avatar's card is anyone's; a venue is its members', a message's `by` left out where its avatar does not mark (§5 rule 1); anything else under an avatar is that avatar's and its person's. */
   read(by: TokenRecord, owner: string, doc: string): Result<{ blocks: Visible[] }> {
     if (!AVATAR_ID.test(owner) || !DOC.test(doc)) return fail(404, "doc.missing");
-    const d = readDoc(this.root, owner, doc);
+    const d = this.store.read(owner, doc);
     if (!d.exists) return fail(404, "doc.missing");
     if (doc === "avatar.geml") return { ok: true, blocks: d.blocks.map((b) => ({ id: b.id, value: b.value })) };
     const mine = this.mine(by);
@@ -519,7 +780,7 @@ export class AvatarRelay {
   /** The group's link rules (spec §6.1): the defaults, then each change the owner made. */
   linkRulesOf(owner: string, venue: string): LinkRules {
     let rules = DEFAULT_LINK_RULES;
-    for (const b of readDoc(this.root, owner, venueDoc(venue)).blocks) {
+    for (const b of this.store.read(owner, venueDoc(venue)).blocks) {
       if (!/^link-rules-\d+$/.test(b.id)) continue;
       rules = withLinkRules(rules, { forward: b.value["forward"], approve: b.value["approve"] }) ?? rules;
     }
@@ -528,13 +789,13 @@ export class AvatarRelay {
 
   /** The group's current code: the last one made for it, kept under the relay's own `links/`. */
   private currentCode(venue: string): string | undefined {
-    const codes = readDoc(this.root, RELAY_OWNER, `links/${venue}.geml`).blocks.filter((b) => /^code-\d+$/.test(b.id));
+    const codes = this.store.read(RELAY_OWNER, `links/${venue}.geml`).blocks.filter((b) => /^code-\d+$/.test(b.id));
     return str(codes[codes.length - 1]?.value["code"]);
   }
 
   private linkOf(code: string): { code: string; owner: string; venue: string; expires: string } | undefined {
     if (!LINK_CODE.test(code)) return undefined;
-    const v = readDoc(this.root, RELAY_OWNER, `links/${code}.geml`).blocks.find((b) => b.id === "link")?.value;
+    const v = this.store.read(RELAY_OWNER, `links/${code}.geml`).blocks.find((b) => b.id === "link")?.value;
     const owner = str(v?.["owner"]), venue = str(v?.["venue"]), expires = str(v?.["expires"]);
     return owner === undefined || venue === undefined || expires === undefined ? undefined : { code, owner, venue, expires };
   }
@@ -544,8 +805,8 @@ export class AvatarRelay {
     const now = this.now(), expires = expiresAt(now);
     for (;;) {
       const code = makeCode(randomBytes(8));
-      if (appendSealed(this.root, RELAY_OWNER, `links/${code}.geml`, "link", { owner, venue, by, at: now, expires }).existed) continue;
-      appendBlock(this.root, RELAY_OWNER, `links/${venue}.geml`, nextId("code"), (_d, prev, id) => sealed({ id, code, at: now }, prev));
+      if (appendSealed(this.store, RELAY_OWNER, `links/${code}.geml`, "link", { owner, venue, by, at: now, expires }).existed) continue;
+      this.store.append(RELAY_OWNER, `links/${venue}.geml`, nextId("code"), (_d, prev, id) => sealed({ id, code, at: now }, prev));
       return { code, expires };
     }
   }
@@ -592,7 +853,7 @@ export class AvatarRelay {
     if (!g.isOwner) return fail(403, "link.ownerRules");
     const next = withLinkRules(this.linkRulesOf(owner, venue), body);
     if (next === undefined) return fail(400, "link.rules");
-    const made = appendBlock(this.root, owner, venueDoc(venue), nextId("link-rules"), (_d, prev, id) => sealed({ id, forward: next.forward, approve: next.approve, by: avatarSpeaker(g.avatar), at: this.now() }, prev));
+    const made = this.store.append(owner, venueDoc(venue), nextId("link-rules"), (_d, prev, id) => sealed({ id, forward: next.forward, approve: next.approve, by: avatarSpeaker(g.avatar), at: this.now() }, prev));
     this.emit(owner, venueDoc(venue), made.block);
     return { ok: true, rules: next };
   }
@@ -666,13 +927,13 @@ export class AvatarRelay {
       avatar = grown.avatar.id;
     } else avatar = pick.avatar;
     const card = this.card(avatar)!;
-    const token = by.scope === "device" ? issueToken(this.root, { speaker: avatarSpeaker(avatar), scope: "avatar", by: by.id, at: this.now() }).token : undefined;
+    const token = by.scope === "device" ? issueToken(this.store, { speaker: avatarSpeaker(avatar), scope: "avatar", by: by.id, at: this.now() }).token : undefined;
     const done = (x: Partial<Joined>): Result<Joined> => ({ ok: true, venue: this.venueView(link.owner, link.venue, avatar)!, avatar: card, already: false, ...x, ...(token !== undefined ? { token } : {}) });
     if (pick.kind === "in") return done({ already: true });
     if (this.linkRulesOf(link.owner, link.venue).approve) {
       const asked = this.requestsOf(link.owner).find((r) => r.venue === link.venue && r.avatar.id === avatar);
       if (asked !== undefined) return done({ pending: asked.id });
-      const made = appendBlock(this.root, link.owner, "requests.geml", nextId("request"), (_d, prev, id) => sealed({ id, venue: link.venue, avatar: avatarSpeaker(avatar), link: code, at: this.now() }, prev));
+      const made = this.store.append(link.owner, "requests.geml", nextId("request"), (_d, prev, id) => sealed({ id, venue: link.venue, avatar: avatarSpeaker(avatar), link: code, at: this.now() }, prev));
       this.emit(link.owner, "requests.geml", made.block);
       // The owner's 答应事情 (spec §6.1, §7.3): the newcomer at the door, in the owner's person's language.
       const lang = this.languageOf(this.ownerOf(link.owner) ?? "");
@@ -680,25 +941,26 @@ export class AvatarRelay {
       return done({ pending: made.block.id });
     }
     this.join(link.owner, link.venue, avatar, avatarSpeaker(avatar));
-    appendBlock(this.root, RELAY_OWNER, `links/${code}.geml`, nextId("use"), (_d, prev, id) => sealed({ id, at: this.now() }, prev));
+    this.store.append(RELAY_OWNER, `links/${code}.geml`, nextId("use"), (_d, prev, id) => sealed({ id, at: this.now() }, prev));
     return done({});
   }
 
-  /** The agent's way in for a person with no token on that machine (spec §6.3, transport §2.5): the number and the code the person typed into the plugin's own box; answered with the avatar's token and a device token for the agent, never the person's. */
+  /** The agent's way in for a person with no token on that machine (spec §6.3, transport §2.5): the address and the code the person typed into the plugin's own box; answered with the avatar's token and a device token for the agent, never the person's. */
   joinWithCode(code: string, body: unknown): Result<Joined & { device: string }> {
     const link = this.goodLink(code);
     if (isFail(link)) return link;
     const p = this.checkCode(body);
     if (isFail(p)) return p;
-    const device = issueToken(this.root, { speaker: `person:${p.person}`, scope: "device", by: "login", at: this.now() });
-    const { phone: _p, code: _c, lang: _l, ...rest } = obj(body) ?? {};
+    const device = issueToken(this.store, { speaker: `person:${p.person}`, scope: "device", by: "login", at: this.now() });
+    this.nameDevice(p.person, device.record.id, obj(body)?.["device"]);
+    const { phone: _p, email: _e, code: _c, lang: _l, device: _d, ...rest } = obj(body) ?? {};
     const joined = this.joinByLink(device.record, code, rest);
     return isFail(joined) ? joined : { ...joined, device: device.token };
   }
 
   /** The requests waiting for the group's owner to let someone in (spec §6.1), oldest first. */
   requestsOf(owner: string): { id: string; venue: string; avatar: AvatarCard; at: string }[] {
-    const d = readDoc(this.root, owner, "requests.geml");
+    const d = this.store.read(owner, "requests.geml");
     const answered = new Set(d.blocks.filter((b) => /^answer-\d+$/.test(b.id)).map((b) => b.value["request"]));
     const out: { id: string; venue: string; avatar: AvatarCard; at: string }[] = [];
     for (const b of d.blocks) {
@@ -723,11 +985,11 @@ export class AvatarRelay {
 
   /** The owner's answer to a newcomer, however it came (the request's own route, or its 需要你 card). */
   private settleRequest(owner: string, request: string, yes: boolean): Result<{ joined: boolean }> {
-    const d = readDoc(this.root, owner, "requests.geml");
+    const d = this.store.read(owner, "requests.geml");
     const asked = d.blocks.find((b) => b.id === request && /^request-\d+$/.test(b.id));
     if (asked === undefined) return fail(404, "request.missing");
     if (d.blocks.some((b) => /^answer-\d+$/.test(b.id) && b.value["request"] === request)) return fail(409, "request.answered");
-    const made = appendBlock(this.root, owner, "requests.geml", nextId("answer"), (_d, prev, id) => sealed({ id, request, yes, by: avatarSpeaker(owner), at: this.now() }, prev));
+    const made = this.store.append(owner, "requests.geml", nextId("answer"), (_d, prev, id) => sealed({ id, request, yes, by: avatarSpeaker(owner), at: this.now() }, prev));
     this.emit(owner, "requests.geml", made.block);
     const w = parseWho(str(asked.value["avatar"]) ?? ""), venue = str(asked.value["venue"]);
     if (yes && w?.kind === "avatar" && venue !== undefined && this.venueState(owner, venue)?.members.includes(w.id) === false) this.join(owner, venue, w.id, avatarSpeaker(owner));
@@ -745,16 +1007,16 @@ export class AvatarRelay {
 
   // --- 需要你 (spec §7.3) ---
 
-  /** One of the avatar's cards as it stands: open, answered, or past its time. */
+  /** One of the avatar's cards as it stands: open, answered, or past its deadline when it has one. */
   private needOf(avatar: string, b: DataBlock, answers: Map<string, DataBlock>, expired: ReadonlySet<string>, settled: ReadonlySet<string>): Need {
     const v = b.value;
     const venue = obj(v["venue"]);
     const answer = answers.get(b.id);
     const request = str(v["request"]);
-    const expires = str(v["expires"]) ?? "";
-    const state = answer !== undefined || (request !== undefined && settled.has(request)) ? "answered" : expired.has(b.id) || Date.parse(expires) <= Date.parse(this.now()) ? "expired" : "open";
+    const expires = str(v["expires"]);
+    const state = answer !== undefined || (request !== undefined && settled.has(request)) ? "answered" : expired.has(b.id) || (expires !== undefined && Date.parse(expires) <= Date.parse(this.now())) ? "expired" : "open";
     return {
-      id: b.id, avatar, kind: isKind(v["kind"]) ? v["kind"] : "error", summary: str(v["summary"]) ?? "", options: (Array.isArray(v["options"]) ? v["options"] : []) as unknown as NeedOption[], expires, at: str(v["at"]) ?? "", state,
+      id: b.id, avatar, kind: isKind(v["kind"]) ? v["kind"] : "error", summary: str(v["summary"]) ?? "", options: (Array.isArray(v["options"]) ? v["options"] : []) as unknown as NeedOption[], ...(expires !== undefined ? { expires } : {}), at: str(v["at"]) ?? "", state,
       ...(venue !== undefined && typeof venue["owner"] === "string" && typeof venue["id"] === "string" ? { venue: { owner: venue["owner"], id: venue["id"] } } : {}),
       ...(str(v["message"]) !== undefined ? { message: str(v["message"])! } : {}),
       ...(str(v["checked"]) !== undefined ? { checked: str(v["checked"])! } : {}),
@@ -767,10 +1029,10 @@ export class AvatarRelay {
 
   /** The avatar's cards, oldest first, each with its state. */
   needsOfAvatar(avatar: string): Need[] {
-    const d = readDoc(this.root, avatar, "needs.geml");
+    const d = this.store.read(avatar, "needs.geml");
     const answers = new Map(d.blocks.filter((b) => /^answer-\d+$/.test(b.id)).map((b) => [str(b.value["need"]) ?? "", b] as const));
     const expired = new Set(d.blocks.filter((b) => /^expired-\d+$/.test(b.id)).map((b) => str(b.value["need"]) ?? ""));
-    const settled = new Set(readDoc(this.root, avatar, "requests.geml").blocks.filter((b) => /^answer-\d+$/.test(b.id)).map((b) => str(b.value["request"]) ?? ""));
+    const settled = new Set(this.store.read(avatar, "requests.geml").blocks.filter((b) => /^answer-\d+$/.test(b.id)).map((b) => str(b.value["request"]) ?? ""));
     return d.blocks.filter((b) => /^need-\d+$/.test(b.id)).map((b) => this.needOf(avatar, b, answers, expired, settled));
   }
 
@@ -780,7 +1042,7 @@ export class AvatarRelay {
     const out: (Need & { avatarName: string; group?: string })[] = [];
     for (const a of this.avatarsOf(person)) {
       for (const n of this.needsOfAvatar(a.id)) {
-        if (n.state === "answered" || (n.state === "expired" && Date.parse(n.expires) < day)) continue;
+        if (n.state === "answered" || (n.state === "expired" && Date.parse(n.expires ?? n.at) < day)) continue;
         const group = n.venue === undefined ? undefined : this.venueView(n.venue.owner, n.venue.id, a.id)?.name;
         out.push({ ...n, avatarName: a.name, ...(group !== undefined ? { group } : {}) });
       }
@@ -788,20 +1050,21 @@ export class AvatarRelay {
     return out;
   }
 
-  /** A card made: in the avatar's own `needs.geml`, in the relay's list of open ones, out to the person's push channels; with `placeholder`, the avatar's waiting line in the chat. */
+  /** A card made: in the avatar's own `needs.geml`, in the relay's list of those with a deadline, out to the person's push channels; with `placeholder`, the avatar's waiting line in the chat. */
   private askFor(avatar: string, n: { kind: NeedKind; summary: string; options: NeedOption[]; venue?: { owner: string; id: string }; message?: string; checked?: string; draft?: string; expires?: string; request?: string; from?: string; placeholder?: boolean }): Need {
     const now = this.now();
-    const expires = expiryOf(now, n.expires);
-    const made = appendBlock(this.root, avatar, "needs.geml", nextId("need"), (_d, prev, id) => sealed({
-      id, kind: n.kind, summary: n.summary.trim(), options: n.options.map((o) => ({ label: o.label.trim(), ...(o.text !== undefined ? { text: o.text } : {}) })), expires, at: now,
+    const expires = n.expires;
+    const made = this.store.append(avatar, "needs.geml", nextId("need"), (_d, prev, id) => sealed({
+      id, kind: n.kind, summary: n.summary.trim(), options: n.options.map((o) => ({ label: o.label.trim(), ...(o.text !== undefined ? { text: o.text } : {}) })), ...(expires !== undefined ? { expires } : {}), at: now,
       ...(n.venue !== undefined ? { venue: n.venue } : {}), ...(n.message !== undefined ? { message: n.message } : {}), ...(n.checked !== undefined ? { checked: n.checked } : {}),
       ...(n.draft !== undefined ? { draft: n.draft } : {}), ...(n.request !== undefined ? { request: n.request } : {}), ...(n.from !== undefined ? { from: n.from } : {}),
     }, prev));
     this.emit(avatar, "needs.geml", made.block);
-    appendBlock(this.root, RELAY_OWNER, "needs-open.geml", nextId("open"), (_d, prev, id) => sealed({ id, avatar, need: made.block.id, expires }, prev));
+    // Only a card whose matter has a deadline is the sweep's; the rest wait until the person answers (architecture §6.3).
+    if (expires !== undefined) this.store.append(RELAY_OWNER, "needs-open.geml", nextId("open"), (_d, prev, id) => sealed({ id, avatar, need: made.block.id, expires }, prev));
     if (n.kind === "borrow" && this.borrowAllowed(avatar, n.from, n.venue)) {
       // 以后不用问 was pressed for this asker or this chat (spec §7.4): nothing waits on the person; the card is answered by the relay, marked, and the job starts.
-      const auto = appendBlock(this.root, avatar, "needs.geml", nextId("answer"), (_d, prev, bid) => sealed({ id: bid, need: made.block.id, choice: 0, by: "relay", auto: true, at: now }, prev));
+      const auto = this.store.append(avatar, "needs.geml", nextId("answer"), (_d, prev, bid) => sealed({ id: bid, need: made.block.id, choice: 0, by: "relay", auto: true, at: now }, prev));
       this.emit(avatar, "needs.geml", auto.block);
       this.closeOpen(avatar, made.block.id);
       const answered = this.needsOfAvatar(avatar).find((x) => x.id === made.block.id)!;
@@ -824,8 +1087,8 @@ export class AvatarRelay {
   private sayAs(avatar: string, venue: { owner: string; id: string }, text: string, by: By, replyTo?: string, extra: Record<string, JsonValue> = {}): string | undefined {
     if (this.venueState(venue.owner, venue.id)?.members.includes(avatar) !== true) return undefined;
     const doc = venueDoc(venue.id);
-    const reply = replyTo !== undefined && readDoc(this.root, venue.owner, doc).blocks.some((b) => b.id === replyTo) ? replyTo : undefined;
-    const made = appendBlock(this.root, venue.owner, doc, nextId("msg"), (_d, prev, id) => sealed({ id, speaker: avatarSpeaker(avatar), by, text: normalizeText(text), at: this.now(), ...(reply !== undefined ? { replyTo: reply } : {}), ...extra }, prev));
+    const reply = replyTo !== undefined && this.store.read(venue.owner, doc).blocks.some((b) => b.id === replyTo) ? replyTo : undefined;
+    const made = this.store.append(venue.owner, doc, nextId("msg"), (_d, prev, id) => sealed({ id, speaker: avatarSpeaker(avatar), by, text: normalizeText(text), at: this.now(), ...(reply !== undefined ? { replyTo: reply } : {}), ...extra }, prev));
     this.emit(venue.owner, doc, made.block);
     return made.block.id;
   }
@@ -853,7 +1116,7 @@ export class AvatarRelay {
     }) };
   }
 
-  /** The person answers one of their avatars' cards (spec §7.3): once, before it expires. */
+  /** The person answers one of their avatars' cards (spec §7.3): once, and before its deadline when it has one. */
   answerNeed(by: TokenRecord, avatar: string, id: string, body: unknown): Result<{ need: Need; sent?: string }> {
     const refused = this.onlyOwner(by, avatar);
     if (refused !== undefined) return refused;
@@ -877,7 +1140,7 @@ export class AvatarRelay {
     if (choice === undefined || (choice === "own" && (text === undefined || text.trim() === ""))) return fail(400, "need.choice");
     if (text !== undefined && [...text].length > TEXT_MAX) return fail(400, "message.tooLong", { max: TEXT_MAX });
     const allowPerson = need.kind === "borrow" && o["allowPerson"] === true, allowVenue = need.kind === "borrow" && o["allowVenue"] === true;
-    const made = appendBlock(this.root, avatar, "needs.geml", nextId("answer"), (_d, prev, bid) => sealed({ id: bid, need: id, choice, ...(text !== undefined ? { text } : {}), ...(allowPerson ? { allowPerson: true } : {}), ...(allowVenue ? { allowVenue: true } : {}), by: "person", at: this.now() }, prev));
+    const made = this.store.append(avatar, "needs.geml", nextId("answer"), (_d, prev, bid) => sealed({ id: bid, need: id, choice, ...(text !== undefined ? { text } : {}), ...(allowPerson ? { allowPerson: true } : {}), ...(allowVenue ? { allowVenue: true } : {}), by: "person", at: this.now() }, prev));
     this.emit(avatar, "needs.geml", made.block);
     this.closeOpen(avatar, id);
     if (need.kind === "borrow" && (choice === 0 || choice === 1)) this.startWork(avatar, need, choice === 0 ? "waiting" : "queued", false);
@@ -892,12 +1155,12 @@ export class AvatarRelay {
   }
 
   private closeOpen(avatar: string, need: string): void {
-    appendBlock(this.root, RELAY_OWNER, "needs-open.geml", nextId("closed"), (_d, prev, id) => sealed({ id, avatar, need }, prev));
+    this.store.append(RELAY_OWNER, "needs-open.geml", nextId("closed"), (_d, prev, id) => sealed({ id, avatar, need }, prev));
   }
 
   /** Whether a borrow may go ahead without asking (spec §7.4): the person said so for the avatar that asked, or for that chat. */
   borrowAllowed(avatar: string, from: string | undefined, venue: { owner: string; id: string } | undefined): boolean {
-    const d = readDoc(this.root, avatar, "needs.geml");
+    const d = this.store.read(avatar, "needs.geml");
     const needs = new Map(d.blocks.filter((b) => /^need-\d+$/.test(b.id)).map((b) => [b.id, b.value] as const));
     return d.blocks.some((b) => {
       if (!/^answer-\d+$/.test(b.id)) return false;
@@ -909,9 +1172,22 @@ export class AvatarRelay {
     });
   }
 
-  /** The cards past their time, marked expired; in its chat, the avatar says that the person must answer this themself (spec §7.3). The server's minute. */
+  /** The earliest deadline among the cards still waiting with one: when a shell with alarms (architecture §2.3: a Durable Object's) should sweep next; none, no alarm. */
+  nextDeadline(): string | undefined {
+    const d = this.store.read(RELAY_OWNER, "needs-open.geml");
+    const closed = new Set(d.blocks.filter((b) => /^closed-\d+$/.test(b.id)).map((b) => `${str(b.value["avatar"])}/${str(b.value["need"])}`));
+    let next: string | undefined;
+    for (const b of d.blocks) {
+      const expires = str(b.value["expires"]);
+      if (!/^open-\d+$/.test(b.id) || expires === undefined || closed.has(`${str(b.value["avatar"])}/${str(b.value["need"])}`)) continue;
+      if (next === undefined || Date.parse(expires) < Date.parse(next)) next = expires;
+    }
+    return next;
+  }
+
+  /** The cards past their deadline, marked expired; in its chat, the avatar says that the person must answer this themself (spec §7.3). The Node shell's minute, or a Durable Object's alarm at the next deadline. */
   sweep(): number {
-    const d = readDoc(this.root, RELAY_OWNER, "needs-open.geml");
+    const d = this.store.read(RELAY_OWNER, "needs-open.geml");
     const closed = new Set(d.blocks.filter((b) => /^closed-\d+$/.test(b.id)).map((b) => `${str(b.value["avatar"])}/${str(b.value["need"])}`));
     const now = Date.parse(this.now());
     let n = 0;
@@ -922,12 +1198,12 @@ export class AvatarRelay {
       const card = this.needsOfAvatar(avatar).find((x) => x.id === need);
       this.closeOpen(avatar, need);
       if (card === undefined || card.state === "answered") continue;
-      const made = appendBlock(this.root, avatar, "needs.geml", nextId("expired"), (_d, prev, id) => sealed({ id, need, at: this.now() }, prev));
+      const made = this.store.append(avatar, "needs.geml", nextId("expired"), (_d, prev, id) => sealed({ id, need, at: this.now() }, prev));
       this.emit(avatar, "needs.geml", made.block);
       if (card.venue !== undefined && card.request === undefined) this.sayAs(avatar, card.venue, say("need.expiredLine", this.languageOf(this.ownerOf(avatar) ?? "")), "agent", card.message);
       n++;
     }
-    return n + this.sweepWork();
+    return n;
   }
 
   /** Answers back from the push channels (spec §7.3), each taken as the person's own press. */
@@ -947,7 +1223,7 @@ export class AvatarRelay {
   /** The push channels the person turned on, of those the relay offers. */
   pushOf(person: string): string[] {
     const on = new Set<string>();
-    for (const b of readDoc(this.root, RELAY_OWNER, peopleDoc(person)).blocks) {
+    for (const b of this.store.read(RELAY_OWNER, peopleDoc(person)).blocks) {
       if (!/^push-\d+$/.test(b.id)) continue;
       const c = str(b.value["channel"]) ?? "";
       if (b.value["on"] === true) on.add(c); else on.delete(c);
@@ -962,14 +1238,14 @@ export class AvatarRelay {
     const o = obj(body) ?? {};
     const channel = str(o["channel"]) ?? "";
     if (!this.push.some((p) => p.id === channel)) return fail(404, "push.unknown", { channel });
-    appendBlock(this.root, RELAY_OWNER, peopleDoc(person), nextId("push"), (_d, prev, id) => sealed({ id, channel, on: o["on"] !== false, at: this.now() }, prev));
+    this.store.append(RELAY_OWNER, peopleDoc(person), nextId("push"), (_d, prev, id) => sealed({ id, channel, on: o["on"] !== false, at: this.now() }, prev));
     return { ok: true, channels: this.pushOf(person), offered: this.push.map((p) => p.id) };
   }
 
   /** What the avatar says while its person decides (spec §7.3): the person's own template, else the words of their language. */
   placeholderOf(avatar: string): string {
     let text: string | undefined;
-    for (const b of readDoc(this.root, avatar, "templates.geml").blocks) if (/^placeholder-\d+$/.test(b.id)) text = str(b.value["text"]);
+    for (const b of this.store.read(avatar, "templates.geml").blocks) if (/^placeholder-\d+$/.test(b.id)) text = str(b.value["text"]);
     return text ?? say("need.placeholder", this.languageOf(this.ownerOf(avatar) ?? ""));
   }
 
@@ -978,135 +1254,66 @@ export class AvatarRelay {
     if (refused !== undefined) return refused;
     const v = obj(body)?.["text"];
     if (v !== null && (typeof v !== "string" || v.trim() === "" || [...v].length > 200)) return fail(400, "message.empty");
-    appendBlock(this.root, avatar, "templates.geml", nextId("placeholder"), (_d, prev, id) => sealed({ id, text: v === null ? null : (v as string).trim(), at: this.now() }, prev));
+    this.store.append(avatar, "templates.geml", nextId("placeholder"), (_d, prev, id) => sealed({ id, text: v === null ? null : (v as string).trim(), at: this.now() }, prev));
     return { ok: true, text: this.placeholderOf(avatar) };
   }
 
-  // --- the hosted body (spec §4.1, §7.7, §8.3; transport §6) ---
-  // The platform's orchestrator (avatar-hosted.ts) plays every avatar whose
-  // person has not paused it; what it does is kept in the avatar's own
-  // `hosted.geml`: the pauses, whether it only receives, each round. The
-  // methods marked "the platform's" are for the orchestrator alone: no route
-  // answers them, since they name the person behind an avatar.
+  // --- 自动回 (architecture §6.3) ---
+  // The chats where the avatar answers on its own when it is called, as its
+  // person set them; kept with the avatar, so every computer of theirs knows.
+  // Off by default: elsewhere the person is asked first. The five kinds come
+  // to the person either way.
 
-  /** The avatar's hosted body: paused by its person or not, playing or only receiving, its rounds (newest last). */
-  hostedOf(avatar: string): { paused: boolean; status: "on" | "receive-only"; rounds: { at: string; kind: string; paid: string; replied: boolean; asked: boolean; ok: boolean }[] } {
-    let paused = false, status: "on" | "receive-only" = "on";
-    const rounds: { at: string; kind: string; paid: string; replied: boolean; asked: boolean; ok: boolean }[] = [];
-    for (const b of readDoc(this.root, avatar, "hosted.geml").blocks) {
-      if (/^pause-\d+$/.test(b.id)) paused = b.value["paused"] === true;
-      else if (/^status-\d+$/.test(b.id)) status = b.value["status"] === "receive-only" ? "receive-only" : "on";
-      else if (/^round-\d+$/.test(b.id)) rounds.push({ at: str(b.value["at"]) ?? "", kind: str(b.value["kind"]) ?? "", paid: str(b.value["paid"]) ?? "", replied: b.value["replied"] === true, asked: b.value["asked"] === true, ok: b.value["ok"] !== false });
-    }
-    return { paused, status, rounds };
+  /** The chats, as `<owner>/<id>`, where the avatar answers on its own. */
+  autoOf(avatar: string): string[] {
+    const on = new Map<string, boolean>();
+    for (const b of this.store.read(avatar, "auto.geml").blocks) if (/^auto-\d+$/.test(b.id) && typeof b.value["venue"] === "string") on.set(b.value["venue"], b.value["on"] === true);
+    return [...on].filter(([, v]) => v).map(([k]) => k);
   }
 
-  /** 暂停自动回复 (spec §7.5), by the person. */
-  setHosted(by: TokenRecord, avatar: string, body: unknown): Result<{ paused: boolean }> {
+  /** A chat set to answer on its own, or not, by the person (以后这个群自动回; 撤 in 我的分身). */
+  setAuto(by: TokenRecord, avatar: string, body: unknown): Result<{ auto: string[] }> {
     const refused = this.onlyOwner(by, avatar);
     if (refused !== undefined) return refused;
-    const paused = obj(body)?.["paused"];
-    if (typeof paused !== "boolean") return fail(400, "hosted.paused");
-    appendBlock(this.root, avatar, "hosted.geml", nextId("pause"), (_d, prev, id) => sealed({ id, paused, at: this.now() }, prev));
-    return { ok: true, paused };
+    const o = obj(body) ?? {};
+    const m = /^([^/\s]+)\/([^/\s]+)$/.exec(str(o["venue"]) ?? "");
+    const on = o["on"];
+    if (m === null || typeof on !== "boolean") return fail(400, "auto.body");
+    if (on && this.venueState(m[1]!, m[2]!)?.members.includes(avatar) !== true) return fail(403, "venue.notMember");
+    this.store.append(avatar, "auto.geml", nextId("auto"), (_d, prev, id) => sealed({ id, venue: `${m[1]}/${m[2]}`, on, at: this.now() }, prev));
+    return { ok: true, auto: this.autoOf(avatar) };
   }
 
-  /** The platform's: the person behind an avatar, for whom its rounds are paid. */
-  hostedPerson(avatar: string): string | undefined { return this.ownerOf(avatar); }
-
-  /** The platform's: when the person first logged in (their free quota counts from it). */
-  firstLoginOf(person: string): string {
-    return str(readDoc(this.root, RELAY_OWNER, peopleDoc(person)).blocks.find((b) => b.id === "person")?.value["at"]) ?? this.now();
-  }
-
-  /** The platform's: the hosted replies the free quota paid for, across all the person's avatars. */
-  hostedReplies(person: string): number {
-    return this.avatarsOf(person).reduce((n, a) => n + this.hostedOf(a.id).rounds.filter((r) => r.replied && r.paid === "free").length, 0);
-  }
-
-  /** The platform's: whether the body plays or only receives; a change only is written. */
-  setHostedStatus(avatar: string, status: "on" | "receive-only"): void {
-    if (this.hostedOf(avatar).status === status) return;
-    appendBlock(this.root, avatar, "hosted.geml", nextId("status"), (_d, prev, id) => sealed({ id, status, at: this.now() }, prev));
-  }
-
-  /** The platform's: one round, as it was paid and what it did. */
-  recordRound(avatar: string, r: { venue: string; message?: string; kind: "reply" | "read"; paid: "free" | "key"; replied: boolean; asked: boolean; ok: boolean }): void {
-    appendBlock(this.root, avatar, "hosted.geml", nextId("round"), (_d, prev, id) => sealed({ id, ...r, ...(r.message === undefined ? {} : { message: r.message }), at: this.now() }, prev));
-  }
-
-  /** The platform's: the chat's latest lines as the avatar's body reads them (others' `by` where they mark), with what the wake rules need. */
-  hostedLines(avatar: string, owner: string, venue: string, n = 20): { id: string; speaker: string; who: string; text: string; by?: string; replyTo?: string; hops?: number; mine: boolean }[] {
-    const view = this.venueView(owner, venue, avatar);
-    if (view === undefined || !view.members.some((m) => m.id === avatar)) return [];
-    const name = (a: string): string => view.members.find((m) => m.id === a)?.name ?? a;
-    return readDoc(this.root, owner, venueDoc(venue)).blocks.filter((b) => typeof b.value["text"] === "string" && typeof b.value["speaker"] === "string").slice(-n).map((b) => {
-      const a = (str(b.value["speaker"]) ?? "").replace(/^avatar:/, "");
-      return { id: b.id, speaker: str(b.value["speaker"])!, who: name(a), text: str(b.value["text"])!, ...(str(b.value["by"]) !== undefined ? { by: str(b.value["by"])! } : {}), ...(str(b.value["replyTo"]) !== undefined ? { replyTo: str(b.value["replyTo"])! } : {}), ...(typeof b.value["hops"] === "number" ? { hops: b.value["hops"] } : {}), mine: a === avatar };
-    });
-  }
-
-  /** The platform's: the body's reply in the chat, `by: agent`, with the hops it carries (§5 rule 7). */
-  hostedSay(avatar: string, owner: string, venue: string, text: string, replyTo: string | undefined, hops: number): string | undefined {
-    if (this.venueState(owner, venue)?.members.includes(avatar) !== true || text.trim() === "") return undefined;
-    const doc = venueDoc(venue);
-    const made = appendBlock(this.root, owner, doc, nextId("msg"), (_d, prev, id) => sealed({ id, speaker: avatarSpeaker(avatar), by: "agent", text: normalizeText(text.slice(0, TEXT_MAX)), at: this.now(), ...(replyTo !== undefined ? { replyTo } : {}), hops }, prev));
-    this.emit(owner, doc, made.block);
-    return made.block.id;
-  }
-
-  /** The platform's: the line in the chat that says the avatars stopped calling each other (§5 rule 7), drawn in each reader's language. */
-  hopsNote(owner: string, venue: string, message: string): void {
-    const doc = venueDoc(venue);
-    const made = appendBlock(this.root, owner, doc, nextId("note"), (_d, prev, id) => sealed({ id, note: "hops", message, at: this.now() }, prev));
-    this.emit(owner, doc, made.block);
-  }
-
-  /** The platform's: a card the body brings its person, about a chat or not. */
-  hostedAsk(avatar: string, ask: { kind: NeedKind; summary: string; draft?: string; options?: NeedOption[] }, at?: { owner: string; id: string; message?: string; from?: string }): Need | undefined {
-    if (at !== undefined && this.venueState(at.owner, at.id)?.members.includes(avatar) !== true) return undefined;
-    if (ask.kind !== "error" && ask.kind !== "pay" && at === undefined) return undefined;
-    const person = this.ownerOf(avatar);
-    const options = ask.options ?? defaultOptions(ask.kind, person === undefined ? DEFAULT_LANG : this.languageOf(person));
-    return this.askFor(avatar, { kind: ask.kind, summary: ask.summary.slice(0, 400), options, ...(ask.draft !== undefined ? { draft: ask.draft } : {}), ...(at !== undefined ? { venue: { owner: at.owner, id: at.id }, ...(at.message !== undefined ? { message: at.message } : {}), ...(at.from !== undefined ? { from: at.from } : {}) } : {}) });
-  }
-
-  // --- 借电脑 (spec §7.4) ---
-  // A borrow card answered 现在干 — or let through by an earlier 以后不用问 —
+  // --- 任务 (spec §7.4; architecture §6.3, once called 借电脑) ---
+  // A task card answered 现在干 — or let through by an earlier 以后不用问 —
   // is a job waiting for the avatar's computer: a Claude Code session the
   // person bound to the avatar, in the repository they named. 排着 keeps it
   // until they say now. The body takes it, does it in a worktree and reports:
   // its words go into the chat as the avatar with the facts its host saw, or
-  // it failed and the person gets an 出错 card. A job left waiting two minutes
-  // means the computer is not online: the avatar says in the chat that it will
-  // come back to it, once, and the person gets an 出错 card; with no job
-  // waiting, a computer offline is only a state. Jobs live in the avatar's own
-  // `work.geml`; the relay's `work-open.geml` lists the open ones for the sweep.
+  // it failed and the person gets an 出错 card. IM is asynchronous: a job waits
+  // for the computer as long as it takes — nothing is said in the chat and
+  // nothing is an error while it waits. Jobs live in the avatar's own
+  // `work.geml`.
 
   private startWork(avatar: string, need: Need, state: "waiting" | "queued", auto: boolean): string {
-    const made = appendBlock(this.root, avatar, WORK_DOC, nextId("work"), (_d, prev, id) => sealed({
+    const made = this.store.append(avatar, WORK_DOC, nextId("work"), (_d, prev, id) => sealed({
       id, need: need.id, summary: need.summary, state, at: this.now(),
       ...(need.venue !== undefined ? { venue: need.venue } : {}), ...(need.message !== undefined ? { message: need.message } : {}),
       ...(need.from !== undefined ? { from: need.from } : {}), ...(auto ? { auto: true } : {}),
     }, prev));
     this.emit(avatar, WORK_DOC, made.block);
-    appendBlock(this.root, RELAY_OWNER, "work-open.geml", nextId("open"), (_d, prev, id) => sealed({ id, avatar, work: made.block.id }, prev));
     return made.block.id;
-  }
-
-  private closeWork(avatar: string, work: string): void {
-    appendBlock(this.root, RELAY_OWNER, "work-open.geml", nextId("closed"), (_d, prev, id) => sealed({ id, avatar, work }, prev));
   }
 
   /** The avatar's jobs, oldest first, each as it stands. */
   worksOfAvatar(avatar: string): Work[] {
     const out = new Map<string, Work>();
-    for (const b of readDoc(this.root, avatar, WORK_DOC).blocks) {
+    for (const b of this.store.read(avatar, WORK_DOC).blocks) {
       const v = b.value;
       if (/^work-\d+$/.test(b.id)) {
         const venue = obj(v["venue"]);
         out.set(b.id, {
-          id: b.id, avatar, need: str(v["need"]) ?? "", summary: str(v["summary"]) ?? "", state: v["state"] === "queued" ? "queued" : "waiting", at: str(v["at"]) ?? "", since: str(v["at"]) ?? "", told: false,
+          id: b.id, avatar, need: str(v["need"]) ?? "", summary: str(v["summary"]) ?? "", state: v["state"] === "queued" ? "queued" : "waiting", at: str(v["at"]) ?? "", since: str(v["at"]) ?? "",
           ...(venue !== undefined && typeof venue["owner"] === "string" && typeof venue["id"] === "string" ? { venue: { owner: venue["owner"], id: venue["id"] } } : {}),
           ...(str(v["message"]) !== undefined ? { message: str(v["message"])! } : {}), ...(str(v["from"]) !== undefined ? { from: str(v["from"])! } : {}), ...(v["auto"] === true ? { auto: true as const } : {}),
         });
@@ -1115,7 +1322,6 @@ export class AvatarRelay {
       const w = out.get(str(v["work"]) ?? "");
       if (w === undefined) continue;
       if (/^state-\d+$/.test(b.id) && (WORK_STATES as readonly unknown[]).includes(v["state"])) { w.state = v["state"] as WorkState; w.since = str(v["at"]) ?? w.since; }
-      else if (/^told-\d+$/.test(b.id)) w.told = true;
     }
     return [...out.values()];
   }
@@ -1128,7 +1334,7 @@ export class AvatarRelay {
       for (const w of this.worksOfAvatar(a.id)) {
         if ((w.state === "done" || w.state === "failed") && Date.parse(w.since) < day) continue;
         const view = w.venue === undefined ? undefined : this.venueView(w.venue.owner, w.venue.id, a.id);
-        const line = w.venue !== undefined && w.message !== undefined ? readDoc(this.root, w.venue.owner, venueDoc(w.venue.id)).blocks.find((b) => b.id === w.message) : undefined;
+        const line = w.venue !== undefined && w.message !== undefined ? this.store.read(w.venue.owner, venueDoc(w.venue.id)).blocks.find((b) => b.id === w.message) : undefined;
         const asker = w.from ?? str(line?.value["speaker"])?.replace(/^avatar:/, "");
         const fromName = asker === undefined ? undefined : view?.members.find((m) => m.id === asker)?.name;
         const words = str(line?.value["text"]);
@@ -1160,7 +1366,6 @@ export class AvatarRelay {
       if (facts === undefined) return fail(400, "work.facts");
       this.markWork(avatar, id, "done");
       if (w.venue !== undefined) this.sayAs(avatar, w.venue, text, "agent", w.message, facts.length > 0 ? { facts: facts.map((f) => ({ label: f.label, ok: f.ok })) } : {});
-      this.closeWork(avatar, id);
     } else if (state === "failed") {
       const code = str(o["code"]);
       if (code === undefined || !WORK_FAULTS.includes(code)) return fail(400, "work.fault");
@@ -1168,35 +1373,12 @@ export class AvatarRelay {
       for (const [k, v] of Object.entries(obj(o["params"]) ?? {})) if (typeof v === "string" && k !== "avatar" && k !== "summary") params[k] = v.slice(0, 400);
       this.markWork(avatar, id, "failed");
       this.askFor(avatar, { kind: "error", summary: say(code, lang, { ...params, avatar: name, summary: w.summary }), options: defaultOptions("error", lang), ...(w.venue !== undefined ? { venue: w.venue } : {}), ...(w.message !== undefined ? { message: w.message } : {}) });
-      this.closeWork(avatar, id);
     } else this.markWork(avatar, id, state);
     return { ok: true, work: this.worksOfAvatar(avatar).find((x) => x.id === id)! };
   }
 
   private markWork(avatar: string, work: string, state: WorkState): void {
-    const made = appendBlock(this.root, avatar, WORK_DOC, nextId("state"), (_d, prev, id) => sealed({ id, work, state, at: this.now() }, prev));
+    const made = this.store.append(avatar, WORK_DOC, nextId("state"), (_d, prev, id) => sealed({ id, work, state, at: this.now() }, prev));
     this.emit(avatar, WORK_DOC, made.block);
-  }
-
-  /** The jobs left waiting for a computer two minutes: the avatar says in the chat it will come back to it, once, and the person gets an 出错 card. */
-  private sweepWork(): number {
-    const d = readDoc(this.root, RELAY_OWNER, "work-open.geml");
-    const closed = new Set(d.blocks.filter((b) => /^closed-\d+$/.test(b.id)).map((b) => `${str(b.value["avatar"])}/${str(b.value["work"])}`));
-    const now = Date.parse(this.now());
-    let n = 0;
-    for (const b of d.blocks) {
-      if (!/^open-\d+$/.test(b.id)) continue;
-      const avatar = str(b.value["avatar"]) ?? "", id = str(b.value["work"]) ?? "";
-      if (closed.has(`${avatar}/${id}`)) continue;
-      const w = this.worksOfAvatar(avatar).find((x) => x.id === id);
-      if (w === undefined || w.state !== "waiting" || w.told || now - Date.parse(w.since) < BODY_WAIT_MS) continue;
-      const lang = this.languageOf(this.ownerOf(avatar) ?? "");
-      const told = appendBlock(this.root, avatar, WORK_DOC, nextId("told"), (_d, prev, bid) => sealed({ id: bid, work: id, at: this.now() }, prev));
-      this.emit(avatar, WORK_DOC, told.block);
-      if (w.venue !== undefined) this.sayAs(avatar, w.venue, say("borrow.later", lang), "agent", w.message);
-      this.askFor(avatar, { kind: "error", summary: say("borrow.offline", lang, { avatar: this.card(avatar)?.name ?? avatar, summary: w.summary }), options: defaultOptions("error", lang), ...(w.venue !== undefined ? { venue: w.venue } : {}), ...(w.message !== undefined ? { message: w.message } : {}) });
-      n++;
-    }
-    return n;
   }
 }

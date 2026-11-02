@@ -9,7 +9,6 @@
 import { AVATAR_ID, parseWho } from "../core/avatar/who.js";
 import { DEFAULT_LANG, isLang, pickLang, say, type Lang } from "../core/avatar/words.js";
 import type { AvatarRelay, Fail, Result } from "./avatars.js";
-import type { Quota } from "../core/avatar/quota.js";
 import type { TokenRecord } from "./tokens.js";
 
 export interface AvatarRequest {
@@ -28,8 +27,6 @@ export interface AvatarRequest {
   version?: string;
 }
 export interface AvatarResponse { status: number; body: string; type: string }
-/** The hosted orchestrator, where the relay runs one (avatar-hosted.ts): the person's quota, and their own key, which the relay never keeps. */
-export interface HostedApi { quota(person: string): Quota & { key: boolean }; setKey(person: string, key: string | null): void }
 
 export const JSON_TYPE = "application/json; charset=utf-8";
 export const MARKDOWN_TYPE = "text/markdown; charset=utf-8";
@@ -51,7 +48,7 @@ export function langOf(r: Pick<AvatarRequest, "query" | "languages" | "body">, p
 /** A link's code in a path part, `<code>` or `<code>.md`. */
 const LINK_PART = /^([a-z0-9]{1,16})(\.md)?$/;
 
-export function routeAvatars(r: AvatarRequest, relay: AvatarRelay, hosted?: HostedApi): AvatarResponse {
+export function routeAvatars(r: AvatarRequest, relay: AvatarRelay): AvatarResponse {
   const parts = r.path.split("/").filter((p) => p !== "").map((p) => { try { return decodeURIComponent(p); } catch { return p; } });
   const m = r.method.toUpperCase();
   const by: TokenRecord | undefined = r.token === undefined ? undefined : relay.verify(r.token);
@@ -105,18 +102,21 @@ export function routeAvatars(r: AvatarRequest, relay: AvatarRelay, hosted?: Host
   if (a === "me" && parts.length === 2 && b === "lang") return only("POST", () => answer(relay.setLanguage(by, r.body)));
   if (a === "me" && parts.length === 2 && b === "default-name") return only("POST", () => answer(relay.setDefaultName(by, r.body)));
   if (a === "me" && parts.length === 2 && b === "push") return only("POST", () => answer(relay.setPush(by, r.body)));
-  // Who pays (spec §8.3): the quota and the person's own key are the orchestrator's.
-  if (a === "me" && parts.length === 2 && (b === "quota" || b === "payment")) {
-    if (person === undefined || by.scope !== "person") return no(403, "person.only");
-    if (hosted === undefined) return no(404, "hosted.noOrchestrator");
-    if (b === "quota") return only("GET", () => json(200, hosted.quota(person)));
-    return only("POST", () => {
-      const key = body["apiKey"];
-      if (key !== null && (typeof key !== "string" || key.trim() === "")) return no(400, "hosted.key");
-      hosted.setKey(person, key === null ? null : key.trim());
-      return json(200, hosted.quota(person));
-    });
+  // The account (architecture §3.1): the ways in, the devices signed in, signing out.
+  if (a === "me" && b === "methods") {
+    if (parts.length === 2) return m === "GET" ? answer(relay.methods(by)) : only("POST", () => answer(relay.startMethod(by, r.body, r.ip)));
+    if (parts.length === 3 && c === "verify") return only("POST", () => answer(relay.addMethod(by, r.body)));
+    if (parts.length === 4 && c !== undefined && d === "remove") return only("POST", () => answer(relay.removeMethod(by, c)));
   }
+  if (a === "me" && b === "devices") {
+    if (parts.length === 2) return only("GET", () => answer(relay.devicesOf(by)));
+    if (parts.length === 3 && c === "revoke-others") return only("POST", () => answer(relay.revokeOthers(by)));
+    if (parts.length === 4 && c !== undefined && d === "revoke") return only("POST", () => answer(relay.revokeDevice(by, c)));
+  }
+  if (a === "me" && parts.length === 2 && b === "logout") return only("POST", () => answer(relay.logout(by)));
+  // The person's box (architecture §5.2): where it stands, the difference, and the wait (the shell holds an empty one open).
+  if (a === "updates" && parts.length === 2 && b === "state") return only("GET", () => answer(relay.updatesState(by)));
+  if (a === "updates" && (parts.length === 1 || (parts.length === 2 && b === "difference"))) return only("GET", () => answer(relay.difference(by, r.query)));
   // 需要你 (spec §7.3): an avatar asks; the person lists and answers.
   if (a === "needs" && parts.length === 1) {
     if (m === "POST") return answer(relay.ask(by, r.body), 201);
@@ -127,16 +127,17 @@ export function routeAvatars(r: AvatarRequest, relay: AvatarRelay, hosted?: Host
     });
   }
   if (a === "needs" && parts.length === 3 && b !== undefined && c !== undefined) return only("POST", () => answer(relay.answerNeed(by, b, c, r.body)));
-  // 借电脑 (spec §7.4): the person's jobs for their computer, and the computer moving one on.
+  // 任务 (spec §7.4, once called 借电脑): the person's jobs for their computer, and the computer moving one on.
   if (a === "work" && parts.length === 1) return only("GET", () => (person !== undefined && by.scope === "person" ? json(200, relay.worksOf(person)) : no(403, "person.only")));
   if (a === "work" && parts.length === 3 && b !== undefined && c !== undefined) return only("POST", () => answer(relay.setWork(by, b, c, r.body)));
   if (a === "devices" && parts.length === 1) return only("POST", () => answer(relay.issueDevice(by), 201));
+  if (a === "avatars" && parts.length === 1) return only("POST", () => answer(relay.firstAvatar(by, r.body), 201));
   if (a === "avatars" && parts.length === 3 && b !== undefined) {
     if (c === "name") return only("POST", () => answer(relay.rename(by, b, r.body)));
     if (c === "rules") return only("POST", () => answer(relay.setRules(by, b, r.body)));
     if (c === "token") return only("POST", () => answer(relay.issueAvatar(by, b), 201));
     if (c === "placeholder") return only("POST", () => answer(relay.setPlaceholder(by, b, r.body)));
-    if (c === "hosted") return only("POST", () => answer(relay.setHosted(by, b, r.body)));
+    if (c === "auto") return only("POST", () => answer(relay.setAuto(by, b, r.body)));
     return no(404, "path.missing");
   }
   if (a === "venues" && parts.length === 1) {

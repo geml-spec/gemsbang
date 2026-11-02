@@ -3,21 +3,29 @@
 // (dist/gemworks.mjs: one JSON request on stdin, one JSON answer on stdout),
 // every request bare, and every IM request one `gb` call of the client
 // (src/gemsbang/ops.ts), which keeps its home in ~/.gemsbang. What the model
-// gets: four tools — im_join, which follows only an invitation the person
-// pasted, from a relay they trust, and asks the person in gemsbang's own
-// dialog (their phone and code too, never through the model); im_say, im_ask
+// gets: four tools — im_join, which follows only a gemsbang invitation the
+// person pasted, and asks the person in gemsbang's own dialog (their email
+// and code too, never through the model); im_say, im_ask
 // (a 需要你 card, one of five kinds, with the words it would send) and
 // im_read, as the avatar this session speaks for. What the person sees: the
 // pane — 需要你 and the total inbox, a chat, 叫人, 我的分身, the settings, the
-// login — and a line above the prompt with the first thing that needs them,
+// account, the sign-in — and a line above the prompt with the first thing that needs them,
 // its options and how many more, or that gemsbang cannot work or nobody is
-// logged in. 借电脑 (spec §7.4): a job for the avatar this session speaks for
+// logged in. 被叫到 (architecture §6.3): when someone calls one of the
+// person's avatars, the pane asks them — 回, 以后这个群自动回, 不回 — and a
+// press, or a chat set to answer on its own (for the avatar this session
+// speaks for), starts an agent in the background that reads the chat and
+// writes what to say, with no tools; its answer goes back as the avatar.
+// 任务 (spec §7.4): a job for the avatar this session speaks for
 // is taken here, in the repository the person named for it, and done by a
 // separate agent in a worktree of it — never in this conversation — held to
 // reading and editing that worktree and running the repository's own
 // commands; its words go back to the chat with the facts this host saw. It
 // fails open: with no Node, a bridge that does not answer, or an answer that
 // does not parse, every call goes through and the line says what is wrong.
+// No poll and no resident process (architecture §6.2): while someone is
+// signed in, the module waits on their box through the client, at most 25
+// seconds a wait, one after another, and what a wait brings shows at once.
 import type { EngineInterface, Register, ToolCallResult } from 'claude-code'
 import { atom, read, update } from 'claude-code'
 import type { GemsbangJson } from '../types'
@@ -34,7 +42,7 @@ import type { Fact } from '../dist/core/avatar/borrow.js'
 import { invitesIn, parseInvite } from '../dist/core/avatar/invite.js'
 import { say } from '../dist/core/avatar/words.js'
 import type { Lang } from '../dist/core/avatar/words.js'
-import type { GbChat, GbLink, GbResult, GbView } from '../dist/gemsbang/ops.js'
+import type { GbAccount, GbChat, GbLink, GbResult, GbRound, GbView } from '../dist/gemsbang/ops.js'
 
 const problemAtom = atom({ plugin: 'gemsbang', key: 'problem' } as const, null as string | null)
 const nodeAtom = atom({ plugin: 'gemsbang', key: 'node' } as const, null as string | null)
@@ -47,7 +55,9 @@ const chatAtom = atom({ plugin: 'gemsbang', key: 'chat' } as const, null as Gems
 const linkAtom = atom({ plugin: 'gemsbang', key: 'link' } as const, null as GemsbangJson)
 const pageAtom = atom({ plugin: 'gemsbang', key: 'page' } as const, 'inbox' as string)
 const filterAtom = atom({ plugin: 'gemsbang', key: 'filter' } as const, null as string | null)
-const phoneAtom = atom({ plugin: 'gemsbang', key: 'phone' } as const, null as string | null)
+const addressAtom = atom({ plugin: 'gemsbang', key: 'address' } as const, null as string | null)
+const addingAtom = atom({ plugin: 'gemsbang', key: 'adding' } as const, null as string | null)
+const accountAtom = atom({ plugin: 'gemsbang', key: 'account' } as const, null as GemsbangJson)
 const groupAsAtom = atom({ plugin: 'gemsbang', key: 'groupAs' } as const, 'new' as string)
 const groupAvatarAtom = atom({ plugin: 'gemsbang', key: 'groupAvatar' } as const, null as string | null)
 const pastedAtom = atom({ plugin: 'gemsbang', key: 'pasted' } as const, [] as GemsbangJson)
@@ -55,9 +65,10 @@ const needsOpenAtom = atom({ plugin: 'gemsbang', key: 'needsOpen' } as const, fa
 const mutedOpenAtom = atom({ plugin: 'gemsbang', key: 'mutedOpen' } as const, false as boolean)
 const allowAtom = atom({ plugin: 'gemsbang', key: 'allow' } as const, {} as GemsbangJson)
 const borrowingAtom = atom({ plugin: 'gemsbang', key: 'borrowing' } as const, {} as GemsbangJson)
+const roundsAtom = atom({ plugin: 'gemsbang', key: 'rounds' } as const, {} as GemsbangJson)
 
 const PANE_TITLE = 'Gemsbang'
-const PAGES: readonly GbPage[] = ['inbox', 'chat', 'invite', 'avatars', 'settings', 'new-group']
+const PAGES: readonly GbPage[] = ['inbox', 'chat', 'invite', 'avatars', 'settings', 'account', 'new-group']
 /** After a start that got no answer, a call or a prompt starts again at most this often; sooner when no Node was found. */
 const START_RETRY_MS = 60_000
 const NODE_RETRY_MS = 10_000
@@ -65,24 +76,27 @@ const START_BACKOFF_MS = [5_000, 15_000, 30_000, 60_000]
 const PROBE_MS = 10_000
 /** A busy machine is no news: the line says the bridge is not answering only once none came back for this long. */
 const QUIET_MS = 120_000
-/** How often the chats are read again while nothing else asks. */
-const POLL_MS = 30_000
+/** A wait on the box (architecture §5.2): this many seconds at most, the bridge given this long to answer; the next wait this soon after one came back, or this long after one failed. */
+const WAIT_S = 25
+const WAIT_TIMEOUT_MS = 45_000
+const WAIT_AGAIN_MS = 1_000
+const WAIT_RETRY_MS = 10_000
 
 /** The four tools (transport §4.1): join with the person's yes, then say, ask the person and read as the avatar this session speaks for. */
 const TOOLS = [
   {
     name: 'im_join',
-    description: 'Join a gemsbang group from the invitation link (https://<relay>/i/<code>.md) your person pasted to you in this conversation. gemsbang asks your person first in its own dialog — their phone and code too when they have no account, never through you — and then this session speaks for the avatar that joined. A link they did not paste themself is not followed.',
+    description: 'Join a gemsbang group from the invitation link (https://gemsbang.com/i/<code>.md) your person pasted to you in this conversation. gemsbang asks your person first in its own dialog — their email and code too when they are not signed in here, never through you — and then this session speaks for the avatar that joined. A link they did not paste themself is not followed.',
     inputSchema: { type: 'object', properties: { url: { type: 'string', description: 'The invitation link exactly as your person pasted it.' } }, required: ['url'], additionalProperties: false },
   },
   {
     name: 'im_say',
-    description: 'Say something in a gemsbang chat as the avatar this session speaks for; the relay marks it as said by an agent. Words only. Ask your person before promising, paying, taking a side or borrowing their computer.',
+    description: 'Say something in a gemsbang chat as the avatar this session speaks for; the relay marks it as said by an agent. Words only. Ask your person before promising, paying, taking a side or taking on a task.',
     inputSchema: { type: 'object', properties: { venue: { type: 'string', description: 'The chat as <owner>/<id>; im_read with no arguments lists them.' }, text: { type: 'string' }, replyTo: { type: 'string', description: 'The message answered, by its id.' } }, required: ['venue', 'text'], additionalProperties: false },
   },
   {
     name: 'im_ask',
-    description: 'Ask your person, as the avatar this session speaks for, about one of five things only: a promise asked of them (promise), money (pay), taking a side (stance), using their computer (borrow), something gone wrong (error). Give the chat, a one-line summary, what you checked, the exact words you would send, and options each a short form of those words; gemsbang shows the card to your person alone and sends the words they choose, as your avatar. placeholder: true says a short waiting line in the chat meanwhile. Do not answer for them before they do.',
+    description: 'Ask your person, as the avatar this session speaks for, about one of five things only: a promise asked of them (promise), money (pay), taking a side (stance), a task that needs their computer (borrow), something gone wrong (error). Give the chat, a one-line summary, what you checked, the exact words you would send, and options each a short form of those words; gemsbang shows the card to your person alone and sends the words they choose, as your avatar. placeholder: true says a short waiting line in the chat meanwhile. Do not answer for them before they do.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -94,7 +108,7 @@ const TOOLS = [
         options: { type: 'array', maxItems: 4, items: { type: 'object', properties: { label: { type: 'string' }, text: { type: 'string', description: 'The words this option sends.' } }, required: ['label'], additionalProperties: false } },
         replyTo: { type: 'string', description: 'The message it answers, by its id.' },
         placeholder: { type: 'boolean' },
-        expires: { type: 'string', description: 'ISO time; twelve hours unless sooner.' },
+        expires: { type: 'string', description: 'ISO time, only when the matter itself has a deadline; without it the card waits until your person answers.' },
       },
       required: ['venue', 'kind', 'summary'],
       additionalProperties: false,
@@ -114,6 +128,10 @@ const readView = async ($: EngineInterface): Promise<GbView | null> => (await re
 type Borrowed = { avatar: string; work: string; worktree: string; commands: string[]; facts: Fact[] }
 const borrowed = (was: GemsbangJson): Record<string, Borrowed> => ({ ...((was as unknown as Record<string, Borrowed> | null) ?? {}) })
 const readBorrowing = async ($: EngineInterface): Promise<Record<string, Borrowed>> => borrowed(await read($, borrowingAtom))
+/** A round's agent of this session, by its id (`pending:<chat>` until its id is known): where its answer goes, replying to which line with how many hops, its prompt's first line. */
+type Rounding = { avatar: string; owner: string; id: string; replyTo: string; hops: number; head: string }
+const roundings = (was: GemsbangJson): Record<string, Rounding> => ({ ...((was as unknown as Record<string, Rounding> | null) ?? {}) })
+const readRounds = async ($: EngineInterface): Promise<Record<string, Rounding>> => roundings(await read($, roundsAtom))
 /** A pending borrowed agent known by its id at last; once is enough. */
 const adopt = (all: Record<string, Borrowed>, key: string, id: string): GemsbangJson => {
   const b = all[key]
@@ -220,6 +238,8 @@ async function startBridge($: EngineInterface): Promise<void> {
   const r = await gb($, 'status', {}, SLOW_TIMEOUT_MS)
   if (r === undefined) { scheduleStartRetry($); return }
   startTries = 0
+  await afterSync($)
+  startWaiting($)
 }
 
 async function retryStart($: EngineInterface): Promise<void> {
@@ -242,13 +262,36 @@ async function registerOne($: EngineInterface, name: string, register: () => Pro
 /** The chats read again, and the chat open with them. */
 async function reload($: EngineInterface): Promise<void> {
   await gb($, 'status', {}, SLOW_TIMEOUT_MS)
+  await afterSync($)
+}
+
+/** After the chats came up to date: this session's jobs and rounds picked up, the chat open shown as it is now. */
+async function afterSync($: EngineInterface): Promise<void> {
   await pickUp($)
   const chat = (await read($, chatAtom)) as unknown as GbChat | null
   const page = await read($, pageAtom)
   if (chat !== null && (page === 'chat' || page === 'invite')) await gb($, 'open', { owner: chat.owner, id: chat.id })
 }
 
-// ---- 借电脑 (spec §7.4) -----------------------------------------------------------------
+let waitAlive = false
+
+/** The waits on the box begin, unless they already run: one after another while someone is signed in. */
+function startWaiting($: EngineInterface): void {
+  if (waitAlive) return
+  waitAlive = true
+  $.clock.after(0, () => { void waitRound($).catch(() => { waitAlive = false }) })
+}
+
+/** One wait on the box (architecture §6.2): back the moment something lands, or after WAIT_S; what it brought shows, then the next. Nobody signed in, the waits stop until someone is. */
+async function waitRound($: EngineInterface): Promise<void> {
+  const before = JSON.stringify(await read($, viewAtom))
+  const r = await gb($, 'wait', { timeout: WAIT_S }, WAIT_TIMEOUT_MS)
+  if (r?.ok === true && JSON.stringify(await read($, viewAtom)) !== before) await afterSync($)
+  if (r?.ok === true && (await readView($))?.loggedIn !== true) { waitAlive = false; return }
+  $.clock.after(r?.ok === true ? WAIT_AGAIN_MS : WAIT_RETRY_MS, () => { void waitRound($).catch(() => { waitAlive = false }) })
+}
+
+// ---- 任务 (spec §7.4, once called 借电脑) ------------------------------------------------
 
 let picking = false
 
@@ -290,9 +333,43 @@ async function pickUp($: EngineInterface): Promise<void> {
       await update($, borrowingAtom, (was) => { const all = borrowed(was); delete all[key]; return all as unknown as GemsbangJson })
       await gb($, 'work-done', { avatar, work: w.id, ok: false, reason: why })
     }
+    // The chats set to answer on their own (architecture §6.3), for the avatar this session speaks for.
+    const asked = await gb($, 'rounds', { session })
+    for (const round of asked?.ok === true ? asked.rounds ?? [] : []) await startRound($, round)
   } finally {
     picking = false
   }
+}
+
+// ---- 被叫到 (architecture §6.3) ----------------------------------------------------------
+
+/**
+ * One round: an agent in the background reads the chat's last lines and
+ * writes what the avatar says — never in the conversation the person is
+ * using, and with no tools. It is written down before it starts, by its
+ * chat, and known by its id from the spawn's answer or its first turn
+ * (which begins with the prompt's first line). One round per chat at a time.
+ */
+async function startRound($: EngineInterface, round: GbRound): Promise<void> {
+  const chat = `${round.owner}/${round.id}`
+  if (Object.values(await readRounds($)).some((x) => `${x.owner}/${x.id}` === chat)) return
+  const key = `pending:${chat}`
+  const head = round.prompt.split('\n')[0] ?? ''
+  await update($, roundsAtom, (was) => ({ ...roundings(was), [key]: { avatar: round.avatar, owner: round.owner, id: round.id, replyTo: round.replyTo, hops: round.hops, head } }) as unknown as GemsbangJson)
+  try {
+    const r = await $.agent.spawn({ prompt: round.prompt, description: round.description, subagentType: 'general-purpose' })
+    if (r.deny === undefined) {
+      if (r.agentId !== undefined) { const id = r.agentId; await update($, roundsAtom, (was) => adoptRound(roundings(was), key, id)) }
+      return
+    }
+  } catch { /* no agent: the call was let go; the person can answer in the chat themself */ }
+  await update($, roundsAtom, (was) => { const all = roundings(was); delete all[key]; return all as unknown as GemsbangJson })
+}
+
+const adoptRound = (all: Record<string, Rounding>, key: string, id: string): GemsbangJson => {
+  const x = all[key]
+  if (x !== undefined) { all[id] = x; delete all[key] }
+  return all as unknown as GemsbangJson
 }
 
 // ---- joining, with the person's yes ---------------------------------------------------
@@ -303,8 +380,8 @@ async function ask($: EngineInterface, question: string, options: string[]): Pro
 }
 
 /**
- * In by a link (spec §6.2–§6.5): the relay trusted, else asked; the person
- * logged in, else asked for their phone and code here, never in the
+ * In by a link (spec §6.2–§6.5): only a link of the service this machine signs
+ * in to; the person signed in, else asked for their email and code here, never in the
  * conversation; then which avatar — the one the inviter knows, another, or a
  * new one named from the names offered; then in. From the model's im_join
  * the link must be one the person pasted; that session then speaks for the
@@ -319,30 +396,26 @@ async function joinFlow($: EngineInterface, url: string, fromTool: { session: st
     const pasted = ((await read($, pastedAtom)) as unknown as string[] | null) ?? []
     if (!pasted.includes(`${p.origin}/i/${p.code}.md`)) { await gb($, 'note', { url }); return say('join.notPasted', l) }
   }
-  if (!((await readView($))?.trusted ?? []).includes(p.origin)) {
-    const a = await ask($, say('ask.trust', l, { host }), [say('ask.trustYes', l), say('ask.no', l)])
-    if (a !== say('ask.trustYes', l)) return say('join.untrusted', l, { host })
-    const t = await gb($, 'trust', { origin: p.origin })
-    if (t === undefined) return (await read($, problemAtom)) ?? ''
-    if (!t.ok) return t.reason
-  }
+  const service = (await readView($))?.relay ?? ''
+  if (service !== '' && p.origin !== service) return say('client.otherRelay', l, { host })
   if (!((await readView($))?.loggedIn ?? false)) {
     const peek = await gb($, 'link-info', { url })
     if (peek === undefined) return (await read($, problemAtom)) ?? ''
     if (!peek.ok) return peek.reason
     const group = String((peek.info?.['group'] as { name?: unknown } | undefined)?.name ?? '')
-    const phone = await ask($, say('ask.phone', l, { group }), [say('ask.no', l), say('panel.open', l)])
-    if (phone === undefined || phone === say('ask.no', l)) return say('join.declined', l)
-    if (phone === say('panel.open', l)) { await openPane($, 'inbox'); return say('client.notLoggedIn', l) }
-    const sent = await gb($, 'login-start', { phone })
+    const typed = await ask($, say('ask.email', l, { group }), [say('ask.no', l), say('panel.open', l)])
+    if (typed === undefined || typed === say('ask.no', l)) return say('join.declined', l)
+    if (typed === say('panel.open', l)) { await openPane($, 'inbox'); return say('client.notLoggedIn', l) }
+    const email = typed.trim()
+    const sent = await gb($, 'login-start', { email })
     if (sent === undefined) return (await read($, problemAtom)) ?? ''
     if (!sent.ok) return sent.reason
-    const tail = String(sent.info?.['tail'] ?? '')
-    const code = await ask($, say('ask.code', l, { tail }), [say('ask.no', l), say('page.sendCode', l)])
+    const code = await ask($, say('ask.code', l, { to: String(sent.info?.['to'] ?? email) }), [say('ask.no', l), say('page.sendCode', l)])
     if (code === undefined || code === say('ask.no', l) || code === say('page.sendCode', l)) return say('join.noAnswer', l)
-    const in_ = await gb($, 'login-verify', { phone, code: code.trim() })
+    const in_ = await gb($, 'login-verify', { email, code: code.trim() })
     if (in_ === undefined) return (await read($, problemAtom)) ?? ''
     if (!in_.ok) return in_.reason
+    startWaiting($)
     l = await langNow($)
   }
   const info = await gb($, 'link-info', { url })
@@ -435,6 +508,7 @@ async function act($: EngineInterface, action: GbAction, surface?: string): Prom
     case 'page': {
       await update($, pageAtom, () => action.page)
       if (action.page === 'invite' && chat !== null) { await update($, linkAtom, () => null); await run($, 'link', { owner: chat.owner, id: chat.id }) }
+      if (action.page === 'account') { await update($, accountAtom, () => null); await account($, run($, 'account', {})) }
       return
     }
     case 'filter': await update($, filterAtom, () => action.avatar); return
@@ -478,32 +552,50 @@ async function act($: EngineInterface, action: GbAction, surface?: string): Prom
     // Each atom named where it is written: the engine lists a module's state by reading its calls.
     case 'more': if (action.what === 'needs') await update($, needsOpenAtom, () => true); else await update($, mutedOpenAtom, () => true); return
     case 'mute': await run($, 'mute', { ...(action.avatar !== undefined ? { avatar: action.avatar } : {}), ...(action.venue !== undefined ? { venue: action.venue } : {}), on: action.on }); return
-    case 'pause': await run($, 'pause', { avatar: action.avatar, paused: action.paused }); return
-    case 'key-remove': await run($, 'key', {}); return
     case 'work-now': await run($, 'work-now', { avatar: action.avatar, work: action.work }); return
-    case 'resend': {
-      const phone = await read($, phoneAtom)
-      if (phone !== null) { const r = await run($, 'login-start', { phone }); if (r?.ok === true) $.ui.toast(r.text ?? '') }
+    case 'wake': {
+      const r = await run($, 'wake', { avatar: action.avatar, owner: action.owner, id: action.id, choice: action.choice })
+      if (r?.ok === true && r.round !== undefined) await startRound($, r.round)
       return
     }
+    case 'auto': await run($, 'auto', { avatar: action.avatar, venue: action.venue, on: action.on }); return
+    case 'resend': {
+      const email = await read($, addressAtom)
+      if (email !== null) { const r = await run($, 'login-start', { email }); if (r?.ok === true) $.ui.toast(r.text ?? '') }
+      return
+    }
+    case 'change-address': await update($, addressAtom, () => null); return
+    case 'add-cancel': await update($, addingAtom, () => null); return
+    case 'method-remove': await account($, run($, 'method-remove', { id: action.id })); return
+    case 'device-revoke': await account($, run($, 'device-revoke', { id: action.id })); return
+    case 'devices-revoke-others': await account($, run($, 'devices-revoke-others', {})); return
     default: return
   }
 }
 
+/** The account as a call left it, kept for its page. */
+async function account($: EngineInterface, call: Promise<GbResult | undefined>): Promise<void> {
+  const r = await call
+  if (r?.ok === true && r.account !== undefined) await update($, accountAtom, () => r.account as unknown as GemsbangJson)
+}
+
 /** Enter in a field: its one call, or what the pane keeps until the next. */
 async function submit($: EngineInterface, field: GbField, value: string, target?: string): Promise<void> {
-  const [chat, phone, groupAs, groupAvatar] = await Promise.all([read($, chatAtom), read($, phoneAtom), read($, groupAsAtom), read($, groupAvatarAtom)])
-  const a = fieldAction(field, value, { chat: chat as unknown as GbChat | null, phone, groupAs, ...(groupAvatar !== null ? { groupAvatar } : {}) }, target)
+  const [chat, address, adding, groupAs, groupAvatar] = await Promise.all([read($, chatAtom), read($, addressAtom), read($, addingAtom), read($, groupAsAtom), read($, groupAvatarAtom)])
+  const session = await $.session.id().catch(() => '')
+  const a = fieldAction(field, value, { chat: chat as unknown as GbChat | null, address, adding, groupAs, session, ...(groupAvatar !== null ? { groupAvatar } : {}) }, target)
   if (a === undefined) return
   if ('local' in a) {
-    if (a.local === 'phone') { const r = await run($, 'login-start', { phone: a.phone }); if (r?.ok === true) await update($, phoneAtom, () => a.phone) }
+    if (a.local === 'email') { const r = await run($, 'login-start', { email: a.email }); if (r?.ok === true) await update($, addressAtom, () => a.email) }
+    else if (a.local === 'add-email') { const r = await run($, 'method-start', { email: a.email }); if (r?.ok === true) await update($, addingAtom, () => a.email) }
     else if (a.local === 'group-avatar') await update($, groupAvatarAtom, () => a.name)
     else $.ui.toast(await joinFlow($, a.url, undefined))
     return
   }
   const r = await run($, a.call, a.args)
   if (r?.ok !== true) return
-  if (a.call === 'login-verify' || a.call === 'setup') await update($, phoneAtom, () => null)
+  if (a.call === 'login-verify') { await update($, addressAtom, () => null); await update($, pageAtom, () => 'inbox'); startWaiting($) }
+  if (a.call === 'method-verify') { await update($, addingAtom, () => null); await account($, Promise.resolve(r)) }
   if (a.call === 'group') { await update($, groupAvatarAtom, () => null); await update($, groupAsAtom, () => 'new') }
 }
 
@@ -639,7 +731,7 @@ function safeRow($: EngineInterface, els: Els, row: GbRow, columns: number): unk
   }
 }
 
-const EMPTY_VIEW: GbView = { relay: '', trusted: [], loggedIn: false, lang: 'zh', avatars: [], rows: [], unread: 0, needs: [], muted: { avatars: [], venues: [] }, work: [], notes: [], bodies: {} }
+const EMPTY_VIEW: GbView = { relay: '', loggedIn: false, lang: 'zh', avatars: [], rows: [], unread: 0, needs: [], calls: [], muted: { avatars: [], venues: [] }, work: [], notes: [], bodies: {} }
 
 export const register: Register = (on) => {
   on('session.start', async ($, e, next) => {
@@ -654,7 +746,6 @@ export const register: Register = (on) => {
     } catch { /* no manifest */ }
     await adoptPane($)
     await startBridge($)
-    $.clock.every(POLL_MS, () => { void reload($).catch(() => undefined) })
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -668,10 +759,11 @@ export const register: Register = (on) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  // Any call: the bridge tried again if it is down. 借电脑 (spec §5 rule 8): a borrowed agent reads and edits its worktree and runs the repository's own commands, nothing else; each command it ran is a fact this host saw.
+  // Any call: the bridge tried again if it is down. A round's agent writes words and uses no tool (architecture §6.3). 任务 (spec §5 rule 8): a borrowed agent reads and edits its worktree and runs the repository's own commands, nothing else; each command it ran is a fact this host saw.
   on('tool.call', async ($, e, next) => {
     $.clock.after(0, () => { void retryStart($).catch(() => undefined) })
     const id = e.agentId
+    if (id !== undefined && (await readRounds($))[id] !== undefined) return { deny: say('round.denied', await langNow($)) }
     const b = id === undefined ? undefined : (await readBorrowing($))[id]
     if (id === undefined || b === undefined) return next(e)
     const input = e as unknown as Record<string, unknown>
@@ -694,10 +786,13 @@ export const register: Register = (on) => {
     return r
   }).catch(($, e, next) => next(e))
 
-  // A borrowed agent's first turn names its worktree: from here its calls are held to its job (when the spawn's answer did not already say its id).
+  // A borrowed agent's first turn names its worktree, a round's begins with its prompt's first line: from here its calls are held (when the spawn's answer did not already say its id).
   on('turn.start', async ($, e, next) => {
     const id = e.agentId
     if (id !== undefined) {
+      const rounds = await readRounds($)
+      const pending = Object.keys(rounds).find((k) => k.startsWith('pending:') && rounds[k]!.head !== '' && e.text.startsWith(rounds[k]!.head))
+      if (pending !== undefined) await update($, roundsAtom, (was) => adoptRound(roundings(was), pending, id))
       const all = await readBorrowing($)
       const key = Object.keys(all).find((k) => k.startsWith('pending:') && e.text.includes(all[k]!.worktree))
       if (key !== undefined) await update($, borrowingAtom, (was) => adopt(borrowed(was), key, id))
@@ -705,9 +800,15 @@ export const register: Register = (on) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  // The borrowed agent's end: its words into the chat as the avatar with the facts, or the job failed and the person is told.
+  // A round's end: its answer into the chat as the avatar (and a card, when it asks one). The borrowed agent's end: its words into the chat as the avatar with the facts, or the job failed and the person is told.
   on('turn.complete', async ($, e, next) => {
     const id = e.agentId
+    const round = id === undefined ? undefined : (await readRounds($))[id]
+    if (id !== undefined && round !== undefined) {
+      await update($, roundsAtom, (was) => { const all = roundings(was); delete all[id]; return all as unknown as GemsbangJson })
+      if (e.reason === 'answer' && !e.isAborted) await gb($, 'round-done', { avatar: round.avatar, owner: round.owner, id: round.id, replyTo: round.replyTo, hops: round.hops, text: e.answer })
+      return next(e)
+    }
     const b = id === undefined ? undefined : (await readBorrowing($))[id]
     if (id !== undefined && b !== undefined) {
       await update($, borrowingAtom, (was) => {
@@ -760,14 +861,14 @@ export const register: Register = (on) => {
     const els = elementsOf($, e)
     const { Box, Text, Svg } = els
     const columns: number = e.props.bodyColumns
-    const [view, chat, link, page, filter, phone, groupAs, problem, setup, version, now, needsOpen, mutedOpen, allow] = await Promise.all([
-      readView($), read($, chatAtom), read($, linkAtom), read($, pageAtom), read($, filterAtom), read($, phoneAtom), read($, groupAsAtom), read($, problemAtom), read($, setupAtom), read($, versionAtom), $.clock.now(),
-      read($, needsOpenAtom), read($, mutedOpenAtom), read($, allowAtom),
+    const [view, chat, link, page, filter, address, groupAs, problem, setup, version, now, needsOpen, mutedOpen, allow, adding, accountNow] = await Promise.all([
+      readView($), read($, chatAtom), read($, linkAtom), read($, pageAtom), read($, filterAtom), read($, addressAtom), read($, groupAsAtom), read($, problemAtom), read($, setupAtom), read($, versionAtom), $.clock.now(),
+      read($, needsOpenAtom), read($, mutedOpenAtom), read($, allowAtom), read($, addingAtom), read($, accountAtom),
     ])
     const session = await $.session.id().catch(() => '')
     const state: PaneState = {
-      page: (PAGES as readonly string[]).includes(page) ? page as GbPage : 'inbox', filter, chat: chat as unknown as GbChat | null, link: link as unknown as GbLink | null, phone, groupAs, session, problem: problem ?? setup, now: new Date(now).toISOString(),
-      needsOpen, mutedOpen, allow: (allow as unknown as Record<string, { person?: boolean; venue?: boolean }>) ?? {},
+      page: (PAGES as readonly string[]).includes(page) ? page as GbPage : 'inbox', filter, chat: chat as unknown as GbChat | null, link: link as unknown as GbLink | null, address, groupAs, session, problem: problem ?? setup, now: new Date(now).toISOString(),
+      needsOpen, mutedOpen, allow: (allow as unknown as Record<string, { person?: boolean; venue?: boolean }>) ?? {}, adding, account: accountNow as unknown as GbAccount | null,
     }
     let rows: GbRow[]
     try {

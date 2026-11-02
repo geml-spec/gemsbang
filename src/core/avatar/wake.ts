@@ -1,4 +1,5 @@
-// When a hosted avatar wakes (spec §7.7, §5 rule 7): an @ of its name always
+// When an avatar is called (spec §7.7, §5 rule 7; run on the person's client,
+// architecture §6.3): an @ of its name always
 // wakes it; a two-person chat is always to it; else a few rules that cost no
 // model call — its name said, a reply to something it said, a line from the
 // group's owner, a question put to the people present — and everything else

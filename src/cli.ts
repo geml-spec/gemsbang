@@ -22,7 +22,6 @@ import { installAntigravity, runAntigravity } from "./antigravity.js";
 import { serveMcp } from "./mcp.js";
 import { startRelay } from "./relay/server.js";
 import { startAvatarRelay } from "./relay/avatar-server.js";
-import { avatarCommandRunner } from "./relay/avatar-hosted.js";
 import { commandTexter } from "./relay/text.js";
 import { commandMailer } from "./relay/mail.js";
 import { commandRunner } from "./relay/hosted.js";
@@ -64,8 +63,7 @@ const USAGE = [
   "  mcp [--host h] [--root dir]             the three model tools over stdio MCP (host default: mcp)",
   "  relay [--root dir] [--port N] [--name host] [--host addr] [--federation open|closed] [--free-credits N] [--mail-command cmd]  the IM relay, until it is stopped (root: ~/.gemworks/relay; login codes go to <root>/_relay/mail/ unless a command takes them: MAIL_TO and MAIL_SUBJECT in its environment, the text on stdin)",
   "  relay … [--hosted-command cmd] [--hosted-credits N]   also run the hosted agents' rounds (transport §6): the command gets the prompt on stdin and HOSTED_* in its environment, answers on stdout; a round costs the owner N credits (1)",
-  "  relay serve [--root dir] [--port N] [--name host] [--host addr] [--public-url url] [--text-command cmd]   gemsbang's relay: avatars, groups, links, the pages /i/<code>, /g/<group>, /login (root: ~/.gemworks/gemsbang; login codes go to <root>/_relay/texts/ unless a command takes them: TEXT_TO in its environment, the text on stdin)",
-  "  relay serve … [--hosted-command cmd] [--free-days N] [--free-replies N]   also play every avatar (spec §7.7): the command gets a round's prompt on stdin and HOSTED_* in its environment (HOSTED_API_KEY when the person pays with their own key), answers on stdout; the free quota is N days or N replies (7, 50)",
+  "  relay serve [--root dir] [--port N] [--name host] [--host addr] [--public-url url] [--mail-command cmd] [--mail-from addr] [--text-command cmd]   gemsbang's relay: avatars, groups, links, the pages /i/<code>, /g/<group>, /login (root: ~/.gemworks/gemsbang; an email's code goes to <root>/_relay/mail/, a phone's to <root>/_relay/texts/, unless a command takes it: MAIL_TO and MAIL_SUBJECT, or TEXT_TO, in its environment, the text on stdin; --mail-from is who the mail says it comes from, the name unless given)",
   "  relay token <person> [--root dir]       issue a person's token on that relay and print it",
   "  relay topup <person> <credits> [--note s] [--root dir]   credit a person's wallet on that relay (the platform's top-up, §9.1) and print the balance",
   "  relay price <market> <price> [--at iso] [--root dir]   a price point from a public source, on the relay's chain (§10.3)",
@@ -272,7 +270,7 @@ async function runPhone(rest: string[]): Promise<number> {
 
 /** `gemworks relay serve`: gemsbang's relay (avatars, groups, links and their pages) until it is stopped. */
 async function serveAvatars(rest: string[]): Promise<number> {
-  if (positionals("relay serve", rest, [], ["--root", "--port", "--name", "--host", "--public-url", "--text-command", "--hosted-command", "--free-days", "--free-replies"]).length > 0) fail(USAGE, 2);
+  if (positionals("relay serve", rest, [], ["--root", "--port", "--name", "--host", "--public-url", "--mail-command", "--mail-from", "--text-command"]).length > 0) fail(USAGE, 2);
   const root = resolve(flag(rest, "--root") ?? join(homedir(), ".gemworks", "gemsbang"));
   const port = Number(flag(rest, "--port") ?? "7710");
   if (!Number.isInteger(port) || port < 0 || port > 65535) fail("gemworks relay serve: --port needs a number from 0 to 65535", 2);
@@ -280,12 +278,9 @@ async function serveAvatars(rest: string[]): Promise<number> {
   if (publicUrl !== undefined && !/^https?:\/\/[^/\s]+$/.test(publicUrl)) fail("gemworks relay serve: --public-url is http(s)://host, with no path", 2);
   const host = flag(rest, "--host") ?? "127.0.0.1";
   const name = flag(rest, "--name") ?? "localhost";
-  const text = flag(rest, "--text-command");
-  const hostedCommand = flag(rest, "--hosted-command"), days = flag(rest, "--free-days"), replies = flag(rest, "--free-replies");
-  for (const [f, v] of [["--free-days", days], ["--free-replies", replies]] as const) if (v !== undefined && !/^\d+$/.test(v)) fail(`gemworks relay serve: ${f} needs a whole number`, 2);
-  const hosted = hostedCommand === undefined ? undefined : { runner: avatarCommandRunner(hostedCommand), ...(days !== undefined ? { days: Number(days) } : {}), ...(replies !== undefined ? { replies: Number(replies) } : {}) };
-  const s = await startAvatarRelay({ root, name, port, host, version: packageVersion(), ...(publicUrl !== undefined ? { publicUrl } : {}), ...(text !== undefined ? { texter: commandTexter(text) } : {}), ...(hosted !== undefined ? { hosted } : {}) });
-  console.log(`gemsbang relay ${name} listening on ${s.url} · documents under ${root}${hostedCommand !== undefined ? ` · hosted by "${hostedCommand}"` : ""}`);
+  const text = flag(rest, "--text-command"), mail = flag(rest, "--mail-command"), mailFrom = flag(rest, "--mail-from");
+  const s = await startAvatarRelay({ root, name, port, host, version: packageVersion(), ...(publicUrl !== undefined ? { publicUrl } : {}), ...(text !== undefined ? { texter: commandTexter(text) } : {}), ...(mail !== undefined ? { mailer: commandMailer(mail) } : {}), ...(mailFrom !== undefined ? { mailFrom } : {}) });
+  console.log(`gemsbang relay ${name} listening on ${s.url} · documents under ${root}`);
   await new Promise<void>((done) => {
     const stop = (): void => { void s.close().then(done); };
     process.once("SIGINT", stop);

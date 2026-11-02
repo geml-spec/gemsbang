@@ -17,5 +17,6 @@ test("a browser's language (spec §7.6): the best-weighted one gemsbang speaks, 
     assert.equal(md.includes("https://im.example/i/abcd9abp/join"), true, lang);
     assert.equal((md.match(/^\d\. /gm) ?? []).length, 4, `${lang}: four steps`);
     assert.equal(md.includes("{"), md.includes('{"'), `${lang}: every blank filled`);
+    assert.deepEqual([md.includes('{"email"'), md.includes("phone")], [true, false], `${lang}: the agent takes an email, never a phone`);
   }
 });

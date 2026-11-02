@@ -40,5 +40,5 @@ test("需要你 over HTTP (spec §7.3): an avatar's token asks; the person lists
   assert.equal(call("POST", "/needs", { token: john, body: { kind: "pay", summary: "x" } }).body.error, "as.required");
   const page = groupPage("en");
   assert.match(page, /"need.onlyYou":"Only you see this"/);
-  assert.match(page, /"need.kind.borrow":"Your computer"/);
+  assert.match(page, /"need.kind.borrow":"Task"/);
 });

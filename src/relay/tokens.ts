@@ -4,9 +4,11 @@
 // under its own owner `_relay`, one block per token and one per revocation;
 // the token itself is shown once, to whoever asked for it. A request's
 // speaker is its token's — a person's token speaks as `person:<id>`, an
-// agent's as `agent:<name>@<owner>` — whatever the body claims.
+// agent's as `agent:<name>@<owner>` — whatever the body claims. Kept on the
+// relay's documents: its folder (`root`), or its store (doc-store.ts).
 import { createHash, randomBytes } from "node:crypto";
-import { appendSealed, readDoc, RELAY_OWNER } from "./store.js";
+import { appendSealed, fileStore, type DocStore } from "./doc-store.js";
+import { RELAY_OWNER } from "./store.js";
 
 /** gemsbang adds two (relay/avatars.ts): an avatar's, which speaks as `avatar:<id>`, and a device's, the agent a person attached on one machine, which speaks as the person but may only ask for an avatar's token. */
 export type Scope = "person" | "agent" | "guest" | "inbox" | "avatar" | "device";
@@ -16,19 +18,20 @@ const TOKENS = "tokens.geml";
 
 export const hashToken = (token: string): string => "sha256:" + createHash("sha256").update(token, "utf8").digest("hex");
 const rand = (): string => randomBytes(6).toString("hex");
+const storeOf = (at: string | DocStore): DocStore => (typeof at === "string" ? fileStore(at) : at);
 
-export function issueToken(root: string, o: { speaker: string; scope: Scope; by: string; at: string }): { token: string; record: TokenRecord } {
+export function issueToken(at: string | DocStore, o: { speaker: string; scope: Scope; by: string; at: string }): { token: string; record: TokenRecord } {
   const token = `gwx_${randomBytes(24).toString("hex")}`;
   const id = `token-${rand()}`;
-  appendSealed(root, RELAY_OWNER, TOKENS, id, { token: hashToken(token), speaker: o.speaker, scope: o.scope, at: o.at, by: o.by });
+  appendSealed(storeOf(at), RELAY_OWNER, TOKENS, id, { token: hashToken(token), speaker: o.speaker, scope: o.scope, at: o.at, by: o.by });
   return { token, record: { id, speaker: o.speaker, scope: o.scope, at: o.at, by: o.by } };
 }
 
 /** The record a token stands for, or nothing: unknown, malformed, or revoked. */
-export function verifyToken(root: string, token: string): TokenRecord | undefined {
+export function verifyToken(at: string | DocStore, token: string): TokenRecord | undefined {
   if (!token.startsWith("gwx_")) return undefined;
   const h = hashToken(token);
-  const d = readDoc(root, RELAY_OWNER, TOKENS);
+  const d = storeOf(at).read(RELAY_OWNER, TOKENS);
   const revoked = new Set(d.blocks.filter((b) => b.id.startsWith("revoke-")).map((b) => b.value["token"]));
   for (const b of d.blocks) {
     if (!b.id.startsWith("token-") || b.value["token"] !== h || revoked.has(b.id)) continue;
@@ -39,9 +42,24 @@ export function verifyToken(root: string, token: string): TokenRecord | undefine
   return undefined;
 }
 
-/** Revoke a token by its record's id; false when there is no such token. */
-export function revokeToken(root: string, id: string, at: string): boolean {
-  if (!readDoc(root, RELAY_OWNER, TOKENS).blocks.some((b) => b.id === id)) return false;
-  appendSealed(root, RELAY_OWNER, TOKENS, `revoke-${rand()}`, { token: id, at });
+/** Every token not revoked, oldest first. */
+export function liveTokens(at: string | DocStore): TokenRecord[] {
+  const d = storeOf(at).read(RELAY_OWNER, TOKENS);
+  const revoked = new Set(d.blocks.filter((b) => b.id.startsWith("revoke-")).map((b) => b.value["token"]));
+  const out: TokenRecord[] = [];
+  for (const b of d.blocks) {
+    const { speaker, scope, at: when, by } = b.value;
+    if (!b.id.startsWith("token-") || revoked.has(b.id) || typeof speaker !== "string" || typeof scope !== "string" || !SCOPES.has(scope)) continue;
+    out.push({ id: b.id, speaker, scope: scope as Scope, at: typeof when === "string" ? when : "", by: typeof by === "string" ? by : "" });
+  }
+  return out;
+}
+
+/** Revoke a token by its record's id; false when there is no such token, or it is revoked already. */
+export function revokeToken(root: string | DocStore, id: string, at: string): boolean {
+  const s = storeOf(root);
+  const d = s.read(RELAY_OWNER, TOKENS);
+  if (!d.blocks.some((b) => b.id === id) || d.blocks.some((b) => b.id.startsWith("revoke-") && b.value["token"] === id)) return false;
+  appendSealed(s, RELAY_OWNER, TOKENS, `revoke-${rand()}`, { token: id, at });
   return true;
 }

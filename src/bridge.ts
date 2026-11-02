@@ -58,7 +58,7 @@ import { answerExecNeed, commandConnector, objectToSignal } from "./daemon/exec.
 import { RelayClient, reasonOf } from "./daemon/client.js";
 import { Daemon } from "./daemon/sync.js";
 import { phoneCode } from "./daemon/phone-code.js";
-import { gbHome } from "./gemsbang/home.js";
+import { gbHome, gbService } from "./gemsbang/home.js";
 import { runGb } from "./gemsbang/ops.js";
 import { performanceLine, signalFaults, signalInput, signalText, type Performance, type Signal } from "./core/im/signal.js";
 import { isCardAction } from "./core/im/card.js";
@@ -782,7 +782,7 @@ async function answerSync(req: BridgeRequest & { op: "im-sync" }): Promise<Bridg
 async function answerGb(req: BridgeRequest & { op: "gb" }): Promise<BridgeResponse> {
   const shell = shellAt(req);
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-  const gb = await runGb(req.call, req.args ?? {}, { home: gbHome(), now, zoneMinutes: -new Date().getTimezoneOffset() });
+  const gb = await runGb(req.call, req.args ?? {}, { home: gbHome(), service: gbService(), now, zoneMinutes: -new Date().getTimezoneOffset() });
   return { v: 1, ok: true, shell, gb };
 }
 

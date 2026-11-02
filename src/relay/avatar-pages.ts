@@ -1,9 +1,9 @@
 // gemsbang's pages (transport §7.1): static HTML, one per road, served by
 // avatar-server.ts to a browser and filled from the relay's JSON. `/i/<code>`
 // is the way into a group for a person: who is in it, what happens once in,
-// the phone and the code, which avatar goes in and what it is called;
+// the email and its code, which avatar goes in and what it is called;
 // `/g/<group>` is the group, open to every member (spec §7.2); `/login` the
-// phone code alone. Each page carries its words in the request's language
+// email code alone (architecture §3.2). Each page carries its words in the request's language
 // (spec §7.6) and the relay answers its refusals in it too. No build step, no
 // framework: every node is built with DOM calls, so nothing the relay
 // returns runs as markup. The person's token lives in the browser's storage.
@@ -50,7 +50,7 @@ label.pick { display: flex; gap: 8px; align-items: center; padding: 6px 0; }
 .need .say { background: #f3f3f3; border-radius: 8px; padding: 6px 10px; margin: 6px 0; }
 `;
 
-/** What every page's script shares: nodes, the stored token, the relay's API in the page's language, the phone-and-code box, the language links. */
+/** What every page's script shares: nodes, the stored token, the relay's API in the page's language, the email-and-code box (the browser named as the device), the language links. */
 const SHARED_JS = `
   function el(tag, cls, children) { var e = document.createElement(tag); if (cls) e.className = cls; (children || []).forEach(function (c) { e.appendChild(typeof c === "string" ? document.createTextNode(c) : c); }); return e; }
   function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
@@ -68,16 +68,17 @@ const SHARED_JS = `
   }
   function face(name) { var f = el("span", "face", [Array.from(name || "?")[0]]); return f; }
   function chip(name) { return el("span", "chip", [face(name), name]); }
+  function browser() { var u = navigator.userAgent; return /Edg\//.test(u) ? "Edge" : /Firefox\//.test(u) ? "Firefox" : /Chrome\//.test(u) ? "Chrome" : /Safari\//.test(u) ? "Safari" : "?"; }
   function loginBox(into, done) {
     var note = el("div", "note");
-    var phone = el("input"); phone.type = "tel"; phone.placeholder = say("page.phone"); phone.autocomplete = "tel";
+    var email = el("input"); email.type = "email"; email.placeholder = say("page.email"); email.autocomplete = "email";
     var send = el("button", "primary", [say("page.sendCode")]);
     var code = el("input"); code.type = "text"; code.inputMode = "numeric"; code.placeholder = say("page.code"); code.autocomplete = "one-time-code";
     var verify = el("button", "primary", [say("page.verify")]);
     var second = el("form", "", [code, verify]); second.style.display = "none";
-    var first = el("form", "", [phone, send]);
-    first.onsubmit = function (e) { e.preventDefault(); note.textContent = ""; api("POST", "/login", { phone: phone.value }).then(function (r) { if (r.status !== 200) { note.textContent = r.data.reason; return; } note.textContent = say("code.sent"); second.style.display = ""; code.focus(); }); };
-    second.onsubmit = function (e) { e.preventDefault(); api("POST", "/login/verify", { phone: phone.value, code: code.value }).then(function (r) { if (r.status !== 200) { note.textContent = r.data.reason; return; } setToken(r.data.token); done(); }); };
+    var first = el("form", "", [email, send]);
+    first.onsubmit = function (e) { e.preventDefault(); note.textContent = ""; api("POST", "/login", { email: email.value }).then(function (r) { if (r.status !== 200) { note.textContent = r.data.reason; return; } note.textContent = say("code.sentTo", { to: r.data.to, from: r.data.from }); second.style.display = ""; code.focus(); }); };
+    second.onsubmit = function (e) { e.preventDefault(); api("POST", "/login/verify", { email: email.value, code: code.value, device: say("page.device", { browser: browser() }) }).then(function (r) { if (r.status !== 200) { note.textContent = r.data.reason; return; } setToken(r.data.token); done(); }); };
     into.appendChild(first); into.appendChild(second); into.appendChild(note);
   }
   function langLinks() {
@@ -91,7 +92,7 @@ const SHARED_JS = `
   langLinks();
 `;
 
-/** The way in (spec §6.2): the group, then the phone and the code, then which avatar and what it is called, then 进群. */
+/** The way in (spec §6.2): the group, then the email and its code, then which avatar and what it is called, then 进群. */
 const JOIN_JS = `
   var code = location.pathname.split("/")[2];
   var params = new URLSearchParams(location.search);
@@ -104,7 +105,6 @@ const JOIN_JS = `
     chips.appendChild(el("span", "dim", [say("page.join.count", { count: info.group.count })]));
     top.appendChild(chips);
     if (info.owner) top.appendChild(el("div", "dim", [say("page.join.owner", { name: info.owner.name })]));
-    top.appendChild(el("p", "", [say("page.join.promise")]));
     if (info.approve) top.appendChild(el("div", "dim", [say("page.join.approve")]));
     main.appendChild(top);
     var step = el("section");
@@ -184,7 +184,7 @@ const GROUP_JS = `
     var me = data.venue.members.filter(function (x) { return x.id === mine.as; })[0];
     var myName = me ? me.name : mine.as;
     clear(main);
-    if (params.get("joined")) main.appendChild(el("section", "banner", [say("page.join.in", { name: params.get("joined") })]));
+    if (params.get("joined")) main.appendChild(el("section", "banner", [say("page.join.in", { name: params.get("joined") }), el("div", "dim", [say("page.join.back", { host: location.host })])]));
     main.appendChild(el("section", "", [el("h1", "", [data.venue.name]), el("div", "dim", [say("page.join.count", { count: data.venue.members.length }) + " · " + say("page.group.as", { name: myName })])]));
     needs.forEach(function (n) { main.appendChild(needCard(n)); });
     var thread = el("div"); thread.id = "thread";
@@ -238,7 +238,7 @@ const GROUP_JS = `
   setInterval(function () { if (mine) load(); }, 4000);
 `;
 
-/** The phone code alone; back to where the person came from (`?next=`). */
+/** The email code alone; back to where the person came from (`?next=`). */
 const LOGIN_JS = `
   var main = document.getElementById("app");
   var s = el("section", "", [el("h1", "", [say("page.login.title")])]);
@@ -249,7 +249,7 @@ const LOGIN_JS = `
 /** The page's words in the language: every page.* code and the few others the script says. */
 function wordsFor(lang: Lang): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const code of CODES) if (code.startsWith("page.") || code.startsWith("need.") || code === "code.sent") out[code] = say(code, lang);
+  for (const code of CODES) if (code.startsWith("page.") || code.startsWith("need.") || code === "code.sentTo") out[code] = say(code, lang);
   return out;
 }
 

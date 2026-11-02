@@ -26,17 +26,15 @@ export interface Mirror {
   needs?: (Need & { avatarName: string; group?: string })[];
   /** Per avatar, the person's own waiting line, where they set one. */
   placeholders?: Record<string, string>;
-  /** Per avatar, its hosted body: paused or not, only receiving or not, its rounds this week (spec §7.5). */
-  hosted?: Record<string, { paused: boolean; away: boolean; week: number }>;
-  /** The person's free quota and whether they pay with their own key, where the relay hosts agents (spec §8.3). */
-  quota?: { free: boolean; daysLeft: number; repliesLeft: number; key: boolean };
   /** The person's jobs for their computer (spec §7.4), as the relay listed them. */
   work?: MirrorWork[];
+  /** Per avatar, the chats it answers on its own (自动回, architecture §6.3), as `<owner>/<id>`. */
+  autos?: Record<string, string[]>;
 }
 
 /** A job for the person's computer: whose, from which chat, who asked and their words, where it stands. */
 export interface MirrorWork {
-  id: string; avatar: string; avatarName: string; need: string; summary: string; state: "waiting" | "queued" | "taken" | "done" | "failed"; at: string; since: string; told: boolean;
+  id: string; avatar: string; avatarName: string; need: string; summary: string; state: "waiting" | "queued" | "taken" | "done" | "failed"; at: string; since: string;
   venue?: { owner: string; id: string }; message?: string; group?: string; fromName?: string; words?: string; auto?: true;
 }
 

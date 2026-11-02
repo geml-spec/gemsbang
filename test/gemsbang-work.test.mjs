@@ -21,7 +21,7 @@ function repo() {
   return dir;
 }
 
-test("借电脑 in the client (spec §7.4, §7.5): each avatar's repository on this machine; a borrow card shows it; 现在干 makes a job; a session in another repository does not take it and the person is told; in the named one, a worktree of its own and the envelope; done, the words and the facts back in the chat; 排着, then now", async () => {
+test("任务 in the client (spec §7.4, §7.5; once called 借电脑): each avatar's repository on this machine; a borrow card shows it; 现在干 makes a job; a session in another repository does not take it and the person is told; in the named one, a worktree of its own and the envelope; done, the words and the facts back in the chat; 排着, then now", async () => {
   const texts = [];
   const s = await startAvatarRelay({ root: mkdtempSync(join(tmpdir(), "gemsbang-work-relay-")), name: "relay.test", texter: (t) => { texts.push(t); } });
   try {
@@ -63,7 +63,7 @@ test("借电脑 in the client (spec §7.4, §7.5): each avatar's repository on t
     assert.ok(existsSync(join(taken.worktree, "src", "settings.ts")), "a worktree of the repository");
     assert.match(git(app, "worktree", "list"), new RegExp(`gemsbang/${g.as.id}-${second.id}`));
     assert.deepEqual(taken.commands, ["npm test", "npm run test", "npm run build"]);
-    assert.match(taken.prompt, /这件活来自「设置页改版」，是 李四 说的。[\s\S]*> 登录页也坏了[\s\S]*`npm test`、`npm run test`、`npm run build`/);
+    assert.match(taken.prompt, /这个任务来自「设置页改版」，是 李四 派的。[\s\S]*> 登录页也坏了[\s\S]*`npm test`、`npm run test`、`npm run build`/);
     assert.equal((await gb("work-take", { session: "s-1", avatar: g.as.id, work: second.id, root: app })).code, "work.taken", "once");
     ok(await gb("work-done", { avatar: g.as.id, work: second.id, text: "登录页修好了。", facts: [{ label: "npm test", ok: true }] }));
     const last = ok(await gb("open", { owner: g.owner, id: g.id })).chat.items.at(-1);

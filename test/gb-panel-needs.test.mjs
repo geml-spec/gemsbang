@@ -4,18 +4,19 @@ import { fieldAction, gbBand, paneRows } from "../dist/hosts/claude-code/gb-pane
 
 const LILY = { id: "a-0000000002", name: "Lily 爸爸", color: "#b5543c", initial: "L", venues: ["三年二班家长"], mark: false, muted: false };
 const NOW = "2026-11-01T09:00:00Z";
-const need = (id, kind, extra = {}) => ({ id, avatar: LILY.id, kind, summary: `${kind} ${id}`, options: kind === "borrow" ? [{ label: "现在干" }, { label: "排着" }, { label: "不干" }] : [{ label: "能去", text: "周五我可以去" }, { label: "去不了", text: "去不了" }], expires: "2026-11-01T20:30:00Z", at: NOW, state: "open", avatarName: "Lily 爸爸", group: "三年二班家长", badge: LILY, muted: false, venue: { owner: "a-00000000c1", id: "g-000000000b" }, ...extra });
+const need = (id, kind, extra = {}) => ({ id, avatar: LILY.id, kind, summary: `${kind} ${id}`, options: kind === "borrow" ? [{ label: "现在干" }, { label: "排着" }, { label: "不干" }] : [{ label: "能去", text: "周五我可以去" }, { label: "去不了", text: "去不了" }], at: NOW, state: "open", avatarName: "Lily 爸爸", group: "三年二班家长", badge: LILY, muted: false, venue: { owner: "a-00000000c1", id: "g-000000000b" }, ...extra });
 const VIEW = (needs, extra = {}) => ({ relay: "https://im.example", trusted: [], loggedIn: true, lang: "zh", avatars: [LILY], rows: [], unread: 0, needs, muted: { avatars: [], venues: [] }, notes: [], bodies: {}, ...extra });
 const STATE = (extra = {}) => ({ page: "inbox", filter: null, chat: null, link: null, phone: null, groupAs: "new", session: "s-1", problem: null, now: NOW, ...extra });
 const kinds = (rows) => rows.map((r) => (r.kind === "need" ? `need:${r.summary}` : r.kind === "section" ? r.text : r.kind === "buttons" ? r.items.map((i) => `[${i.label}]`).join("") : r.kind)).filter((x) => x.startsWith("need") || x.startsWith("需要你") || x.startsWith("["));
 
-test("需要你 in the inbox (spec §7.1, §7.3): its count of open cards; two shown whole, more folded behind 还有 N 件; the muted counted apart; a card says whose, what kind, where, how long it waits, what it checked and the words it would send", () => {
-  const two = paneRows(VIEW([need("need-1", "promise", { checked: "你周五下午是空的", draft: "周五我可以去" }), need("need-2", "pay")]), STATE());
+test("需要你 in the inbox (spec §7.1, §7.3): its count of open cards; two shown whole, more folded behind 还有 N 件; the muted counted apart; a card says whose, what kind, where, when it came (or how long it still waits, when the matter has a deadline), what it checked and the words it would send", () => {
+  const two = paneRows(VIEW([need("need-1", "promise", { checked: "你周五下午是空的", draft: "周五我可以去" }), need("need-2", "pay", { expires: "2026-11-01T20:30:00Z" })]), STATE());
   assert.deepEqual(kinds(two), ["需要你 2", "need:promise need-1", "need:pay need-2", "[建群]"]);
   const card = two.find((r) => r.kind === "need");
-  assert.deepEqual([card.head, card.expires, card.checked, card.willSay, card.options.map((o) => o.label), card.own.target], ["Lily 爸爸 · 答应事情 · 来自「三年二班家长」", "11 小时后过期", "它查了什么：你周五下午是空的", "将要发出：「周五我可以去」", ["能去", "去不了"], `${LILY.id}/need-1`]);
+  assert.deepEqual([card.head, card.expires, card.checked, card.willSay, card.options.map((o) => o.label), card.own.target], ["Lily 爸爸 · 答应事情 · 来自「三年二班家长」", "09:00", "它查了什么：你周五下午是空的", "将要发出：「周五我可以去」", ["能去", "去不了"], `${LILY.id}/need-1`]);
   const many = [need("need-1", "promise"), need("need-2", "pay"), need("need-3", "stance"), need("need-4", "stance", { muted: true })];
-  assert.deepEqual(kinds(paneRows(VIEW(many), STATE())), ["需要你 3", "need:promise need-1", "[还有 2 件][静音的 1 件]", "[建群]"]);
+  assert.equal(two.filter((r) => r.kind === "need")[1].expires, "11 小时后过期", "a deadline of its own");
+  assert.deepEqual(kinds(paneRows(VIEW(many), STATE())), ["需要你 3", "need:promise need-1", "need:pay need-2", "[还有 1 件][静音的 1 件]", "[建群]"]);
   assert.deepEqual(kinds(paneRows(VIEW(many), STATE({ needsOpen: true, mutedOpen: true }))), ["需要你 3", "need:promise need-1", "need:pay need-2", "need:stance need-3", "need:stance need-4", "[建群]"]);
 });
 

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { defaultOptions, expiresIn, expiryOf, foldNeeds, NEED_KINDS, needFault, orderNeeds, wordsOf } from "../dist/core/avatar/needs.js";
+import { defaultOptions, expiresIn, foldNeeds, NEED_KINDS, needFault, orderNeeds, wordsOf } from "../dist/core/avatar/needs.js";
 
 const NOW = "2026-11-01T09:00:00Z";
 
@@ -22,13 +22,11 @@ test("the five kinds (spec §7.3): promise, pay, stance, borrow, error; a borrow
   assert.equal(needFault({ kind: "pay", summary: "x", expires: "2026-11-01T10:00:00Z" }, NOW), undefined);
 });
 
-test("time, order and folding (spec §7.1, §7.3): twelve hours unless sooner; errors first, then the soonest, the expired last; two whole, more folded; the words an answer sends", () => {
-  assert.equal(expiryOf(NOW), "2026-11-01T21:00:00Z");
-  assert.equal(expiryOf(NOW, "2026-11-01T10:00:00Z"), "2026-11-01T10:00:00Z");
-  const n = (id, kind, expires, state = "open") => ({ id, kind, expires, state });
-  assert.deepEqual(orderNeeds([n("a", "promise", "2026-11-01T20:00:00Z"), n("b", "error", "2026-11-01T21:00:00Z"), n("c", "pay", "2026-11-01T10:00:00Z"), n("d", "stance", "2026-11-01T08:00:00Z", "expired")]).map((x) => x.id), ["b", "c", "a", "d"]);
+test("order and folding (spec §7.1, §7.3; architecture §6.3): no clock of its own; errors first, then the newest, the expired last; two whole, more folded; the words an answer sends", () => {
+  const n = (id, kind, at, state = "open") => ({ id, kind, at, state });
+  assert.deepEqual(orderNeeds([n("a", "promise", "2026-11-01T08:00:00Z"), n("b", "error", "2026-11-01T07:00:00Z"), n("c", "pay", "2026-11-01T08:30:00Z"), n("d", "stance", "2026-11-01T08:45:00Z", "expired")]).map((x) => x.id), ["b", "c", "a", "d"]);
   assert.deepEqual(foldNeeds([1, 2]), { shown: [1, 2], folded: 0 });
-  assert.deepEqual(foldNeeds([1, 2, 3, 4]), { shown: [1], folded: 3 });
+  assert.deepEqual(foldNeeds([1, 2, 3, 4]), { shown: [1, 2], folded: 2 });
   assert.deepEqual(foldNeeds([1, 2, 3], true), { shown: [1, 2, 3], folded: 0 });
   assert.equal(expiresIn("2026-11-01T20:30:00Z", NOW, "zh"), "11 小时后过期");
   assert.equal(expiresIn("2026-11-01T09:22:10Z", NOW, "en"), "expires in 23 min");

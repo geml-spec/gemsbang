@@ -105,7 +105,7 @@ test("my avatars (spec §7.5) and the language (§7.6): rename one, turn its mar
     assert.equal(ok(await john.gb("default-name", { name: "老张" })).view.defaultName, "老张");
     assert.equal(ok(await john.gb("lang", { lang: "en" })).view.lang, "en");
     assert.equal(bad(await john.gb("rename", { avatar: a, name: " " }), "name.empty").reason, "The name cannot be empty");
-    assert.equal(bad(await john.gb("join", { url: "https://elsewhere.example/i/abcd9ahe" }), "client.otherRelay").reason, "This link is from another relay, elsewhere.example; switch relays in the settings first");
+    assert.equal(bad(await john.gb("join", { url: "https://elsewhere.example/i/abcd9ahe" }), "client.otherRelay").reason, "This link is not from gemsbang (elsewhere.example); not followed");
   } finally {
     await s.close();
   }
@@ -148,7 +148,7 @@ test("out of reach (transport §2.7): the last mirror stays readable and says wh
   await s.close();
   const offline = ok(await john.gb("status")).view;
   assert.deepEqual(offline.rows.map((r) => r.name), ["设置页改版"]);
-  assert.match(offline.offline, /^连不上中继：/);
+  assert.match(offline.offline, /^连不上 gemsbang：/);
   assert.deepEqual(offline.notes.map((n) => n.url), ["https://evil.example/i/abcd9ahe.md"]);
   const out = ok(await john.gb("logout")).view;
   assert.deepEqual([out.loggedIn, out.relay], [false, s.url]);

@@ -47,7 +47,7 @@ const lines = (r, g, viewer) => ok(r.read(viewer, g.owner, `venues/${g.id}.geml`
 test("an avatar asks its person (spec §7.3): its agent makes a card in the avatar's own list — the kind, the chat, what it checked, the words it would send; with `placeholder` it says the waiting line in the chat meanwhile; the person sees every avatar's cards with the avatar's and the chat's names; others see nothing", () => {
   const { r, john, wang, lily, teacher, g, agent } = world();
   const made = ok(r.ask(agent, ASK(g, { placeholder: true }))).need;
-  assert.deepEqual([made.id, made.kind, made.state, Date.parse(made.expires) - Date.parse(made.at), made.venue], ["need-1", "promise", "open", 12 * 3_600_000, { owner: g.owner, id: g.id }]);
+  assert.deepEqual([made.id, made.kind, made.state, made.expires, made.venue], ["need-1", "promise", "open", undefined, { owner: g.owner, id: g.id }], "no deadline of its own: it waits until the person answers");
   assert.deepEqual(lines(r, g, wang.by).at(-1), [`avatar:${lily.id}`, "agent", "我看一下，晚点回。", "m-1"], "the waiting line, said by its agent");
   const listed = r.needsOf(john.person);
   assert.deepEqual(listed.map((n) => [n.avatarName, n.group, n.summary, n.draft]), [["Lily 爸爸", "三年二班家长", "王老师问周五能不能来当志愿者", "周五我可以去，几点在哪集合？"]]);
@@ -81,8 +81,9 @@ test("the person answers (spec §7.3): an option's words go into the chat as the
   assert.deepEqual(r.needsOf(john.person), []);
 });
 
-test("expiry (spec §7.3): past its twelve hours a card is marked expired by the sweep, the avatar says in the chat that the person must answer this themself, and an answer is refused; it stays listed a day as 已过期", () => {
+test("a deadline (spec §7.3; architecture §6.3): a card without one waits however long it takes; past the matter's own deadline the sweep marks it expired, the avatar says in the chat that the person must answer this themself, and an answer is refused; it stays listed a day as 已过期", () => {
   const { r, john, wang, lily, g, agent } = world();
+  const waits = ok(r.ask(agent, ASK(g, { kind: "stance", summary: "要不要投票选春游地点", options: [{ label: "赞成" }] }))).need;
   const card = ok(r.ask(agent, ASK(g, { expires: new Date(Date.UTC(2026, 10, 1, 10, 0, 0)).toISOString() }))).need;
   assert.equal(r.sweep(), 0);
   r.advance(2 * 3_600_000);
@@ -90,12 +91,27 @@ test("expiry (spec §7.3): past its twelve hours a card is marked expired by the
   assert.equal(r.sweep(), 0, "once");
   assert.deepEqual(lines(r, g, wang.by).at(-1), [`avatar:${lily.id}`, "agent", "这件事要本人回，我先不替答。", "m-1"]);
   bad(r.answerNeed(john.by, lily.id, card.id, { choice: 0 }), 410, "这件事已经过期了");
-  assert.deepEqual(r.needsOf(john.person).map((n) => n.state), ["expired"]);
-  r.advance(25 * 3_600_000);
-  assert.deepEqual(r.needsOf(john.person), []);
+  assert.deepEqual(r.needsOf(john.person).map((n) => [n.id, n.state]), [[waits.id, "open"], [card.id, "expired"]]);
+  r.advance(30 * 86_400_000);
+  assert.equal(r.sweep(), 0);
+  assert.deepEqual(r.needsOf(john.person).map((n) => [n.id, n.state]), [[waits.id, "open"]], "a month on, the card with no deadline still waits");
 });
 
-test("borrowing the computer (spec §7.4's card): its three options send no words; 现在干 with 这个人以后不用问 or 这个群以后不用问 lets the next one through without asking", () => {
+test("the next deadline (architecture §2.3: a Durable Object sweeps by its alarm): the earliest among the cards still waiting with one; none with no deadline; past it swept, the next; an answered card, none", () => {
+  const { r, john, lily, g, agent } = world();
+  ok(r.ask(agent, ASK(g, { kind: "stance", summary: "要不要投票选春游地点", options: [{ label: "赞成" }] })));
+  assert.equal(r.nextDeadline(), undefined, "a card with no deadline sets no alarm");
+  ok(r.ask(agent, ASK(g, { expires: new Date(Date.UTC(2026, 10, 1, 10, 0, 0)).toISOString() })));
+  const later = ok(r.ask(agent, ASK(g, { summary: "周日的事", expires: new Date(Date.UTC(2026, 10, 1, 14, 0, 0)).toISOString() }))).need;
+  assert.equal(Date.parse(r.nextDeadline()), Date.UTC(2026, 10, 1, 10, 0, 0));
+  r.advance(2 * 3_600_000);
+  assert.equal(r.sweep(), 1);
+  assert.equal(Date.parse(r.nextDeadline()), Date.UTC(2026, 10, 1, 14, 0, 0), "then the next");
+  ok(r.answerNeed(john.by, lily.id, later.id, { choice: 0 }));
+  assert.equal(r.nextDeadline(), undefined, "an answered card sets no alarm");
+});
+
+test("a task card (spec §7.4's card, once called 借电脑): its three options send no words; 现在干 with 这个人以后不用问 or 这个群以后不用问 lets the next one through without asking", () => {
   const { r, john, wang, lily, teacher, g, agent } = world();
   const card = ok(r.ask(agent, { venue: `${g.owner}/${g.id}`, kind: "borrow", summary: "王老师要你在 settings-app 里看导出按钮", from: teacher.id })).need;
   assert.deepEqual(card.options.map((o) => o.label), ["现在干", "排着", "不干"]);

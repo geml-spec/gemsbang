@@ -44,7 +44,7 @@ test("a person over HTTP (spec §6, §7): login, an avatar, a group, its link; t
   const john = login("13800138000");
   const me = call("GET", "/me", { token: john }).body;
   assert.deepEqual([me.scope, me.lang, me.avatars], ["person", "zh", []]);
-  assert.equal(call("POST", "/avatars", { token: john }).status, 404, "avatars grow only by joining or making a group (spec §6.4)");
+  assert.equal(call("POST", "/avatars", { token: john, body: { name: "" } }).status, 400, "a first avatar needs a name");
   assert.equal(call("POST", "/devices", { token: john }).status, 201);
   assert.equal(call("POST", "/groups", { token: john, body: { as: "a-0000000000", name: "前端周会" } }).status, 403, "the avatar must be the person's");
   const g = call("POST", "/groups", { token: john, body: { avatar: { name: "John" }, name: "前端周会" } });

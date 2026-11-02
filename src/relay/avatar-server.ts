@@ -1,28 +1,20 @@
-// `node:http` around gemsbang's relay (transport §2.5, §7.1): a browser at
-// `/i/<code>`, `/g/<group>` or `/login` gets the page (avatar-pages.ts), in
-// its language; everything else is the JSON of avatar-api.ts, a body of at
-// most a megabyte, the token from the Authorization header or the query.
+// `node:http` around gemsbang's relay (transport §2.5, §7.1; architecture
+// §2.4: a company's own servers and local work), its documents on files.
 // `GET /subscribe` is upgraded to a WebSocket whose client names the
 // documents it follows (`{"subscribe": "<avatar>/<doc>"}`): each block is
 // pushed as it lands, as the client may read it — a venue's to its members,
-// a message's `by` left out where its avatar does not mark.
+// a message's `by` left out where its avatar does not mark. What it answers
+// is avatar-shell.ts's, the same core the Worker's Durable Object runs.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { JSON_TYPE, langOf, refusal, routeAvatars, type AvatarRequest } from "./avatar-api.js";
-import { groupPage, HTML_TYPE, joinPage, loginPage } from "./avatar-pages.js";
+import { answerRequest, BODY_LIMIT } from "./avatar-shell.js";
 import { AvatarRelay, type AvatarRelayOptions } from "./avatars.js";
-import { AvatarHosted, type HostedRunner } from "./avatar-hosted.js";
 import { fileAdapter, type PushAdapter } from "./push.js";
 import { upgrade, type WsConnection } from "./ws.js";
-import type { Lang } from "../core/avatar/words.js";
 
-export interface AvatarServer { port: number; url: string; relay: AvatarRelay; hosted?: AvatarHosted; close(): Promise<void> }
+export interface AvatarServer { port: number; url: string; relay: AvatarRelay; close(): Promise<void> }
 
-/** A request body may be this long: a message, never a file's bytes. */
-export const BODY_LIMIT = 1_048_576;
-
-/** The pages by path, for a browser (`Accept: text/html`); a script at the same path gets the JSON. */
-const PAGES: readonly [RegExp, (lang: Lang) => string][] = [[/^\/i\/[a-z0-9]{1,16}$/, joinPage], [/^\/g\/[gd]-[0-9a-f]{10}$/, groupPage], [/^\/login$/, loginPage]];
+export { BODY_LIMIT };
 
 function readBody(req: IncomingMessage): Promise<string | undefined> {
   return new Promise((done, failed) => {
@@ -48,14 +40,12 @@ function reply(res: ServerResponse, status: number, body: string, type: string):
 /** How often the relay expires 需要你 cards and collects answers from its push channels. */
 export const SWEEP_MS = 30_000;
 
-export function startAvatarRelay(o: AvatarRelayOptions & { port?: number; host?: string; publicUrl?: string; version?: string; hosted?: { runner: HostedRunner; days?: number; replies?: number } }): Promise<AvatarServer> {
+/** The Node shell keeps the relay on files under `root`. */
+export function startAvatarRelay(o: AvatarRelayOptions & { root: string; port?: number; host?: string; publicUrl?: string; version?: string }): Promise<AvatarServer> {
   // The file channel unless the operator gave others (spec §7.3: the outlet first, real channels later).
   const push: PushAdapter[] = o.push ?? [fileAdapter(o.root)];
   const relay = new AvatarRelay({ ...o, push });
-  // The hosted bodies (transport §6), awake to every chat while the server runs.
-  const hosted = o.hosted === undefined ? undefined : new AvatarHosted({ relay, runner: o.hosted.runner, ...(o.hosted.days !== undefined ? { days: o.hosted.days } : {}), ...(o.hosted.replies !== undefined ? { replies: o.hosted.replies } : {}), log: (line) => console.error(`hosted: ${line}`) });
-  hosted?.start();
-  const sweep = setInterval(() => { try { relay.sweep(); void relay.collectPush().catch(() => undefined); void hosted?.tick().catch(() => undefined); } catch { /* the next round */ } }, SWEEP_MS);
+  const sweep = setInterval(() => { try { relay.sweep(); void relay.collectPush().catch(() => undefined); } catch { /* the next round */ } }, SWEEP_MS);
   sweep.unref();
   const host = o.host ?? "127.0.0.1";
   const subscribers = new Map<WsConnection, { token: string; docs: Set<string> }>();
@@ -73,27 +63,14 @@ export function startAvatarRelay(o: AvatarRelayOptions & { port?: number; host?:
   const server = createServer((req, res) => {
     void (async () => {
       const url = new URL(req.url ?? "/", "http://relay");
-      const languages = typeof req.headers["accept-language"] === "string" ? req.headers["accept-language"] : undefined;
-      const query = Object.fromEntries(url.searchParams);
-      try {
-        const page = (req.method ?? "GET").toUpperCase() === "GET" && /text\/html/.test(String(req.headers["accept"] ?? "")) ? PAGES.find(([re]) => re.test(url.pathname)) : undefined;
-        if (page !== undefined) { reply(res, 200, page[1](langOf({ query, ...(languages !== undefined ? { languages } : {}) })), HTML_TYPE); return; }
-        const text = await readBody(req);
-        const lang = langOf({ query, ...(languages !== undefined ? { languages } : {}) });
-        if (text === undefined) { const r = refusal(413, "body.tooLarge", lang); reply(res, r.status, r.body, r.type); return; }
-        let body: unknown;
-        if (text !== "") {
-          try { body = JSON.parse(text); } catch { const r = refusal(400, "body.notJson", lang); reply(res, r.status, r.body, r.type); return; }
-        }
-        const token = tokenOf(req, url);
-        const base = o.publicUrl ?? `http://${req.headers["host"] ?? `${host}`}`;
-        const r: AvatarRequest = { method: req.method ?? "GET", path: url.pathname, query, base, ...(o.version !== undefined ? { version: o.version } : {}), ...(languages !== undefined ? { languages } : {}), ...(req.socket.remoteAddress !== undefined ? { ip: req.socket.remoteAddress } : {}), ...(token !== undefined ? { token } : {}), ...(body !== undefined ? { body } : {}) };
-        const out = routeAvatars(r, relay, hosted);
-        reply(res, out.status, out.body, out.type);
-      } catch (e) {
-        const r = refusal(500, "server.error", langOf({ query }), { detail: e instanceof Error ? e.message : String(e) });
-        reply(res, r.status, r.body, JSON_TYPE);
-      }
+      const header = (name: string): string | undefined => (typeof req.headers[name] === "string" ? req.headers[name] : undefined);
+      const out = await answerRequest(relay, {
+        method: req.method ?? "GET", url, base: o.publicUrl ?? `http://${req.headers["host"] ?? host}`, body: () => readBody(req),
+        gone: new Promise<void>((done) => { res.once("close", () => done()); }),
+        ...(header("accept") !== undefined ? { accept: header("accept")! } : {}), ...(header("accept-language") !== undefined ? { languages: header("accept-language")! } : {}),
+        ...(header("authorization") !== undefined ? { authorization: header("authorization")! } : {}), ...(req.socket.remoteAddress !== undefined ? { ip: req.socket.remoteAddress } : {}), ...(o.version !== undefined ? { version: o.version } : {}),
+      });
+      if (!res.destroyed) reply(res, out.status, out.body, out.type);
     })();
   });
 
@@ -127,9 +104,8 @@ export function startAvatarRelay(o: AvatarRelayOptions & { port?: number; host?:
     server.listen(o.port ?? 0, host, () => {
       const port = (server.address() as AddressInfo).port;
       done({
-        port, url: `http://${host}:${port}`, relay, ...(hosted !== undefined ? { hosted } : {}),
+        port, url: `http://${host}:${port}`, relay,
         close: () => new Promise((closed) => {
-          hosted?.stop();
           clearInterval(sweep);
           off();
           for (const c of subscribers.keys()) c.close();

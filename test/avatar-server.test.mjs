@@ -44,7 +44,11 @@ test("a person joins from a WeChat link (spec §6.2): the browser gets the join 
     assert.match(page.body, /"page.join.go":"Join"/);
     assert.equal(page.body.includes("三年二班家长"), false, "the page carries no data of the relay's: its script asks for it");
     assert.match((await call("GET", "/g/" + g.id, { accept: "text/html", languages: "ja" })).body, /<html lang="ja">/);
-    assert.match((await call("GET", "/login?lang=zh", { accept: "text/html", languages: "en" })).body, /<title>登录 gemsbang<\/title>/);
+    const signIn = (await call("GET", "/login?lang=zh", { accept: "text/html", languages: "en" })).body;
+    assert.match(signIn, /<title>登录 gemsbang<\/title>/);
+    assert.match(signIn, /"page.email":"邮箱"/, "the web signs in by email (architecture §3.2)");
+    assert.match(signIn, /email.type = "email"/);
+    assert.equal(signIn.includes("page.phone"), false);
     const anyone = (await call("GET", `/i/${link.code}?by=${g.owner}`, { languages: "en" })).body;
     assert.deepEqual([anyone.group.name, anyone.group.count, anyone.suggestions.map((x) => x.text)], ["三年二班家长", 1, ["__'s mom", "__'s dad"]]);
     const mei = await login("13900139000", "en");
