@@ -19,7 +19,7 @@ import { orderNeeds, type Need } from "../core/avatar/needs.js";
 import { callKey, callOf, callsOf, roundFor, type Call, type Round } from "../core/avatar/calls.js";
 import { readRound, roundPrompt } from "../core/avatar/round.js";
 import { DEFAULT_LANG, isLang, say, type Lang } from "../core/avatar/words.js";
-import { RelayClient, RelayDown, type Answer } from "../daemon/client.js";
+import { RelayClient, RelayDown, type Answer } from "./client.js";
 import { GAP_WAIT_MS, receive, WAIT_MAX_S, type SyncState, type Update } from "../core/avatar/updates.js";
 import { clearCache, readCache, readClient, readMirror, readSeen, writeCache, writeClient, writeMirror, writeSeen, type Client } from "./home.js";
 

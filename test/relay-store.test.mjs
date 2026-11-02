@@ -4,9 +4,9 @@ import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendBlock, appendSealed, docPath, DOC, lastHash, listDocs, listOwners, NAME, nextId, readDoc } from "../dist/relay/store.js";
-import { verifyChain } from "../dist/core/im/chain.js";
+import { verifyChain } from "../dist/core/chain.js";
 
-const root = () => mkdtempSync(join(tmpdir(), "gemworks-relay-"));
+const root = () => mkdtempSync(join(tmpdir(), "gemsbang-relay-"));
 
 test("appendSealed chains blocks in one document under a meta head; readDoc reads them back; the chain verifies", () => {
   const r = root();
@@ -20,7 +20,7 @@ test("appendSealed chains blocks in one document under a meta head; readDoc read
   assert.equal(d.exists, true);
   assert.deepEqual(d.blocks.map((x) => x.id), ["venue", "member-1"]);
   assert.deepEqual(verifyChain(d.blocks), []);
-  assert.match(d.text, /^=== meta\ntitle = "gemworks im john\/venues\/g-7.geml"\n===\n\n=== data \{#venue format=json\}/);
+  assert.match(d.text, /^=== meta\ntitle = "gemsbang john\/venues\/g-7.geml"\n===\n\n=== data \{#venue format=json\}/);
   assert.equal(docPath(r, "john", "venues/g-7.geml"), join(r, "john", "venues", "g-7.geml"));
   assert.equal(lastHash(d), b.block.value["hash"]);
   assert.deepEqual(readDoc(r, "john", "venues/none.geml"), { blocks: [], diagnostics: [], text: "", exists: false });

@@ -10,8 +10,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { appendOrCreate, withLock } from "../host-fs.js";
-import { readDataBlocks, renderDataBlock, seal, type DataBlock } from "../core/im/chain.js";
-import type { JsonValue } from "../core/schema.js";
+import { readDataBlocks, renderDataBlock, seal, type DataBlock } from "../core/chain.js";
+import type { JsonValue } from "../core/json.js";
 
 /** A document's path under its owner: `/`-separated names of letters, digits, `_` and `-`, ending in `.geml`. */
 export const DOC = /^(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.geml$/;
@@ -21,7 +21,7 @@ export const BLOCK_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/;
 export const RELAY_OWNER = "_relay";
 
 export const docPath = (root: string, owner: string, doc: string): string => join(root, owner, ...doc.split("/"));
-export const docHead = (owner: string, doc: string): string => `=== meta\ntitle = "gemworks im ${owner}/${doc}"\n===\n\n`;
+export const docHead = (owner: string, doc: string): string => `=== meta\ntitle = "gemsbang ${owner}/${doc}"\n===\n\n`;
 
 /** A document as read: its data blocks, the parse diagnostics, its text, whether it is there at all. */
 export interface Doc { blocks: DataBlock[]; diagnostics: string[]; text: string; exists: boolean }

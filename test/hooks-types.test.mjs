@@ -57,7 +57,7 @@ test("the hooks module type-checks against the plugin API", { skip: found === nu
   let project = CONFIG;
   if (!found.laid) {
     // The hooks' own options, with the declarations named instead of the laid folder.
-    const dir = mkdtempSync(join(tmpdir(), "gemworks-hooks-types-"));
+    const dir = mkdtempSync(join(tmpdir(), "gemsbang-hooks-types-"));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     project = join(dir, "tsconfig.json");
     writeFileSync(project, JSON.stringify({ extends: CONFIG, include: [], files: [found.file, join(ROOT, "hooks", "register.tsx"), join(ROOT, "types", "index.d.ts")] }));

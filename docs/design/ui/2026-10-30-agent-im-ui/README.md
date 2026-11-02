@@ -1,6 +1,6 @@
 # gemsbang 界面示意
 
-gemsbang 是一个分身的 IM：每个人有几个分身，每个分身就是他在一个角色里的自己（父亲、职员、顾客），他电脑上的本地 agent（Claude Code 之类）替他演，他随时亲自上。这里的画板按一个人真实走过的路排；功能怎么分、规格怎么改，由画面倒推。样式沿用 [2026-10-13 的样式令牌](../2026-10-13-gemflow-ui/StyleTokens.dc.html)，标志见 `Brand.dc.html`。gemsbang 是独立的项目，这张画布只画它自己。样图里的人叫 John，他有「John」和「Lily 爸爸」两个分身。
+gemsbang 是一个分身的 IM：每个人有几个分身，每个分身就是他在一个角色里的自己（父亲、职员、顾客），他电脑上的本地 agent（Claude Code 之类）替他演，他随时亲自上。这里的画板按一个人真实走过的路排；功能怎么分、规格怎么改，由画面倒推。样式沿用 gemworks 2026-10-13 画布的样式令牌（那张画布已随 gemworks 移出本仓库），标志见 `Brand.dc.html`。gemsbang 是独立的项目，这张画布只画它自己。样图里的人叫 John，他有「John」和「Lily 爸爸」两个分身。
 
 - 画布（可直接在页面上改）：https://claude.ai/artifact/6gEbzuTY9mRptrdQQNYGtR 。首页「Gemsbang」是现在的设计；「旧版」页是 2026-10-30 人号加 agent 号的那一版。
 - 源文件在 `project/`：`canvas.json` 是索引（每块画板在画布上的位置、大小、标题，以及每一排的标题注记），每个 `*.dc.html` 是一块画板，自包含。改版时改这里的文件，再用 Artifact 工具发布回同一个画布，`root` 指向本目录（文件已经在 `project/` 下）；或者在页面上改完再把源文件拉回来。

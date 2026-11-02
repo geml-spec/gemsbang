@@ -1,60 +1,37 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { PROTOCOL_VERSION, decodeRequest, decodeResponse, encodeRequest, unreadableText } from "../dist/hosts/claude-code/protocol.js";
 
-test("requests: one JSON line; the CLI refuses what it cannot run", () => {
-  const req = { v: 1, root: "/r", op: "before", tool: "Bash", callId: "c1", input: { command: "ls" }, cwd: "/r/sub" };
+test("requests: one JSON line, one call of the client by name with its arguments; the CLI refuses what it cannot run", () => {
+  const req = { v: 1, call: "say", args: { venue: "a-1/g-1", text: "好" } };
   assert.equal(encodeRequest(req), `${JSON.stringify(req)}\n`);
   assert.deepEqual(decodeRequest(encodeRequest(req)), req);
+  assert.deepEqual(decodeRequest('{"v":1,"call":"status"}'), { v: 1, call: "status" }, "no arguments");
+  assert.deepEqual(decodeRequest('{"v":1,"call":"status","root":"/r","op":"gb"}'), { v: 1, call: "status" }, "what else it carries is not read");
   assert.deepEqual(decodeRequest("nope"), { error: "the request is not JSON" });
-  assert.deepEqual(decodeRequest('{"v":2,"root":"/r","op":"status"}'), { error: "protocol version 2; this CLI speaks 1" });
-  assert.deepEqual(decodeRequest('{"v":1,"op":"status"}'), { error: "root is required" });
-  assert.deepEqual(decodeRequest('{"v":1,"root":"/r","op":"nope"}'), { error: "unknown op nope" });
-  assert.deepEqual(decodeRequest('{"v":1,"root":"/r","op":"before","tool":"Bash"}'), { error: "op before: missing or mistyped fields" });
-  assert.deepEqual(decodeRequest('{"v":1,"root":"/r","op":"verb","name":"rm","args":{}}'), { error: "op verb: missing or mistyped fields" });
-});
-
-test("before and after carry the directory the call starts in; one that has none starts at the root", () => {
-  const before = { v: 1, root: "/r", op: "before", tool: "Bash", callId: "c1", input: { command: "ls" }, cwd: "/r/.claude/worktrees/w" };
-  assert.deepEqual(decodeRequest(encodeRequest(before)), before);
-  const after = { v: 1, root: "/r", op: "after", tool: "Bash", callId: "c1", input: { command: "ls" }, isError: false, exitCode: 0, gitOperation: false, cwd: "/r/sub" };
-  assert.deepEqual(decodeRequest(encodeRequest(after)), after);
-  const { cwd: _b, ...bare } = before;
-  assert.deepEqual(decodeRequest(JSON.stringify(bare)), { ...bare, cwd: "/r" });
-  const { cwd: _a, ...plain } = after;
-  assert.deepEqual(decodeRequest(JSON.stringify(plain)), { ...plain, cwd: "/r" });
-  assert.equal(decodeRequest(JSON.stringify({ v: 1, root: "/r", op: "status" })).cwd, undefined, "only a tool call starts somewhere");
-  for (const cwd of [42, "", null]) {
-    assert.deepEqual(decodeRequest(JSON.stringify({ ...before, cwd })), { error: "op before: missing or mistyped fields" }, JSON.stringify(cwd));
-    assert.deepEqual(decodeRequest(JSON.stringify({ ...after, cwd })), { error: "op after: missing or mistyped fields" }, JSON.stringify(cwd));
-  }
+  assert.deepEqual(decodeRequest("[1]"), { error: "the request is not an object" });
+  assert.deepEqual(decodeRequest('{"v":2,"call":"status"}'), { error: "protocol version 2; this CLI speaks 1" });
+  assert.deepEqual(decodeRequest('{"v":1}'), { error: "call is required" });
+  assert.deepEqual(decodeRequest('{"v":1,"call":""}'), { error: "call is required" });
+  for (const args of ['["x"]', "null", '"x"']) assert.deepEqual(decodeRequest(`{"v":1,"call":"setup","args":${args}}`), { error: "args is an object" }, args);
 });
 
 test("answers: the last line that parses as this protocol's version", () => {
-  const ok = { v: PROTOCOL_VERSION, ok: true, shell: { status: null, policy: null, contextKey: null } };
+  const ok = { v: PROTOCOL_VERSION, ok: true, gb: { ok: true } };
   assert.deepEqual(decodeResponse(`noise\n${JSON.stringify(ok)}\n`), ok);
+  assert.deepEqual(decodeResponse(`${JSON.stringify(ok)}\n{"v":1,"ok":false,"error":"x"}\n`), { v: 1, ok: false, error: "x" });
   assert.equal(decodeResponse('{"v":9,"ok":true}\n'), undefined);
   assert.equal(decodeResponse(""), undefined);
 });
 
 test("an answer that did not parse: stderr's error line, and the build to run when a module is missing", () => {
-  const missing = "node:internal/modules/cjs/loader:1479\n  throw err;\n  ^\n\nError: Cannot find module '/plugin/dist/gemworks.mjs'\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1476:15)\n";
+  const missing = "node:internal/modules/cjs/loader:1479\n  throw err;\n  ^\n\nError: Cannot find module '/plugin/dist/gemsbang.mjs'\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1476:15)\n";
   assert.equal(unreadableText(1, missing, "/plugin"),
-    "gemworks：桥接没有构建 — 在 /plugin 运行 npm run build（Error: Cannot find module '/plugin/dist/gemworks.mjs'）");
-  assert.equal(unreadableText(1, "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@geml/geml' imported from /plugin/dist/gemworks.mjs\n", "/plugin"),
-    "gemworks：桥接没有构建 — 在 /plugin 运行 npm run build（Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@geml/geml' imported from /plugin/dist/gemworks.mjs）");
-  assert.equal(unreadableText(1, "file:///plugin/dist/gemworks.mjs:3\n    at x\nTypeError: x is not a function\n", "/plugin"),
-    "gemworks：桥接的应答无法解析（退出码 1：TypeError: x is not a function）");
-  assert.equal(unreadableText(134, "Aborted\n", "/plugin"), "gemworks：桥接的应答无法解析（退出码 134：Aborted）", "no error line: the first line");
-  assert.equal(unreadableText(0, "", "/plugin"), "gemworks：桥接的应答无法解析（退出码 0）");
-});
-
-test("every op the hooks module may send is one the CLI runs: none is refused as unknown", () => {
-  const src = readFileSync(fileURLToPath(new URL("../src/hosts/claude-code/protocol.ts", import.meta.url)), "utf8").replace(/\r\n/g, "\n");
-  const union = src.slice(src.indexOf("export type BridgeOp"), src.indexOf(";\n\n", src.indexOf("export type BridgeOp")));
-  const ops = [...union.matchAll(/op: "([\w-]+)"/g)].map((m) => m[1]);
-  assert.ok(ops.includes("attention") && ops.length > 15, `read the union: ${ops.join(", ")}`);
-  for (const op of ops) assert.notEqual(decodeRequest(JSON.stringify({ v: 1, root: "/r", op })).error, `unknown op ${op}`, op);
+    "gemsbang：没有构建 — 在 /plugin 运行 npm run build（Error: Cannot find module '/plugin/dist/gemsbang.mjs'）");
+  assert.equal(unreadableText(1, "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@geml/geml' imported from /plugin/dist/gemsbang.mjs\n", "/plugin"),
+    "gemsbang：没有构建 — 在 /plugin 运行 npm run build（Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@geml/geml' imported from /plugin/dist/gemsbang.mjs）");
+  assert.equal(unreadableText(1, "file:///plugin/dist/gemsbang.mjs:3\n    at x\nTypeError: x is not a function\n", "/plugin"),
+    "gemsbang：应答无法解析（退出码 1：TypeError: x is not a function）");
+  assert.equal(unreadableText(134, "Aborted\n", "/plugin"), "gemsbang：应答无法解析（退出码 134：Aborted）", "no error line: the first line");
+  assert.equal(unreadableText(0, "", "/plugin"), "gemsbang：应答无法解析（退出码 0）");
 });

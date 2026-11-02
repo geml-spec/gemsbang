@@ -1,5 +1,5 @@
 // Where a login code goes (spec §6.2): the operator's choice, as for mail.
-// By default a file under the relay's own folder; `gemworks relay
+// By default a file under the relay's own folder; `gemsbang relay serve
 // --text-command` runs a command with the number in its environment and the
 // text on stdin (a curl to a provider). The relay never waits on it.
 import { spawn } from "node:child_process";

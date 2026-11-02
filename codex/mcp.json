@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "gemworks": {
-      "command": "node",
-      "args": ["./dist/gemworks.mjs", "mcp", "--host", "codex"],
-      "cwd": "."
-    }
-  }
-}

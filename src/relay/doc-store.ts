@@ -8,8 +8,8 @@
 // not duplicate). A secret is made once and kept: the phone hashes' salt.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { renderDataBlock, type DataBlock } from "../core/im/chain.js";
-import type { JsonValue } from "../core/schema.js";
+import { renderDataBlock, type DataBlock } from "../core/chain.js";
+import type { JsonValue } from "../core/json.js";
 import { appendBlock, BLOCK_ID, docHead, lastHash, listDocs, readDoc, RELAY_OWNER, sealed, type Appended, type Doc } from "./store.js";
 
 /** The whole value of a block, built from the document as it stands, the last block's hash and the id. */

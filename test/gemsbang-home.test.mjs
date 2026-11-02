@@ -12,9 +12,9 @@ test("the client's home (transport §3): GEMSBANG_HOME or ~/.gemsbang; a missing
   assert.deepEqual(readClient(home), { relay: "", avatars: {}, bodies: {}, notes: [], muted: { avatars: [], venues: [] }, repos: {}, dismissed: {} });
   writeFileSync(join(home, "client.json"), "{ not json");
   assert.deepEqual(readClient(home).avatars, {});
-  writeClient(home, { relay: "https://im.example", token: "gwx_t", person: "p-0000000001", lang: "en", avatars: { "a-0000000001": "gwx_a", bad: 3 }, bodies: { s1: "a-0000000001" }, notes: [{ url: "u", at: "t" }, { url: 1 }] });
+  writeClient(home, { relay: "https://im.example", token: "gb_t", person: "p-0000000001", lang: "en", avatars: { "a-0000000001": "gb_a", bad: 3 }, bodies: { s1: "a-0000000001" }, notes: [{ url: "u", at: "t" }, { url: 1 }] });
   const c = readClient(home);
-  assert.deepEqual([c.relay, c.token, c.person, c.lang, c.avatars, c.bodies, c.notes], ["https://im.example", "gwx_t", "p-0000000001", "en", { "a-0000000001": "gwx_a" }, { s1: "a-0000000001" }, [{ url: "u", at: "t" }]]);
+  assert.deepEqual([c.relay, c.token, c.person, c.lang, c.avatars, c.bodies, c.notes], ["https://im.example", "gb_t", "p-0000000001", "en", { "a-0000000001": "gb_a" }, { s1: "a-0000000001" }, [{ url: "u", at: "t" }]]);
   if (process.platform !== "win32") assert.equal(statSync(join(home, "client.json")).mode & 0o777, 0o600);
   assert.equal(readMirror(home), undefined);
   writeMirror(home, { at: "t", relay: "r", person: "p", lang: "zh", avatars: [], venues: [] });

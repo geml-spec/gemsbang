@@ -14,7 +14,7 @@ if (to === undefined || to === "") throw new Error("usage: node scripts/sync-dev
 const TO = resolve(to);
 const within = relative(FROM, TO);
 if (within === "" || (!within.startsWith("..") && !isAbsolute(within))) throw new Error(`${TO} is inside this checkout`);
-const LEFT = new Set(["node_modules", ".git", ".geml", "coverage", ".nyc_output", ".pack", "gemworks-pkg"]);
+const LEFT = new Set(["node_modules", ".git", ".geml", "coverage", ".nyc_output", ".pack"]);
 
 if (existsSync(resolve(TO, "dist"))) rmSync(resolve(TO, "dist"), { recursive: true });
 cpSync(FROM, TO, { recursive: true, filter: (src) => !LEFT.has(relative(FROM, src).split(sep)[0]) && !src.endsWith(".tgz") });

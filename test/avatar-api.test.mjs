@@ -29,7 +29,7 @@ test("the relay's HTTP answers (transport §2.5, spec §7.6): a refusal is a cod
   assert.equal(call("POST", "/login?lang=ja", { body: { phone: "x" }, languages: "en" }).body.reason, "電話番号を入力してください");
   assert.equal(call("POST", "/login", { body: { phone: "x", lang: "en" } }).body.reason, "Enter a phone number");
   assert.deepEqual(call("POST", "/groups", { body: {} }).body, { error: "token.required", reason: "要令牌" });
-  assert.equal(call("POST", "/groups", { token: "gwx_nothing", languages: "ja" }).body.reason, "トークンが無効です");
+  assert.equal(call("POST", "/groups", { token: "gb_nothing", languages: "ja" }).body.reason, "トークンが無効です");
   const john = login("13800138000", "en");
   assert.deepEqual(call("POST", "/groups", { token: john, body: { name: "x" }, languages: "zh" }).body, { error: "as.required", reason: "Say which avatar you speak as" }, "the person's own language wins over the browser's");
   assert.equal(call("DELETE", "/me", { token: john }).body.error, "method.wrong");
@@ -67,7 +67,7 @@ test("a person over HTTP (spec §6, §7): login, an avatar, a group, its link; t
   const joined = call("POST", `/i/${link.code}/join`, { token: li, body: { name: "李四" } });
   assert.deepEqual([joined.status, joined.body.avatar.name, joined.body.already], [201, "李四", false]);
   assert.equal(call("POST", `/i/${link.code}/join`, { token: li, body: {} }).status, 200, "already in");
-  assert.equal(call("POST", `/i/${link.code}/join`, { token: "gwx_nothing", body: {} }).body.error, "token.invalid");
+  assert.equal(call("POST", `/i/${link.code}/join`, { token: "gb_nothing", body: {} }).body.error, "token.invalid");
   call("POST", "/login", { body: { phone: "13700137000" } });
   const agent = call("POST", `/i/${link.code}/join`, { body: { phone: "13700137000", code: lastCode(), name: "王五" } });
   assert.deepEqual([agent.status, agent.body.avatar.name, typeof agent.body.token, typeof agent.body.device], [201, "王五", "string", "string"]);

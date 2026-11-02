@@ -3,7 +3,6 @@
 .pack/
 coverage/
 dist/
-gemworks-pkg/
 node_modules/
 .claude-plugin/types/
 /.geml/

@@ -1,6 +1,6 @@
 // Where a login code goes (transport §7.1 /login): the operator's choice.
 // By default a file under the relay's own folder, for whatever routes mail
-// on that box; `gemworks relay --mail-command` runs a command with the
+// on that box; `gemsbang relay serve --mail-command` runs a command with the
 // address and the subject in its environment and the text on stdin
 // (sendmail -t, a curl to a provider). The relay never waits on it.
 import { spawn } from "node:child_process";

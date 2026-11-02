@@ -16,8 +16,8 @@
 // (architecture §5.1): a line in a chat of theirs as they may see it, their
 // avatars' cards, jobs, rules and lists, a name changed, their own record.
 import { createHash, randomBytes, randomInt } from "node:crypto";
-import { normalizeText, type DataBlock } from "../core/im/chain.js";
-import type { JsonValue } from "../core/schema.js";
+import { normalizeText, type DataBlock } from "../core/chain.js";
+import type { JsonValue } from "../core/json.js";
 import { factsOf } from "../core/avatar/borrow.js";
 import { defaultOptions, isKind, needFault, wordsOf, type Need, type NeedKind, type NeedOption } from "../core/avatar/needs.js";
 import { DEFAULT_LINK_RULES, expiresAt, linkPath, linkStatus, LINK_CODE, makeCode, mayHandOut, withLinkRules, type LinkRules } from "../core/avatar/links.js";

@@ -1,9 +1,8 @@
-// Gemsbang's Claude Code shell (plan R): the IM of avatars, a plugin that
-// sits beside gemworks or stands without it. It asks the bundled CLI
-// (dist/gemworks.mjs: one JSON request on stdin, one JSON answer on stdout),
-// every request bare, and every IM request one `gb` call of the client
-// (src/gemsbang/ops.ts), which keeps its home in ~/.gemsbang. What the model
-// gets: four tools — im_join, which follows only a gemsbang invitation the
+// Gemsbang's Claude Code shell (plan R): the IM of avatars, a plugin of its
+// own. It asks the bundled CLI
+// (dist/gemsbang.mjs: one JSON request on stdin, one JSON answer on stdout),
+// every request one call of the client (src/gemsbang/ops.ts), which keeps
+// its home in ~/.gemsbang. What the model gets: four tools — im_join, which follows only a gemsbang invitation the
 // person pasted, and asks the person in gemsbang's own dialog (their email
 // and code too, never through the model); im_say, im_ask
 // (a 需要你 card, one of five kinds, with the words it would send) and
@@ -29,7 +28,7 @@
 import type { EngineInterface, Register, ToolCallResult } from 'claude-code'
 import { atom, read, update } from 'claude-code'
 import type { GemsbangJson } from '../types'
-import { cellWidth, truncate } from '../dist/hosts/claude-code/band.js'
+import { cellWidth, truncate } from '../dist/hosts/claude-code/cells.js'
 import { fitToBudget } from '../dist/hosts/claude-code/budget.js'
 import { GEMSBANG_BLUE, GEMSBANG_MARK_CHAR, GEMSBANG_MARK_SVG } from '../dist/hosts/claude-code/gemsbang.js'
 import { fieldAction, gbBand, GB_PANE_ID, paneRows } from '../dist/hosts/claude-code/gb-panel.js'
@@ -186,10 +185,10 @@ async function gb($: EngineInterface, call: string, args: Record<string, unknown
   const node = await read($, nodeAtom)
   const root = await read($, rootAtom)
   if (node === null || root === null) return undefined
-  const request = { v: 1, root, bare: true, op: 'gb', call, args } as BridgeRequest
+  const request: BridgeRequest = { v: 1, call, args }
   let out: { exitCode: number; stdout: string; stderr: string }
   try {
-    out = await $.process.run([node, `${$.plugin.root}/dist/gemworks.mjs`, 'hook'], { cwd: root, stdin: encodeRequest(request), timeoutMs })
+    out = await $.process.run([node, `${$.plugin.root}/dist/gemsbang.mjs`, 'hook'], { cwd: root, stdin: encodeRequest(request), timeoutMs })
   } catch (err) {
     const now = await $.clock.now()
     missedSince ??= now
@@ -199,11 +198,11 @@ async function gb($: EngineInterface, call: string, args: Record<string, unknown
   missedSince = undefined
   const res: BridgeResponse | undefined = decodeResponse(out.stdout)
   if (res === undefined) {
-    await setProblem($, unreadableText(out.exitCode, out.stderr, $.plugin.root).replace(/^gemworks：/, 'gemsbang：'))
+    await setProblem($, unreadableText(out.exitCode, out.stderr, $.plugin.root))
     return undefined
   }
-  if (!res.ok || res.gb === undefined) {
-    await setProblem($, `gemsbang：${res.ok ? 'no answer' : res.error.replace(/^gemworks: /, '')}`)
+  if (!res.ok) {
+    await setProblem($, `gemsbang：${res.error}`)
     return undefined
   }
   await setProblem($, null)

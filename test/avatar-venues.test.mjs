@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AvatarRelay } from "../dist/relay/avatars.js";
 import { readDoc } from "../dist/relay/store.js";
-import { verifyChain } from "../dist/core/im/chain.js";
+import { verifyChain } from "../dist/core/chain.js";
 
 const BASE = Date.UTC(2026, 10, 1, 9, 0, 0);
 /** A relay whose clock starts at 09:00 and moves a second per look; its texts are kept; `advance` moves the clock further. */

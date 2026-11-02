@@ -4,12 +4,14 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BUNDLE } from "./helpers/repo.mjs";
+import { fileURLToPath } from "node:url";
+
+const BUNDLE = fileURLToPath(new URL("../dist/gemsbang.mjs", import.meta.url));
 
 const root = () => mkdtempSync(join(tmpdir(), "gemsbang-serve-"));
 const run = (args) => { const r = spawnSync(process.execPath, [BUNDLE, ...args], { encoding: "utf8", timeout: 60_000 }); return { code: r.status ?? 1, out: r.stdout ?? "", err: r.stderr ?? "" }; };
 
-test("gemworks relay serve: gemsbang's relay until it is stopped, saying where; the join page at /i/<code>; bad flags are usage errors", async () => {
+test("gemsbang relay serve: the service on this machine until it is stopped, saying where; the join page at /i/<code>; bad flags are usage errors", async () => {
   const dir = root();
   const child = spawn(process.execPath, [BUNDLE, "relay", "serve", "--root", dir, "--port", "0", "--name", "relay.test", "--public-url", "https://im.example"], { stdio: ["ignore", "pipe", "pipe"] });
   let out = "";
@@ -38,7 +40,7 @@ test("gemworks relay serve: gemsbang's relay until it is stopped, saying where; 
   assert.match(run([]).err, /relay serve/, "the usage says it");
 });
 
-test("gemworks relay serve plays no avatar (architecture §7): models run only in each person's own agents, so the hosted flags are gone from the usage and refused", () => {
+test("gemsbang relay serve plays no avatar (architecture §7): models run only in each person's own agents, so the hosted flags are gone from the usage and refused", () => {
   const dir = root();
   assert.doesNotMatch(run([]).err, /--free-days|--free-replies|relay serve … \[--hosted-command/, "the usage no longer offers them");
   for (const f of ["--hosted-command", "--free-days", "--free-replies"]) assert.match(run(["relay", "serve", f, "1", "--root", dir]).err, new RegExp(`unknown option ${f}`), f);

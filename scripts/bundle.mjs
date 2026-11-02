@@ -1,4 +1,4 @@
-// One file for the Claude Code plugin: dist/gemworks.mjs is the CLI with
+// One file for the Claude Code plugin: dist/gemsbang.mjs is the CLI with
 // @geml/geml inlined, so an installed plugin starts it with no dependency
 // install. Node's built-ins stay external.
 import { build } from "esbuild";
@@ -25,7 +25,7 @@ const noParserHandoff = {
 
 await build({
   entryPoints: [`${root}src/cli.ts`],
-  outfile: `${root}dist/gemworks.mjs`,
+  outfile: `${root}dist/gemsbang.mjs`,
   bundle: true,
   platform: "node",
   format: "esm",

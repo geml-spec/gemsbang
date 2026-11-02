@@ -9,7 +9,7 @@ declare module 'claude-code' {
       /** Why the plugin cannot do its part (no Node, a bridge that does not answer or answers what does not parse); null while it can. */
       problem: string | null
       node: string | null
-      /** The session's directory: the bridge runs there, and a bare request opens nothing in it. */
+      /** The session's directory: the bridge runs there, and a task's repository is named from it. */
       root: string | null
       startedAt: number | null
       /** A tool or the command the engine would not register. */

@@ -1,6 +1,6 @@
 # Third-party notices
 
-gemworks is licensed under the GNU Affero General Public License v3.0 (see LICENSE). Its bundle (`dist/gemworks.mjs`) carries the code below under its own license.
+gemsbang is licensed under the GNU Affero General Public License v3.0 (see LICENSE). Its bundle (`dist/gemsbang.mjs`) and its Worker (`dist/relay/worker.js`, bundled by wrangler) carries the code below under its own license.
 
 ## @geml/geml
 

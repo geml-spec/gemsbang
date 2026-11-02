@@ -1,8 +1,8 @@
 // The gemsbang hooks module under the engine's own test host (plan R). A
-// scripted bridge answers `process.run`: every request is one `gb` call of the
+// scripted bridge answers `process.run`: every request is one call of the
 // client, answered as src/gemsbang/ops.ts would. Nothing here touches a disk
 // or starts a process. The hooks this file registers sit beneath the plugin's:
-// an AbovePrompt drawn here is the line of a plugin below it (gemworks's).
+// an AbovePrompt drawn here is the line of a plugin below it (another plugin's).
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
@@ -15,7 +15,7 @@ const PRESENTATION = { isFullscreen: true, columns: 160 }
 const SESSION = 'sess-1234567890'
 const RELAY = 'https://im.example'
 
-type Req = { op: string; call: string; args: Record<string, unknown>; [key: string]: unknown }
+type Req = { v: number; call: string; args: Record<string, unknown> }
 const JOHN = { id: 'a-0000000001', name: 'John', color: '#2f6fb3', initial: 'J', venues: ['设置页改版'], mark: true, muted: false }
 const LILY = { id: 'a-0000000002', name: 'Lily 爸爸', color: '#b5543c', initial: 'L', venues: ['三年二班家长'], mark: false, muted: false }
 const ROW = { owner: JOHN.id, id: 'g-000000000a', kind: 'group', name: '设置页改版', as: JOHN, last: { who: '李四', text: '@John Safari 里导出按钮没反应' }, at: '2026-11-01T06:05:00Z', time: '14:05', unread: 2 }
@@ -45,11 +45,10 @@ function world(on: On) {
     toasts: [] as string[],
     opened: [] as string[],
   }
-  const shell = { status: null, policy: null, contextKey: null, versions: { gemworks: '0.5.3', parser: '1.12.5' } }
   const answer = (req: Req): Record<string, unknown> => {
     w.sent.push(req)
     const own = w.answers[req.call]
-    return { v: 1, ok: true, shell, gb: own !== undefined ? own(req.args) : { ok: true, view: w.view } }
+    return { v: 1, ok: true, gb: own !== undefined ? own(req.args) : { ok: true, view: w.view } }
   }
   const ran = (stdout: string, exitCode = 0) => ({ exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false })
   on('process.run', ($, e) => {
@@ -112,12 +111,12 @@ const paneText = async ($: Engine): Promise<string> => {
 }
 const calls = (w: ReturnType<typeof world>, call: string) => w.sent.filter((r) => r.call === call)
 
-test('the start: the four tools and /gemsbang registered; every request bare at the session\'s directory, the first a read of the chats', async ($, on) => {
+test('the start: the four tools and /gemsbang registered; every request one call of the client, the first a read of the chats', async ($, on) => {
   const w = world(on)
   await start($, on)
   expect(w.registered).toEqual(['im_join', 'im_say', 'im_ask', 'im_read'])
   expect(w.commands).toEqual(['gemsbang'])
-  expect(w.sent[0]).toMatchObject({ v: 1, root: ROOT, bare: true, op: 'gb', call: 'status', args: {} })
+  expect(w.sent[0]).toEqual({ v: 1, call: 'status', args: {} })
   expect(await bandText($), 'logged in, nothing needs the person: no line').toBe('')
 })
 

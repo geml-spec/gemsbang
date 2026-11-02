@@ -9,7 +9,7 @@
 // number it reached before it answers, never later. The box keeps a week; a
 // client further behind is told so and reads everything again. Pure: the
 // rules and their named times, the same on the relay and the client.
-import type { JsonValue } from "../schema.js";
+import type { JsonValue } from "../json.js";
 
 /** A gap waits this long for its missing updates before the client asks for the difference. */
 export const GAP_WAIT_MS = 500;

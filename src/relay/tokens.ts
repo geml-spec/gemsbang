@@ -21,7 +21,7 @@ const rand = (): string => randomBytes(6).toString("hex");
 const storeOf = (at: string | DocStore): DocStore => (typeof at === "string" ? fileStore(at) : at);
 
 export function issueToken(at: string | DocStore, o: { speaker: string; scope: Scope; by: string; at: string }): { token: string; record: TokenRecord } {
-  const token = `gwx_${randomBytes(24).toString("hex")}`;
+  const token = `gb_${randomBytes(24).toString("hex")}`;
   const id = `token-${rand()}`;
   appendSealed(storeOf(at), RELAY_OWNER, TOKENS, id, { token: hashToken(token), speaker: o.speaker, scope: o.scope, at: o.at, by: o.by });
   return { token, record: { id, speaker: o.speaker, scope: o.scope, at: o.at, by: o.by } };
@@ -29,7 +29,7 @@ export function issueToken(at: string | DocStore, o: { speaker: string; scope: S
 
 /** The record a token stands for, or nothing: unknown, malformed, or revoked. */
 export function verifyToken(at: string | DocStore, token: string): TokenRecord | undefined {
-  if (!token.startsWith("gwx_")) return undefined;
+  if (!token.startsWith("gb_")) return undefined;
   const h = hashToken(token);
   const d = storeOf(at).read(RELAY_OWNER, TOKENS);
   const revoked = new Set(d.blocks.filter((b) => b.id.startsWith("revoke-")).map((b) => b.value["token"]));

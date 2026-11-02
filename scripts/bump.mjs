@@ -1,6 +1,6 @@
-// Bump the version everywhere it is named: package.json, the lockfile's head (twice), and the two plugin manifests. The
-// board shows the plugin's version, and the smoke test fails when any of these disagree.
-// Usage: node scripts/bump.mjs <version>   (e.g. 0.2.89)
+// Bump the version everywhere it is named: package.json, the lockfile's head (twice), and the plugin manifest. The
+// pane's header shows the plugin's version, and the plugin-files test fails when any of these disagree.
+// Usage: node scripts/bump.mjs <version>   (e.g. 0.5.13)
 import { readFileSync, writeFileSync } from "node:fs";
 
 const to = process.argv[2] ?? "";
@@ -19,5 +19,4 @@ function edit(rel, n) {
 edit("package.json", 1);
 edit("package-lock.json", 2);
 edit(".claude-plugin/plugin.json", 1);
-edit(".codex-plugin/plugin.json", 1);
 console.log(`${from} -> ${to}`);

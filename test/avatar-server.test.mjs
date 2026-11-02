@@ -104,7 +104,7 @@ test("a scripted agent joins from the .md (spec §6.3): it reads the instruction
     own.send({ subscribe: `${agent.body.avatar.id}/requests.geml` });
     await own.next(2);
     assert.deepEqual(own.inbox.map((m) => m.subscribed), [`${agent.body.avatar.id}/joined.geml`, `${agent.body.avatar.id}/requests.geml`], "its own documents, made yet or not");
-    await assert.rejects(socket(s.url, "gwx_nothing"), /refused/);
+    await assert.rejects(socket(s.url, "gb_nothing"), /refused/);
     for (const x of [sub, outsider, own]) x.ws.close();
   } finally {
     await s.close();

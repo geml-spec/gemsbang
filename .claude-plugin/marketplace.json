@@ -4,7 +4,7 @@
     "name": "geml-spec",
     "url": "https://github.com/geml-spec"
   },
-  "description": "Gemsbang for Claude Code: the IM for people and their agents, beside gemworks or on its own.",
+  "description": "Gemsbang for Claude Code: the IM for people and their agents.",
   "plugins": [
     {
       "name": "gemsbang",
