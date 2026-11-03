@@ -50,6 +50,14 @@ const CHAT = { owner: JOHN.id, id: 'g-00000000st', kind: 'group', name: '设置�
   { kind: 'left', id: 'leave-1', avatar: 'a-00000000b9', who: 'Mia', at: at(17, 20) },
 ] }
 
+// Direction ①'s bar: 三年二班家长 as Lily 爸爸, 王老师's question and the card about it above the box.
+const CLASS_CHAT = { ...CLASS, kind: 'group', name: '三年二班家长', count: 12, as: badge(LILY), members: [{ id: LILY.id, name: 'Lily 爸爸' }, { id: 'a-00000000t2', name: '王老师' }], earlier: 0, isOwner: false, items: [
+  { kind: 'message', id: 'm-c1', avatar: 'a-00000000t2', who: '王老师', text: '周五春游能来当志愿者吗？', at: at(19, 30), mark: false, mine: false },
+] }
+// The inbox with a muted group someone called in: it stays in its place, a grey dot for its unread (S17).
+const QUIET = { owner: 'a-00000000q1', id: 'g-00000000qt' }
+const MUTED_VIEW = { ...INBOX, rows: [...INBOX.rows.slice(0, 3), { ...QUIET, kind: 'group', name: '小区业主群', as: badge(LILY), last: { who: '物业', text: '@Lily 爸爸 车位的事明天定' }, at: at(13, 5), time: '13:05', unread: 3 }, INBOX.rows[3]], calls: [...INBOX.calls, { avatar: LILY.id, ...QUIET, kind: 'group', group: '小区业主群', lines: [{ id: 'm-q1', who: '物业', text: '@Lily 爸爸 车位的事明天定', reason: 'mention', at: at(13, 5) }], last: 'm-q1', at: at(13, 5), auto: false, badge: badge(LILY), muted: true }], muted: { avatars: [], venues: [`${QUIET.owner}/${QUIET.id}`] } }
+
 // P8's 我: John works in settings-app and answers 设置页改版 on his own; Lily 爸爸 muted; both played.
 const BASE = [
   { id: 'base-1', label: '家人', text: 'Lily，8 岁，三年二班', for: [LILY.id], state: 'kept', by: 'person', at: at(9, 0) },
@@ -73,7 +81,7 @@ function world(on: On, view: Record<string, unknown>) {
     if (e.argv[0] === '/bin/sh') return { value: ran('', 1) }
     if (e.argv[2] === 'hook') {
       const req = JSON.parse(e.init?.stdin ?? '{}') as Req
-      const gb = req.call === 'wait' ? { ok: true } : req.call === 'open' ? { ok: true, chat: CHAT, view } : req.call === 'link' ? { ok: true, link: LINK, view } : req.call === 'account' ? { ok: true, account: ACCOUNT } : { ok: true, view }
+      const gb = req.call === 'wait' ? { ok: true } : req.call === 'open' ? { ok: true, chat: req.args['id'] === CLASS.id ? CLASS_CHAT : CHAT, view } : req.call === 'link' ? { ok: true, link: LINK, view } : req.call === 'account' ? { ok: true, account: ACCOUNT } : { ok: true, view }
       return { value: ran(`${JSON.stringify({ v: 1, ok: true, gb })}\n`) }
     }
     return { deny: `unexpected ${e.argv.join(' ')}` }
@@ -113,6 +121,8 @@ const LIVE = /* live */ null as Record<string, unknown> | null
 
 test('inbox', async ($, on) => scene('inbox', $, on, INBOX))
 test('chat', async ($, on) => scene('chat', $, on, CHAT_VIEW, async (pane) => { await pane.press({ key: `chat-${JOHN.id}-g-00000000st-go` }) }))
+test('chat-card', async ($, on) => scene('chat-card', $, on, INBOX, async (pane) => { await pane.press({ key: `chat-${CLASS.owner}-${CLASS.id}-go` }) }))
+test('inbox-muted', async ($, on) => scene('inbox-muted', $, on, MUTED_VIEW))
 test('avatars', async ($, on) => scene('avatars', $, on, ME_VIEW, async (pane) => { await pane.press({ key: 'go-avatars' }) }))
 test('avatar-edit', async ($, on) => scene('avatar-edit', $, on, ME_VIEW, async (_, press) => { await press('go-avatars'); await press(`edit-${JOHN.id}`) }))
 test('base-edit', async ($, on) => scene('base-edit', $, on, ME_VIEW, async (_, press) => { await press('go-avatars'); await press('edit-base') }))

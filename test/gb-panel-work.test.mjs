@@ -6,27 +6,21 @@ const JOHN = { id: "a-0000000001", name: "John", color: "#2f6fb3", initial: "J",
 const LILY = { id: "a-0000000002", name: "Lily 爸爸", color: "#b5543c", initial: "L", venues: ["三年二班家长"], mark: false, muted: false };
 const NOW = "2026-11-01T09:00:00Z";
 const VIEW = (extra = {}) => ({ relay: "https://im.example", trusted: [], loggedIn: true, lang: "zh", avatars: [JOHN, LILY], rows: [], unread: 0, needs: [], muted: { avatars: [], venues: [] }, work: [], notes: [], bodies: {}, ...extra });
-const STATE = (extra = {}) => ({ page: "inbox", filter: null, chat: null, link: null, phone: null, groupAs: "new", session: "s-1", problem: null, now: NOW, ...extra });
-const JOB = (id, state, extra = {}) => ({ id, avatar: JOHN.id, avatarName: "John", need: "need-1", summary: `修 ${id}`, state, at: NOW, since: NOW, group: "设置页改版", fromName: "李四", words: "帮忙修一下", badge: JOHN, repo: "/work/app", ...extra });
+const STATE = (extra = {}) => ({ page: "inbox", chat: null, link: null, phone: null, groupAs: "new", session: "s-1", problem: null, now: NOW, ...extra });
+const JOB = (id, state, extra = {}) => ({ id, avatar: JOHN.id, avatarName: "John", need: "need-1", summary: `修 ${id}`, state, at: NOW, since: NOW, venue: { owner: JOHN.id, id: "g-000000000a" }, group: "设置页改版", fromName: "李四", words: "帮忙修一下", badge: JOHN, repo: "/work/app", ...extra });
+const CHAT = { owner: JOHN.id, id: "g-000000000a", kind: "group", name: "设置页改版", count: 2, as: JOHN, earlier: 0, isOwner: true, items: [] };
 const BORROW = (avatar, extra = {}) => ({ id: "need-1", avatar: avatar.id, kind: "borrow", summary: "修设置页缓存的写路径", options: [{ label: "现在干" }, { label: "排着" }, { label: "不干" }], expires: "2026-11-01T21:00:00Z", at: NOW, state: "open", avatarName: avatar.name, group: "设置页改版", badge: avatar, muted: false, ...extra });
 
-test("任务 in the pane (spec §7.4, §7.5; once called 借电脑): a borrow card says where it would work and what may be done there, or that no repository is named; the jobs under 需要你, each with where it stands, a queued one with 现在干", () => {
+test("任务 in the pane (spec §7.4, §7.5, S16, direction ①): a borrow card says where it would work and what may be done there, or that no repository is named; no 任务 section in the inbox — a job queued or under way is its chat's bar, a queued one with 现在干; one done or failed has said so in the chat", () => {
   const card = paneRows(VIEW({ needs: [BORROW(JOHN, { repo: "/work/app" })] }), STATE()).find((r) => r.kind === "need");
   assert.equal(card.willSay, "在哪干：/work/app\n准做的：读、改、跑仓库里已有的命令；不推送，不碰密钥");
   assert.match(paneRows(VIEW({ needs: [BORROW(LILY)] }), STATE()).find((r) => r.kind === "need").willSay, /^还没指定仓库：先在「我」里指定\n/);
-  const rows = paneRows(VIEW({ work: [JOB("work-1", "taken"), JOB("work-2", "queued"), JOB("work-3", "waiting", { auto: true }), JOB("work-4", "failed"), JOB("work-5", "done")] }), STATE());
-  const at = rows.findIndex((r) => r.key === "work");
-  assert.deepEqual(rows.slice(at, at + 7).map((r) => (r.kind === "buttons" ? r.items.map((i) => `[${i.label}]`).join("") : `${r.text}${r.tone !== undefined && r.tone !== "plain" ? ` (${r.tone})` : ""}`)), [
-    "任务 3",
-    "John · 在干 · 「设置页改版」：修 work-1",
-    "John · 排着 · 「设置页改版」：修 work-2",
-    "[现在干]",
-    "John · 等电脑 · 放行过，没再问你 · 「设置页改版」：修 work-3",
-    "John · 没干成 · 「设置页改版」：修 work-4 (error)",
-    "John · 干完了 · 「设置页改版」：修 work-5 (dim)",
-  ]);
-  assert.deepEqual(rows[at + 3].items[0].action, { op: "work-now", avatar: JOHN.id, work: "work-2" });
-  assert.equal(paneRows(VIEW(), STATE()).some((r) => r.key === "work"), false, "no jobs, no section");
+  assert.equal(paneRows(VIEW({ work: [JOB("work-1", "taken")] }), STATE()).some((r) => r.key === "work" || r.kind === "need"), false, "no 任务 section in the inbox");
+  const bars = (work) => paneRows(VIEW({ work }), STATE({ page: "chat", chat: CHAT })).filter((r) => r.kind === "need").map((r) => `${r.body[0][0].text}${r.options.map((o) => `[${o.label}]`).join("")}${r.more !== undefined ? `|${r.more}` : ""}|${r.tone}`);
+  assert.deepEqual(bars([JOB("work-2", "queued"), JOB("work-1", "taken", { at: "2026-11-01T09:05:00Z" })]), ["排着 · 修 work-2[现在干]|还有 1 件|plain"]);
+  assert.deepEqual(bars([JOB("work-1", "taken")]), ["在干 · 修 work-1|dim"]);
+  assert.deepEqual(bars([JOB("work-3", "waiting"), JOB("work-4", "failed"), JOB("work-5", "done")]), [], "asked (its card is the bar), failed or done: nothing more");
+  assert.deepEqual(paneRows(VIEW({ work: [JOB("work-2", "queued")] }), STATE({ page: "chat", chat: CHAT })).find((r) => r.kind === "need").options[0].action, { op: "work-now", avatar: JOHN.id, work: "work-2" });
 });
 
 test("我 (spec §7.5, P8, S23): what each avatar's tasks may do unasked, each taken back with 撤; where each avatar's computer works, by its folder's name, and none said only once 改 is open (P8b), where 换 opens a field to name or clear it; in a chat, the facts the host saw under the line they came with", () => {

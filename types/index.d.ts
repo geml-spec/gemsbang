@@ -21,9 +21,8 @@ declare module 'claude-code' {
       /** The chat open (GbChat), and its link while 叫人 shows (GbLink). */
       chat: GemsbangJson
       link: GemsbangJson
-      /** The pane's page and the avatar the inbox is narrowed to. */
+      /** The pane's page. */
       page: string
-      filter: string | null
       /** The email a sign-in code was sent to, until the code is in; an email being added to the account, the same. */
       address: string | null
       adding: string | null
@@ -34,9 +33,6 @@ declare module 'claude-code' {
       groupAvatar: string | null
       /** The invitations for agents the person typed or pasted this session (spec §6.3). */
       pasted: GemsbangJson
-      /** 需要你 unfolded; the muted cards shown; a borrow card's two switches, per card. */
-      needsOpen: boolean
-      mutedOpen: boolean
       /** The card whose 自己写 field is open, by its row's key; null when none is. */
       writing: string | null
       /** The inbox's ＋ open; 建群's list of avatars open; 用链接进群 once the link was read (what it says, where the person is in it). */

@@ -1,6 +1,6 @@
-// The pictures the pane draws where the surface takes `Svg` (the desktop, VS Code, the phone), after the canvas's
-// GbInbox: an avatar's pill, a filter chip, a chat's round picture, the unread count, the count beside the name, a
-// row's or a card's colour bar. A desktop Button holds words only and draws them in its own colour and weight, so
+// The pictures the pane draws where the surface takes `Svg` (the desktop, VS Code, the phone): an avatar's pill, a
+// chat's picture in the inbox with the avatar at its corner and its unread (WeChat's row), the red words before a
+// chat's last line, the muted mark, a count, a card's colour bar. A desktop Button holds words only and draws them in its own colour and weight, so
 // whatever must keep a colour is a picture here, sized in CSS pixels. Text is measured by estimate (an ideograph
 // 1em, a Latin letter about half), which the pills' padding absorbs. Pure and Node-free.
 
@@ -31,8 +31,8 @@ export function textWidth(s: string, size: number, bold = false): number {
 }
 
 /**
- * An avatar's pill (GbInbox's): a round initial in its colour, its name in its colour, a rim of its colour; `small`
- * as in a chat row, `filled` for the one a filter is on (the colour behind, the words white).
+ * An avatar's pill (GbInbox's): a round initial in its colour, its name in its colour, a rim of its colour; `small` a
+ * little smaller, `filled` for the one picked in a list (the colour behind, the words white).
  */
 export function pillSvg(b: PillOf, o: { small?: boolean; filled?: boolean; tick?: boolean; faded?: boolean } = {}): Pic {
   const k = o.small === true ? 10.5 / 11 : 1;
@@ -48,15 +48,6 @@ export function pillSvg(b: PillOf, o: { small?: boolean; filled?: boolean; tick?
   ].join("");
   // 底子's 给 (P8c): the avatars it is not given to, faded.
   return { source: svg(w, h, o.faded === true ? `<g opacity="0.4">${body}</g>` : body), width: Math.ceil(w), height: h, alt: label };
-}
-
-/** The filter's own chip (全部): dark with white words when on, a grey rim when off. */
-export function chipSvg(label: string, on: boolean): Pic {
-  const size = 12, h = 24, w = 10 + textWidth(label, size) + 10;
-  const body = on
-    ? `<rect width="${n2(w)}" height="${h}" rx="12" fill="#1f1e1d"/>${text(10, h / 2, size, "#fff", label)}`
-    : `<rect x="0.5" y="0.5" width="${n2(w - 1)}" height="${h - 1}" rx="11.5" fill="none" stroke="#8a8986" stroke-opacity="0.5"/>${text(10, h / 2, size, "#8a8986", label)}`;
-  return { source: svg(w, h, body), width: Math.ceil(w), height: h, alt: label };
 }
 
 /** Words that open a page, as the canvas's links are drawn (我的分身): blue and underlined. */
@@ -86,15 +77,49 @@ export function tagSvg(label: string): Pic {
   return { source: svg(w, h, `<rect width="${n2(w)}" height="${h}" rx="4" fill="#4b6b8f" fill-opacity="0.13"/>${text(4, h / 2, size, "#4b6b8f", label)}`), width: Math.ceil(w), height: h, alt: label };
 }
 
-/** A chat's round picture: a group's people on grey, a person's initial on their colour. */
-export function chatPicSvg(kind: "group" | "dm", name: string, size = 36): Pic {
+/** A chat's round picture, as the markup inside an `svg`: a group's people on grey, a person's initial on their colour. */
+function chatPicBody(kind: "group" | "dm", name: string, size: number): string {
   const r = size / 2;
   if (kind === "group") {
     const s = size / 2, x = (size - s) / 2, k = s / 24;
     const icon = `<g transform="translate(${n2(x)} ${n2(x)}) scale(${n2(k)})" fill="none" stroke="#8a8986" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><circle cx="17" cy="9" r="2.5"/><path d="M3 19c0-3.3 2.7-5 6-5s6 1.7 6 5M15 19c0-2 1-3.5 3-4"/></g>`;
-    return { source: svg(size, size, `<circle cx="${r}" cy="${r}" r="${r}" fill="#8a8986" fill-opacity="0.2"/>${icon}`), width: size, height: size, alt: name };
+    return `<circle cx="${r}" cy="${r}" r="${r}" fill="#8a8986" fill-opacity="0.2"/>${icon}`;
   }
-  return { source: svg(size, size, `<circle cx="${r}" cy="${r}" r="${r}" fill="${peopleColor(name)}"/>${text(r, r, size * 0.42, "#fff", firstOf(name), { bold: true, anchor: "middle" })}`), width: size, height: size, alt: name };
+  return `<circle cx="${r}" cy="${r}" r="${r}" fill="${peopleColor(name)}"/>${text(r, r, size * 0.42, "#fff", firstOf(name), { bold: true, anchor: "middle" })}`;
+}
+
+/** A chat's round picture: a group's people on grey, a person's initial on their colour. */
+export function chatPicSvg(kind: "group" | "dm", name: string, size = 36): Pic {
+  return { source: svg(size, size, chatPicBody(kind, name, size)), width: size, height: size, alt: name };
+}
+
+/**
+ * A chat's picture in the inbox (WeChat's row, S11, S20): its round picture; at its lower right the avatar in the chat,
+ * a round initial in its colour; at its upper right the unread in red, or for a muted chat a grey dot (S17). The marks
+ * sit in a white ring, so they stand off the picture under them.
+ */
+export function chatRowPicSvg(kind: "group" | "dm", name: string, as: PillOf, unread: number, muted: boolean): Pic {
+  const size = 36, w = 46, h = 46, x = 2, y = 6, r = 8;
+  const corner = `<circle cx="${x + size - 3}" cy="${y + size - 3}" r="${r}" fill="${as.color}" stroke="#fff" stroke-width="1.5"/>${text(x + size - 3, y + size - 3, 9, "#fff", as.initial, { bold: true, anchor: "middle" })}`;
+  let count = "";
+  if (unread > 0 && muted) count = `<circle cx="${x + size - 4}" cy="${y + 3}" r="5" fill="#8a8986" stroke="#fff" stroke-width="1.5"/>`;
+  else if (unread > 0) {
+    const label = unread > 99 ? "99+" : String(unread), ch = 16, cw = Math.max(ch, textWidth(label, 10.5, true) + 10);
+    count = `<rect x="${n2(w - cw - 0.75)}" y="0.75" width="${n2(cw)}" height="${ch}" rx="${ch / 2}" fill="#ef3b3f" stroke="#fff" stroke-width="1.5"/>${text(w - 0.75 - cw / 2, 0.75 + ch / 2, 10.5, "#fff", label, { bold: true, anchor: "middle" })}`;
+  }
+  return { source: svg(w, h, `<g transform="translate(${x} ${y})">${chatPicBody(kind, name, size)}</g>${corner}${count}`), width: w, height: h, alt: `${name} · ${as.name}` };
+}
+
+/** The red words before a chat's last line while it needs the person (S11: [有人@我], [等你定], [任务]). */
+export function flagSvg(label: string): Pic {
+  const size = 12, h = 18, w = textWidth(label, size) + 2;
+  return { source: svg(w, h, text(1, h / 2, size, "#e5484d", label)), width: Math.ceil(w), height: h, alt: label };
+}
+
+/** A muted chat's mark at the right of its row (S17): a struck bell, grey. */
+export function mutedSvg(alt: string): Pic {
+  const s = 14;
+  return { source: svg(s, s, `<g fill="none" stroke="#8a8986" stroke-width="1.3" stroke-linecap="round"><path d="M7 2.2a3.3 3.3 0 0 0-3.3 3.3v2.4L2.6 10h8.8L10.3 7.9V5.5A3.3 3.3 0 0 0 7 2.2zM5.6 11.6a1.4 1.4 0 0 0 2.8 0"/><path d="M2 2l10 10"/></g>`), width: s, height: s, alt };
 }
 
 /** A red count: a chat's unread (16 high), or 需要你 beside the name (`small`, 14 high); past 99, 99+. */

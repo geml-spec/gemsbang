@@ -1,20 +1,24 @@
 // gemsbang's pane in Claude Code (spec §7.1–§7.6, transport §4), as rows the
-// hooks module draws: the total inbox first (a filter per avatar, its colour
-// and initial; each chat with the avatar that is in it, its last line, its
-// time, its unread; a way in when there is none), a chat (who you are there,
-// what was said, `分身` by an agent's line, the box 「以 <分身> 说」; a
-// group's head opens 群信息), 群信息 (叫人, 静音, the owner's 进群要我同意,
-// every member), 叫人 (the link for a person with its QR code, the line for
-// an agent, a new link), 我 (each avatar's card, its marking, a new name; the
-// default name, the language, the account, the version), the account (the
-// ways in, the devices signed in, signing out) and the sign-in (an email, its
-// code, a name for a new person's first avatar; no server to fill in). 需要你 leads the inbox (two whole, more folded, the
-// muted apart) and shows in its chat to the person alone; the band says only
-// what needs the person — the first card and its options — or that gemsbang
-// cannot work or nobody is logged in. Pure and Node-free.
+// hooks module draws, laid out as WeChat lays its own out (direction ①, the
+// person's pick of 2026-11-03): the inbox is the chats alone — each with its
+// picture, the avatar in it at the picture's corner, its name, time, last
+// line and unread; the ones that need the person first, their last line
+// after red words ([有人@我], [等你定], [任务]); a muted one in its place,
+// a grey dot for its unread — and a way in when there is none. A chat is its
+// lines as bubbles (the person's at the right, `分身` under an agent's), and
+// what needs the person there — a call, a card, a task — one at a time in a
+// bar above the box 「以 <分身> 说…」, which only they see; a group's head
+// opens 群信息 (叫人, 静音, 自动回, the owner's 进群要我同意, every member).
+// Then 叫人 (the link for a person with its QR code, the line for an agent, a
+// new link), 我 (each avatar's card, its marking, a new name; the default
+// name, the language, the account, the version), the account (the ways in,
+// the devices signed in, signing out) and the sign-in (an email, its code, a
+// name for a new person's first avatar; no server to fill in). The band says
+// only what needs the person — the first card and its options — or that
+// gemsbang cannot work or nobody is logged in. Pure and Node-free.
 import { factsLine } from "../../core/avatar/borrow.js";
-import type { Badge, ChatItem, InboxRow } from "../../core/avatar/inbox.js";
-import { expiresIn, foldNeeds } from "../../core/avatar/needs.js";
+import { timeLabel, type Badge, type ChatItem, type InboxRow } from "../../core/avatar/inbox.js";
+import { expiresIn } from "../../core/avatar/needs.js";
 import { LANGS, say, type Lang } from "../../core/avatar/words.js";
 import type { GbAccount, GbAllow, GbCalled, GbChat, GbLink, GbNeed, GbView, GbWork } from "../../gemsbang/ops.js";
 
@@ -23,7 +27,6 @@ export type GbPage = "inbox" | "chat" | "info" | "invite" | "avatars" | "account
 
 export type GbAction =
   | { op: "page"; page: GbPage }
-  | { op: "filter"; avatar: string | null }
   | { op: "open"; owner: string; id: string }
   | { op: "copy"; text: string }
   | { op: "rotate" }
@@ -65,15 +68,15 @@ export type GbAction =
   /** 需要你: an option pressed; a borrow carries whether to stop asking for its asker or its chat. */
   | { op: "answer"; avatar: string; need: string; choice: number; allowPerson?: boolean; allowVenue?: boolean }
   | { op: "allow"; need: string; person?: boolean; venue?: boolean }
-  | { op: "more"; what: "needs" | "muted" }
   /** 自己写 on a card: its field opened (the card's key), or closed. */
   | { op: "write"; card: string | null }
   /** 改 on a card of 我的分身: its fields opened (the card's key), or closed. */
   | { op: "edit"; card: string | null }
   | { op: "mute"; avatar?: string; venue?: string; on: boolean }
   | { op: "work-now"; avatar: string; work: string }
-  /** 被叫到 (architecture §6.3): 交给 agent 回, or 以后这个群自动回; and 自动回 taken back. The person answering themself writes in the chat's box; not answering is leaving the card be. */
+  /** 被叫到 (architecture §6.3): 交给 agent 回. The person answering themself writes in the chat's box; not answering is leaving the bar be. */
   | { op: "wake"; avatar: string; owner: string; id: string; choice: "reply" | "auto" }
+  /** 自动回 set or taken back: 群信息's switch, a two-person chat's head, 我 (S23). */
   | { op: "auto"; avatar: string; venue: string; on: boolean }
   /** A standing 以后不用问 taken back (撤 in 我, S23). */
   | { op: "allow-off"; avatar: string; allow: string }
@@ -92,15 +95,14 @@ export interface GbPress { key: string; label: string; action: GbAction; primary
 export type Tone = "plain" | "dim" | "error" | "success";
 export type GbRow =
   /**
-   * A page's head; the inbox's carries how many things wait in 需要你 (`count`), drawn beside the name where the surface
-   * takes pictures. `back` goes up a page, and `backLabel` names where to (‹ 收件箱), as WeChat, WhatsApp and Telegram
-   * all say more than an arrow.
+   * A page's head; the inbox's carries 我 and ＋ at the right, as WeChat's. `back` goes up a page, and `backLabel` names
+   * where to (‹ 收件箱), as WeChat, WhatsApp and Telegram all say more than an arrow.
    */
-  | { kind: "head"; key: string; title: string; sub?: string; back?: GbAction; backLabel?: string; actions: GbPress[]; count?: number; open?: GbAction }
+  | { kind: "head"; key: string; title: string; sub?: string; back?: GbAction; backLabel?: string; actions: GbPress[]; open?: GbAction }
   /** 群信息's members (P6), every one of them: a row each — a round initial, the name, who is the owner and which is you — and past MEMBER_ROWS the rest's names in one line (`rest`). */
   | { kind: "people"; key: string; items: { key: string; name: string; color?: string; note?: string }[]; rest?: string }
-  /** Rows of a page's settings, a rule between (P6): one to go to (›), a switch, or one in red that leaves. */
-  | { kind: "menu"; key: string; items: { key: string; label: string; action: GbAction; go?: true; on?: boolean; danger?: true }[] }
+  /** Rows of a page's settings, a rule between (P6): one to go to (›), a switch (what it does in grey under it), or one in red that leaves. */
+  | { kind: "menu"; key: string; items: { key: string; label: string; action: GbAction; go?: true; on?: boolean; danger?: true; hint?: string }[] }
   /**
    * Words to pass on (叫人, P4): what they are for, the words themselves to select, and a QR code of them where the
    * surface takes pictures; a copy press where it can copy (the terminal), never where it cannot (the desktop).
@@ -110,11 +112,17 @@ export type GbRow =
   | { kind: "tip"; key: string; text: string; pictures?: true }
   /** A grey line, and after it a press as a link (链接 7 天有效 · 换一个链接). */
   | { kind: "line"; key: string; text: string; press?: GbPress }
-  /** Chips to choose one of, and after them at the right the page's own presses (the inbox's 我的分身 and 建群). */
-  | { kind: "chips"; key: string; items: { key: string; label: string; badge?: Badge; on: boolean; action: GbAction }[]; actions?: GbPress[] }
-  | { kind: "chat"; key: string; row: InboxRow; action: GbAction }
-  /** A line said: who, `tag` (分身) where an agent said it, the time, the words; the person's own with their avatar's badge. */
-  | { kind: "message"; key: string; item: Extract<ChatItem, { kind: "message" }>; badge?: Badge; tag?: string; time: string; body: Span[] }
+  /**
+   * A chat in the inbox (WeChat's row): `flag` the red words before its last line while it needs the person ([有人@我],
+   * [等你定], [任务]); `muted`, its unread a grey dot and a muted mark at the right.
+   */
+  | { kind: "chat"; key: string; row: InboxRow; action: GbAction; flag?: string; muted?: true }
+  /**
+   * A line said, as a bubble: the person's own at the right (`side`), with their avatar's badge; another's at the left, its
+   * speaker named over it in a group (`name`); `tag` (分身) under it where an agent said it; the time, for a surface that
+   * draws no stamps between the lines.
+   */
+  | { kind: "message"; key: string; item: Extract<ChatItem, { kind: "message" }>; side: "left" | "right"; name?: string; badge?: Badge; tag?: string; time: string; body: Span[] }
   /** Something that happened in a chat, centred where the surface takes pictures (GbChat): who came in and when, how many lines came before, a reply that went too far. */
   | { kind: "event"; key: string; text: string; time?: string; tone: Tone }
   /** Rows to go to or pick from, one under another (P1b's 建群 ›, P2c's John ✓): `mark` an arrow at the right, or a tick on the one picked. */
@@ -129,20 +137,20 @@ export type GbRow =
   | { kind: "section"; key: string; text: string; badge?: Badge; note?: string; press?: GbPress }
   /** Which avatars a 底子 entry is given to (P8c): 给：, a pill each — ✓ given, faded not — pressed to give or not; 删 at the right. */
   | { kind: "give"; key: string; lead: string; items: { key: string; badge: Badge; on: boolean; action?: GbAction }[]; press?: GbPress }
-  /** A field; the chat's box carries, for a surface that takes pictures, 「以 <分身> 说」 around the avatar's pill, its own hint and what Enter does (GbChat). */
-  | { kind: "input"; key: string; field: GbField; placeholder: string; target?: string; label?: string; submitLabel?: string; value?: string; compose?: { as: Badge; lead: [string, string]; placeholder: string; submitLabel: string } }
+  /** A field; the chat's box (`compose`) holds 「以 <分身> 说…」 as its hint and says 发送 beside it, for a surface that takes pictures. */
+  | { kind: "input"; key: string; field: GbField; placeholder: string; target?: string; label?: string; submitLabel?: string; value?: string; compose?: { as: Badge; placeholder: string; submitLabel: string } }
   | { kind: "select"; key: string; label: string; options: { value: string; label: string }[]; value: string }
   | { kind: "buttons"; key: string; items: GbPress[] }
   | { kind: "toggle"; key: string; label: string; on: boolean; action: GbAction }
   | { kind: "copy"; key: string; text: string; label: string }
   /**
-   * A 需要你 card (spec §7.3): whose and what kind and where, how long it still waits when the matter has a deadline (else
-   * when it came), what it is, what it checked, the words it would send, a borrow's two switches, the options, 自己写.
-   * Where the surface takes pictures it is drawn as GbInbox's card: `label` (what kind, in `tint`) beside the avatar's
-   * pill, `body` (its lines, a mention marked), `quote` (the words it would send) set off, and 自己写 a button that opens
-   * the field (`writing`).
+   * What needs the person in a chat (spec §7.3, architecture §6.3), as the bar above its box that only they see: a call
+   * (`line`: its words and 交给 agent 回 on one line), a card (whose and what kind, `expires` how long it still waits
+   * when the matter has a deadline, what it is and what it checked, the words it would send set off as `quote`, a
+   * borrow's switches, the options, 自己写 opening its field), a task queued or under way. `more`, 还有 N 件 when others
+   * wait in the same chat; `label` in `tint`. A card with no chat stands so at the head of the inbox.
    */
-  | { kind: "need"; key: string; badge?: Badge; head: string; expires: string; tone: Tone; summary: string; checked?: string; willSay?: string; toggles: { key: string; label: string; on: boolean; action: GbAction }[]; options: GbPress[]; own?: { target: string; placeholder: string; label: string; writing: boolean }; label: string; tint: Tint; body: Span[][]; quote?: string; hint?: string; foot?: string; inChat?: true }
+  | { kind: "need"; key: string; badge?: Badge; head: string; expires: string; tone: Tone; summary: string; checked?: string; willSay?: string; toggles: { key: string; label: string; on: boolean; action: GbAction }[]; options: GbPress[]; own?: { target: string; placeholder: string; label: string; writing: boolean }; label: string; tint: Tint; body: Span[][]; quote?: string; hint?: string; line?: true; more?: string }
   /**
    * A card of 我的分身 (GbAvatars): an avatar's (its badge and name, its colour down the edge) or the settings' (no
    * name); 改 opens its fields; each line a label and a value, the presses after the value (换, 撤, …) or a choice.
@@ -151,9 +159,7 @@ export type GbRow =
   /** A label and its value on a page of settings (我's 默认名, 界面语言, 账号, 关于; 账号与登录's 邮箱): a grey note after the value, a press as a link, or › to go. */
   | { kind: "kv"; key: string; label: string; value: string; note?: string; tone?: Tone; press?: GbPress; go?: GbAction }
   /** One thing in a list of a page's (GbAccount): its name, a line under it, a press or a tag at its right; `rule`, a line above it. */
-  | { kind: "item"; key: string; title: string; sub?: string; press?: GbPress; tag?: string; rule?: true }
-  /** 需要你 folded (spec §7.3): 还有 N 件 with the first of them (whose, what kind, when) and 展开; the muted ones apart. */
-  | { kind: "fold"; key: string; more?: GbPress & { lead: string; badge?: Badge; first: string; open: string }; muted?: GbPress };
+  | { kind: "item"; key: string; title: string; sub?: string; press?: GbPress; tag?: string; rule?: true };
 /** A card's line: a label, a value (its tone), then presses, or a choice (the language). */
 export interface CardLine { key: string; label: string; value: string; tone?: Tone; presses?: GbPress[]; choice?: { options: { value: string; label: string }[]; value: string } }
 /** A card's kind as its label's colour: a call, a thing to nod to, gone wrong, expired. */
@@ -163,12 +169,12 @@ export interface Span { text: string; mark?: true }
 
 export const LANG_NAMES: Readonly<Record<Lang, string>> = { zh: "中文", en: "English", ja: "日本語" };
 
-/** What the pane holds besides the view: the page, the filter, the chat and the link open, the email a sign-in code went to, the avatar a new group is made as; the account as last read and an email being added. */
+/** What the pane holds besides the view: the page, the chat and the link open, the email a sign-in code went to, the avatar a new group is made as; the account as last read and an email being added. */
 export interface PaneState {
-  page: GbPage; filter: string | null; chat: GbChat | null; link: GbLink | null; address: string | null; groupAs: string; session: string; problem: string | null; zoneMinutes?: number; now: string;
+  page: GbPage; chat: GbChat | null; link: GbLink | null; address: string | null; groupAs: string; session: string; problem: string | null; zoneMinutes?: number; now: string;
   account?: GbAccount | null; adding?: string | null;
-  /** 需要你 unfolded, the muted ones shown, a borrow's switches as set, the card whose 自己写 is open. */
-  needsOpen?: boolean; mutedOpen?: boolean; allow?: Record<string, { person?: boolean; venue?: boolean }>; writing?: string | null;
+  /** A borrow's switches as set, the card whose 自己写 is open. */
+  allow?: Record<string, { person?: boolean; venue?: boolean }>; writing?: string | null;
   /** The card of 我的分身 whose 改 is open. */
   editing?: string | null;
   /** The chats (owner/id) where this session's agent is answering a call handed to it. */
@@ -272,44 +278,35 @@ function accountRows(v: GbView, s: PaneState): GbRow[] {
   return rows;
 }
 
-/** One card's row: in the inbox it says whose and where; in its chat, that only the person sees it and the avatar waits. */
-function needRow(n: GbNeed, l: Lang, s: PaneState, where: "inbox" | "chat"): GbRow {
-  const kind = say(`need.kind.${n.kind}`, l);
-  const head = where === "chat" ? `${say("need.onlyYou", l)} · ${kind} · ${say("need.waiting", l)}` : say("need.from", l, { avatar: n.avatarName, kind, group: n.group ?? "" });
-  const allow = s.allow?.[n.id] ?? {};
-  const expired = n.state === "expired";
-  const toggles = n.kind === "borrow" && !expired ? [
-    { key: `allow-person-${n.id}`, label: say("need.borrow.person", l), on: allow.person === true, action: { op: "allow", need: n.id, person: allow.person !== true } as GbAction },
-    { key: `allow-venue-${n.id}`, label: say("need.borrow.venue", l), on: allow.venue === true, action: { op: "allow", need: n.id, venue: allow.venue !== true } as GbAction },
-  ] : [];
-  const options: GbPress[] = expired ? [] : n.options.map((o, i) => ({ key: `answer-${n.id}-${i}`, label: o.label, primary: i === 0, action: { op: "answer", avatar: n.avatar, need: n.id, choice: i, ...(n.kind === "borrow" && i === 0 && allow.person === true ? { allowPerson: true } : {}), ...(n.kind === "borrow" && i === 0 && allow.venue === true ? { allowVenue: true } : {}) } }));
-  const key = `need-${where}-${n.avatar}-${n.id}`;
-  const borrowScope = n.kind === "borrow" ? `${n.repo !== undefined ? say("need.repo", l, { repo: n.repo }) : say("need.noRepo", l)}\n${say("need.borrowScope", l)}` : undefined;
-  return {
-    kind: "need", key, ...(where === "chat" ? { inChat: true } : {}),
-    // GbInbox's card: the kind beside the pill (in the chat, that only the person sees it), what it is with what it checked, the words set off.
-    label: where === "chat" ? head : expired ? `${kind} · ${say("need.expired", l)}` : kind, tint: expired ? "dim" : n.kind === "error" ? "error" : "ask",
-    body: [[{ text: n.checked !== undefined ? say("need.withChecked", l, { summary: n.summary, checked: n.checked }) : n.summary }], ...(n.unplayed === true && !expired ? [[{ text: say("call.unplayed", l) }]] : [])],
-    ...(n.badge !== undefined ? { badge: n.badge } : {}), head, expires: n.expires !== undefined ? expiresIn(n.expires, s.now, l) : hhmm(n.at, s.zoneMinutes), tone: expired ? "dim" : n.kind === "error" ? "error" : "plain",
-    summary: n.summary, ...(n.checked !== undefined ? { checked: say("need.checked", l, { text: n.checked }) } : {}),
-    // A borrow's card says where the work would happen and what may be done there (spec §7.4); another, the words it would send.
-    ...(borrowScope !== undefined ? { willSay: borrowScope, quote: borrowScope } : n.draft !== undefined ? { willSay: say("need.willSay", l, { text: n.draft }), quote: say("need.willSay", l, { text: n.draft }) } : {}),
-    toggles, options, ...(!expired && n.kind !== "borrow" && n.kind !== "error" && n.request === undefined ? { own: { target: `${n.avatar}/${n.id}`, placeholder: say("need.ownHint", l), label: say("need.own", l), writing: s.writing === key } } : {}),
-  };
-}
-
 /**
- * A line that called the person's avatar as GbInbox writes it: who, in which group, the mention set off and the rest
- * quoted (王五在「前端周会」@John：「明天站会谁来讲…？」); a mention inside the words is set off where it stands.
+ * An open card as its chat's bar (S15, S16), or with no chat at the head of the inbox: whose and what kind, how long it
+ * still waits when the matter has a deadline, what it is and what it checked, the words it would send, the options and
+ * 自己写; a borrow's switches, the chat's only in a group (a two-person chat has no group to stop asking for). Past its
+ * deadline a card leaves the bar: its avatar has said in the chat that the person answers it (S15).
  */
-function callSpans(who: string, words: string, c: GbCalled, l: Lang): Span[] {
-  const by = c.kind === "group" ? say("call.in", l, { who, group: c.group }) : who;
-  const at = c.badge !== undefined ? `@${c.badge.name}` : "";
-  if (at !== "" && words.startsWith(at)) return [{ text: by }, { text: at, mark: true }, { text: say("call.quote", l, { text: words.slice(at.length).trim() }) }];
-  const i = at === "" ? -1 : words.indexOf(at);
-  if (i < 0) return [{ text: `${by}${say("call.quote", l, { text: words })}` }];
-  const [open = "", close = ""] = say("call.quote", l, { text: "\u0000" }).split("\u0000");
-  return [{ text: `${by}${open}${words.slice(0, i)}` }, { text: at, mark: true }, { text: `${words.slice(i + at.length)}${close}` }];
+function needRow(n: GbNeed, l: Lang, s: PaneState, o: { dm?: boolean; more?: number } = {}): GbRow {
+  const kind = say(`need.kind.${n.kind}`, l);
+  const allow = s.allow?.[n.id] ?? {};
+  const toggles = n.kind === "borrow" ? [
+    { key: `allow-person-${n.id}`, label: say("need.borrow.person", l), on: allow.person === true, action: { op: "allow", need: n.id, person: allow.person !== true } as GbAction },
+    ...(o.dm === true ? [] : [{ key: `allow-venue-${n.id}`, label: say("need.borrow.venue", l), on: allow.venue === true, action: { op: "allow", need: n.id, venue: allow.venue !== true } as GbAction }]),
+  ] : [];
+  const options: GbPress[] = n.options.map((o, i) => ({ key: `answer-${n.id}-${i}`, label: o.label, primary: i === 0, action: { op: "answer", avatar: n.avatar, need: n.id, choice: i, ...(n.kind === "borrow" && i === 0 && allow.person === true ? { allowPerson: true } : {}), ...(n.kind === "borrow" && i === 0 && allow.venue === true ? { allowVenue: true } : {}) } }));
+  const key = `need-${n.avatar}-${n.id}`;
+  const borrowScope = n.kind === "borrow" ? `${n.repo !== undefined ? say("need.repo", l, { repo: n.repo }) : say("need.noRepo", l)}\n${say("need.borrowScope", l)}` : undefined;
+  // Whose and what kind (Lily 爸爸 · 答应事情), how long it still waits; in the bar's corner, 还有 N 件.
+  const expires = n.expires !== undefined ? expiresIn(n.expires, s.now, l) : "";
+  const label = [n.avatarName, kind, ...(expires !== "" ? [expires] : [])].join(" · ");
+  return {
+    kind: "need", key, label, tint: n.kind === "error" ? "error" : "ask",
+    body: [[{ text: n.checked !== undefined ? say("need.withChecked", l, { summary: n.summary, checked: n.checked }) : n.summary }], ...(n.unplayed === true ? [[{ text: say("call.unplayed", l) }]] : [])],
+    ...(n.badge !== undefined ? { badge: n.badge } : {}), head: label, expires, tone: n.kind === "error" ? "error" : "plain",
+    summary: n.summary, ...(n.checked !== undefined ? { checked: say("need.checked", l, { text: n.checked }) } : {}),
+    // A borrow's bar says where the work would happen and what may be done there (spec §7.4); another, the words it would send.
+    ...(borrowScope !== undefined ? { willSay: borrowScope, quote: borrowScope } : n.draft !== undefined ? { willSay: say("need.willSay", l, { text: n.draft }), quote: say("need.willSay", l, { text: n.draft }) } : {}),
+    toggles, options, ...(n.kind !== "borrow" && n.kind !== "error" && n.request === undefined ? { own: { target: `${n.avatar}/${n.id}`, placeholder: say("need.ownHint", l), label: say("need.own", l), writing: s.writing === key } } : {}),
+    ...(o.more !== undefined && o.more > 0 ? { more: say("need.more", l, { count: o.more }) } : {}),
+  };
 }
 
 /** A line's words with each mention of the person's avatar (`at`, as @John) set off. */
@@ -326,122 +323,82 @@ function mentionSpans(words: string, at: string): Span[] {
   return out;
 }
 
-/** A call on an avatar (architecture §6.3), drawn as a card: who called it and where, the lines, and one step, 交给 agent 回 (or 以后这个群自动回); in its chat, that only the person sees it. */
-function callRow(c: GbCalled, l: Lang, s: PaneState, where: "inbox" | "chat"): GbRow {
-  const head = where === "chat" ? say("call.onlyYou", l) : say("call.from", l, { avatar: c.badge?.name ?? "", group: c.group });
-  const shown = c.lines.slice(-3).map((x) => say("call.line", l, { who: x.who, text: x.text }));
-  const press = (choice: "reply" | "auto"): GbAction => ({ op: "wake", avatar: c.avatar, owner: c.owner, id: c.id, choice });
-  // In the inbox, the lines that called it; in its chat, where they are, by who and when (GbChat: 这里有 2 处叫到你：张三 14:03、李四 14:11).
-  const body = where === "chat"
-    ? [[{ text: say("call.here", l, { count: c.lines.length, list: c.lines.map((x) => `${x.who} ${hhmm(x.at, s.zoneMinutes)}`).join(say("call.sep", l)), name: c.badge?.name ?? "" }) }]]
-    : c.lines.slice(-3).map((x) => callSpans(x.who, x.text, c, l));
-  if (where !== "chat" && c.lines.length > 3) body.unshift([{ text: say("call.more", l, { count: c.lines.length - 3 }) }]);
-  // B1: the chat answers on its own, but no open session plays the avatar: the person is asked, and told why.
-  if (c.unplayed === true) body.push([{ text: say("call.unplayed", l) }]);
-  // B3: the last round handed it ended in an error; the call is the person's again.
-  if (c.failed !== undefined) body.push([{ text: say("call.failed", l, { why: say(`call.why.${c.failed}`, l) }) }]);
+/**
+ * A call on an avatar (architecture §6.3, S14) as its chat's bar, on one line: who called and how often (王五 @ 了你 2
+ * 次) and the one step, 交给 agent 回; a round handed it that failed, why instead (B3); no session to play it, said (B1).
+ */
+function callRow(c: GbCalled, l: Lang, more = 0): GbRow {
+  const who = [...new Set(c.lines.map((x) => x.who))].join(say("call.sep", l)), count = c.lines.length;
+  const said = say(`${c.kind === "dm" ? "call.barDm" : "call.bar"}${count > 1 ? "N" : ""}`, l, { who, count });
+  const failed = c.failed !== undefined ? say("call.failed", l, { why: say(`call.why.${c.failed}`, l) }) : undefined;
   return {
-    kind: "need", key: `call-${where}-${c.avatar}-${c.owner}-${c.id}`, ...(c.badge !== undefined ? { badge: c.badge } : {}), head, expires: hhmm(c.at, s.zoneMinutes), tone: "plain",
-    label: where === "chat" ? head : say("call.ask", l), tint: "call", body, ...(where === "chat" ? { inChat: true } : {}),
-    summary: [...(c.lines.length > 3 ? [say("call.more", l, { count: c.lines.length - 3 })] : []), ...shown].join("\n"),
-    toggles: [],
-    options: [
-      { key: `wake-reply-${c.avatar}-${c.id}`, label: say("call.reply", l), primary: true, action: press("reply") },
-      { key: `wake-auto-${c.avatar}-${c.id}`, label: say(c.kind === "dm" ? "call.autoDm" : "call.auto", l), action: press("auto") },
-    ],
+    kind: "need", key: `call-${c.avatar}-${c.owner}-${c.id}`, ...(c.badge !== undefined ? { badge: c.badge } : {}), head: failed ?? said, expires: "", tone: failed !== undefined ? "error" : "plain",
+    label: "", tint: failed !== undefined ? "error" : "call", line: true,
+    body: [[{ text: failed ?? said }], ...(c.unplayed === true ? [[{ text: say("call.unplayed", l) }]] : [])],
+    summary: failed ?? said, toggles: [],
+    options: [{ key: `wake-reply-${c.avatar}-${c.id}`, label: say("call.reply", l), primary: true, action: { op: "wake", avatar: c.avatar, owner: c.owner, id: c.id, choice: "reply" } }],
+    ...(more > 0 ? { more: say("need.more", l, { count: more }) } : {}),
   };
 }
 
-/** What the person is asked about: calls in chats that do not answer on their own, and 需要你's cards — errors first, then the newest, the expired last. */
-type Asked = { call: GbCalled } | { need: GbNeed };
-function askedOf(needs: readonly GbNeed[], calls: readonly GbCalled[]): Asked[] {
-  const rank = (a: Asked): number => ("need" in a ? (a.need.state === "expired" ? 2 : a.need.kind === "error" ? 0 : 1) : 1);
-  const at = (a: Asked): string => ("need" in a ? a.need.at : a.call.at);
-  return [...needs.map((need) => ({ need })), ...calls.filter((c) => !c.auto).map((call) => ({ call }))].sort((a, b) => rank(a) - rank(b) || (at(a) > at(b) ? -1 : at(a) < at(b) ? 1 : 0));
+/** A task the person took on in this chat (spec §7.4, S16), as its bar while it is queued (现在干) or under way. */
+function workRow(w: GbWork, l: Lang, more = 0): GbRow {
+  const said = `${say(`work.state.${w.state}`, l)} · ${w.summary}`;
+  return {
+    kind: "need", key: `work-${w.avatar}-${w.id}`, ...(w.badge !== undefined ? { badge: w.badge } : {}), head: said, expires: "", tone: w.state === "taken" ? "dim" : "plain",
+    label: "", tint: "dim", line: true, body: [[{ text: said }]], summary: said, toggles: [],
+    options: w.state === "queued" ? [{ key: `now-${w.avatar}-${w.id}`, label: say("work.now", l), primary: true, action: { op: "work-now", avatar: w.avatar, work: w.id } }] : [],
+    ...(more > 0 ? { more: say("need.more", l, { count: more }) } : {}),
+  };
 }
 
-/** 需要你 at the top of the inbox (spec §7.1, §7.3; architecture §6.3): the calls and the cards, two whole, more folded behind 还有 N 件; the muted counted apart. */
-function needRows(v: GbView, s: PaneState): GbRow[] {
+/** Whether a chat is muted: itself, or the avatar in it (S17). */
+const mutedChat = (v: GbView, owner: string, id: string, avatar: string): boolean => v.muted.venues.includes(`${owner}/${id}`) || v.muted.avatars.includes(avatar);
+
+/**
+ * What a chat waits on the person for (S11): the red words before its last line — a card ([等你定]), a task ([任务]), a
+ * call in a group ([有人@我]) — and whether it waits at all: a two-person chat's call has no words, its unread says it, as
+ * WeChat's does.
+ */
+function waitOf(v: GbView, r: InboxRow): { flag?: string; waits: boolean } {
   const l = v.lang;
-  const { loud, quiet } = loudAndQuiet(v);
-  if (loud.length + quiet.length === 0) return [];
-  const row = (a: Asked): GbRow => ("need" in a ? needRow(a.need, l, s, "inbox") : callRow(a.call, l, s, "inbox"));
-  const rows: GbRow[] = [{ kind: "section", key: "needs", text: `${say("need.title", l)} ${waitingOf(v)}` }];
-  const fold = foldNeeds(loud, s.needsOpen === true);
-  for (const a of fold.shown) rows.push(row(a));
-  // Folded: 还有 N 件 with the first of them as GbInbox says it (whose, what kind, when), and the muted apart.
-  const next = loud[fold.shown.length];
-  const more = fold.folded > 0 && next !== undefined ? {
-    key: "needs-more", label: say("need.more", l, { count: fold.folded }), action: { op: "more", what: "needs" } as GbAction, lead: say("need.moreLead", l, { count: fold.folded }), open: say("need.unfold", l),
-    ...("need" in next ? { ...(next.need.badge !== undefined ? { badge: next.need.badge } : {}), first: `${say(`need.kind.${next.need.kind}`, l)} · ${next.need.summary} · ${hhmm(next.need.at, s.zoneMinutes)}` }
-      : { ...(next.call.badge !== undefined ? { badge: next.call.badge } : {}), first: `${say("call.kind", l)} · ${next.call.group} · ${hhmm(next.call.at, s.zoneMinutes)}` }),
-  } : undefined;
-  const mutedPress = quiet.length > 0 && s.mutedOpen !== true ? { key: "needs-muted", label: say("need.muted", l, { count: quiet.length }), action: { op: "more", what: "muted" } as GbAction } : undefined;
-  if (more !== undefined || mutedPress !== undefined) rows.push({ kind: "fold", key: "needs-folded", ...(more !== undefined ? { more } : {}), ...(mutedPress !== undefined ? { muted: mutedPress } : {}) });
-  if (s.mutedOpen === true) for (const a of quiet) rows.push(row(a));
-  return rows;
+  const needs = v.needs.filter((n) => n.state === "open" && n.venue?.owner === r.owner && n.venue.id === r.id);
+  if (needs.some((n) => n.kind !== "borrow")) return { flag: say("panel.flag.ask", l), waits: true };
+  if (needs.length > 0) return { flag: say("panel.flag.task", l), waits: true };
+  const call = (v.calls ?? []).find((c) => c.owner === r.owner && c.id === r.id && c.avatar === r.as.id && !c.auto);
+  if (call === undefined) return { waits: false };
+  return call.kind === "group" ? { flag: say("panel.flag.call", l), waits: true } : { waits: true };
 }
 
-/** The calls and cards that ask the person, the muted apart. */
-function loudAndQuiet(v: GbView): { loud: Asked[]; quiet: Asked[] } {
-  const all = askedOf(v.needs, v.calls ?? []); // a view from a bridge older than the calls has none
-  const muted = (a: Asked): boolean => ("need" in a ? a.need.muted : a.call.muted);
-  return { loud: all.filter((a) => !muted(a)), quiet: all.filter(muted) };
-}
-
-/** How many things wait in 需要你: the calls and the open cards that are not muted (the count beside the name). */
-export function waitingOf(v: GbView): number {
-  return loudAndQuiet(v).loud.filter((a) => !("need" in a) || a.need.state === "open").length;
-}
-
-/** The jobs for this person's computers (spec §7.4): whose, where they stand, from which chat; a queued one can start now. */
-function workRows(v: GbView): GbRow[] {
-  const l = v.lang;
-  const work: GbWork[] = v.work ?? []; // a view from a bridge older than the jobs has none
-  if (work.length === 0) return [];
-  const open = work.filter((w) => w.state === "waiting" || w.state === "queued" || w.state === "taken").length;
-  const rows: GbRow[] = [{ kind: "section", key: "work", text: `${say("panel.work", l)} ${open}` }];
-  for (const w of work) {
-    const where = w.group !== undefined ? `「${w.group}」：` : "";
-    rows.push(text(`work-${w.avatar}-${w.id}`, `${w.avatarName} · ${say(`work.state.${w.state}`, l)}${w.auto === true ? ` · ${say("work.auto", l)}` : ""} · ${where}${w.summary}`, w.state === "failed" ? "error" : w.state === "done" ? "dim" : "plain"));
-    if (w.state === "queued") rows.push({ kind: "buttons", key: `work-now-${w.avatar}-${w.id}`, items: [{ key: `now-${w.avatar}-${w.id}`, label: say("work.now", l), primary: true, action: { op: "work-now", avatar: w.avatar, work: w.id } }] });
-  }
-  return rows;
-}
-
-/** The total inbox (spec §7.1). */
+/** The inbox (spec §7.1, S11): WeChat's — the chats alone, the ones that need the person first. */
 function inboxRows(v: GbView, s: PaneState): GbRow[] {
   const l = v.lang;
-  // GbInbox: the name with how many things wait; a bar of the avatars' filters with 我的分身 and 建群; 需要你; the chats.
-  const waiting = waitingOf(v);
-  const rows: GbRow[] = [{ kind: "head", key: "head-inbox", title: "Gemsbang", ...(v.unread > 0 ? { sub: say("panel.unreadBand", l, { count: v.unread }) } : {}), ...(waiting > 0 ? { count: waiting } : {}), actions: [] }];
-  if (v.offline !== undefined) rows.push(text("offline", say("panel.offline", l, { detail: v.offline }), "error"));
-  for (const n of v.notes) rows.push(text(`note-${n.url}`, say("panel.notFollowed", l, { url: n.url }), "error"));
-  rows.push({ kind: "chips", key: "filters", items: v.avatars.length > 1 ? [
-    { key: "filter-all", label: say("panel.all", l), on: s.filter === null, action: { op: "filter", avatar: null } },
-    ...v.avatars.map((a) => ({ key: `filter-${a.id}`, label: a.name, badge: a, on: s.filter === a.id, action: { op: "filter", avatar: a.id } as GbAction })),
-  ] : [], actions: [
-    // 我 with a count beside it while an agent's 底子 entries wait for the person's yes (P9b′): they do not go to 需要你.
+  // The head: the name; 我 (with how many 底子 entries an agent left wait for the person's yes, P9b′) and ＋ at the right.
+  const rows: GbRow[] = [{ kind: "head", key: "head-inbox", title: "Gemsbang", ...(v.unread > 0 ? { sub: say("panel.unreadBand", l, { count: v.unread }) } : {}), actions: [
     { key: "go-avatars", label: say("panel.avatars", l), action: { op: "page", page: "avatars" }, ...(baseWaiting(v) > 0 ? { count: baseWaiting(v) } : {}) },
     { key: "plus", label: "＋", primary: true, action: { op: "plus" } },
-  ] });
-  // ＋ (P1b, Q4): its two ways under the bar, as WeChat's ＋ opens; pressed again, folded.
+  ] }];
+  if (v.offline !== undefined) rows.push(text("offline", say("panel.offline", l, { detail: v.offline }), "error"));
+  for (const n of v.notes) rows.push(text(`note-${n.url}`, say("panel.notFollowed", l, { url: n.url }), "error"));
+  // ＋ (P1b, Q4): its two ways under the head, as WeChat's ＋ opens; pressed again, folded.
   if (s.plusOpen === true) rows.push({ kind: "list", key: "plus-ways", mark: "arrow", items: [
     { key: "go-new-group", label: say("panel.newGroup", l), action: { op: "page", page: "new-group" } },
     { key: "go-join", label: say("panel.joinLink", l), action: { op: "page", page: "join" } },
   ] });
-  rows.push(...needRows(v, s));
-  rows.push(...workRows(v));
-  const shown = s.filter === null ? v.rows : v.rows.filter((r) => r.as.id === s.filter);
+  // A card with no chat to stand in waits at the head, as a chat's bar would.
+  for (const n of v.needs) if (n.state === "open" && n.venue === undefined && !n.muted) rows.push(needRow(n, l, s));
   // No chat yet (P1c): the two ways ＋ holds, laid out in the middle; ＋ stays where it is.
-  if (v.rows.length === 0) rows.push({ kind: "empty", key: "empty", text: say("panel.empty", l), items: [
-    { key: "empty-new-group", label: say("panel.newGroup", l), primary: true, action: { op: "page", page: "new-group" } },
-    { key: "empty-join", label: say("panel.joinLink", l), action: { op: "page", page: "join" } },
-  ] });
-  else if (shown.length === 0) rows.push(text("empty", say("panel.empty", l)));
-  else {
-    rows.push({ kind: "section", key: "chats", text: say("panel.chats", l) });
-    for (const r of shown) rows.push({ kind: "chat", key: `chat-${r.owner}-${r.id}`, row: r, action: { op: "open", owner: r.owner, id: r.id } });
+  if (v.rows.length === 0) {
+    rows.push({ kind: "empty", key: "empty", text: say("panel.empty", l), items: [
+      { key: "empty-new-group", label: say("panel.newGroup", l), primary: true, action: { op: "page", page: "new-group" } },
+      { key: "empty-join", label: say("panel.joinLink", l), action: { op: "page", page: "join" } },
+    ] });
+    return rows;
+  }
+  // The chats that need the person first, newest first among them; then the rest, the muted in their place (S17).
+  const shown = v.rows.map((r) => ({ r, ...waitOf(v, r), muted: mutedChat(v, r.owner, r.id, r.as.id) }));
+  for (const x of [...shown.filter((x) => x.waits && !x.muted), ...shown.filter((x) => !x.waits || x.muted)]) {
+    rows.push({ kind: "chat", key: `chat-${x.r.owner}-${x.r.id}`, row: x.r, action: { op: "open", owner: x.r.owner, id: x.r.id }, ...(x.flag !== undefined ? { flag: x.flag } : {}), ...(x.muted ? { muted: true as const } : {}) });
   }
   return rows;
 }
@@ -454,44 +411,72 @@ const hhmm = (at: string, zoneMinutes = 0): string => {
   return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
 };
 
-/** One chat (spec §7.2). */
+/** How long a chat goes quiet before its next line gets a stamp over it, as WeChat's (S13). */
+const STAMP_GAP_MS = 5 * 60_000;
+/** A stamp between a chat's lines: today 16:20, else the day as the inbox says it with the time (昨天 16:20). */
+function stampOf(at: string, now: string, l: Lang, zoneMinutes = 0): string {
+  const time = hhmm(at, zoneMinutes), day = timeLabel(at, now, l, zoneMinutes);
+  return day === time ? time : `${day} ${time}`;
+}
+
+/**
+ * What needs the person in a chat (S14–S16): the calls, the cards and the tasks there, oldest first, the first as the
+ * bar above its box with 还有 N 件; while the agent answers a call handed to it, a grey line before it (agent 在回…).
+ */
+function barRows(v: GbView, s: PaneState, c: GbChat): GbRow[] {
+  const l = v.lang;
+  const here = (x: { owner: string; id: string } | undefined): boolean => x !== undefined && x.owner === c.owner && x.id === c.id;
+  const waiting: { at: string; row: (more: number) => GbRow }[] = [
+    ...(v.calls ?? []).filter((k) => here(k) && k.avatar === c.as?.id && !k.auto).map((k) => ({ at: k.at, row: (more: number) => callRow(k, l, more) })),
+    ...v.needs.filter((n) => n.state === "open" && here(n.venue)).map((n) => ({ at: n.at, row: (more: number) => needRow(n, l, s, { dm: c.kind === "dm", more }) })),
+    ...(v.work ?? []).filter((w) => (w.state === "queued" || w.state === "taken") && here(w.venue)).map((w) => ({ at: w.at, row: (more: number) => workRow(w, l, more) })),
+  ].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+  const rows: GbRow[] = [];
+  if (s.replying?.includes(`${c.owner}/${c.id}`) === true) rows.push({ kind: "pending", key: "replying", text: say("call.replying", l) });
+  const first = waiting[0];
+  if (first !== undefined) rows.push(first.row(waiting.length - 1));
+  return rows;
+}
+
+/** One chat (spec §7.2, S13): its head, its lines as bubbles with stamps between, the bar of what needs the person, the box. */
 function chatRows(v: GbView, s: PaneState, c: GbChat): GbRow[] {
   const l = v.lang;
   const me = c.as?.name ?? "";
   const key = `${c.owner}/${c.id}`;
   const muted = v.muted.venues.includes(key);
-  // A group's head opens 群信息, where 叫人 and 静音 are (P5, Q17); a two-person chat has no 群信息 yet, so 静音 stays on its head.
+  const auto = c.as !== undefined && (v.avatars.find((a) => a.id === c.as?.id)?.autos ?? []).some((x) => x.venue === key);
+  // A group's head opens 群信息, where 叫人, 静音 and 自动回 are (P5, Q17); a two-person chat has no 群信息 yet, so 静音 and 自动回 stay on its head.
   const sub = `${say("page.join.count", l, { count: c.count })} · ${say("page.group.as", l, { name: me })}`;
   const rows: GbRow[] = [c.kind === "group"
     ? { kind: "head", key: "head-chat", title: c.name, sub, back: { op: "page", page: "inbox" }, actions: [], open: { op: "page", page: "info" } }
-    : { kind: "head", key: "head-chat", title: c.name, sub, back: { op: "page", page: "inbox" }, actions: [{ key: "mute-venue", label: say(muted ? "panel.unmute" : "panel.mute", l), action: { op: "mute", venue: key, on: !muted }, quiet: true }] }];
-  // The cards only the person sees stand after the line they are about (GbChat); one about a line not shown, at the end.
-  const after = new Map<string, GbRow[]>(), last: GbRow[] = [];
-  const place = (line: string | undefined, r: GbRow): void => { if (line !== undefined && c.items.some((i) => i.id === line)) after.set(line, [...(after.get(line) ?? []), r]); else last.push(r); };
-  for (const k of v.calls ?? []) if (k.owner === c.owner && k.id === c.id && k.avatar === c.as?.id && !k.auto) place(k.last, callRow(k, l, s, "chat"));
-  // A call handed to the agent: its card, folded to a line, until the answer is in the chat.
-  if (s.replying?.includes(key) === true) last.push({ kind: "pending", key: "replying", text: say("call.replying", l) });
-  for (const n of v.needs) if (n.venue !== undefined && n.venue.owner === c.owner && n.venue.id === c.id && n.state === "open") place(n.message, needRow(n, l, s, "chat"));
+    : { kind: "head", key: "head-chat", title: c.name, sub, back: { op: "page", page: "inbox" }, actions: [
+        { key: "mute-venue", label: say(muted ? "panel.unmute" : "panel.mute", l), action: { op: "mute", venue: key, on: !muted }, quiet: true },
+        ...(c.as !== undefined ? [{ key: "auto-venue", label: say(auto ? "panel.dmAutoOff" : "panel.dmAuto", l), action: { op: "auto", avatar: c.as.id, venue: key, on: !auto } as GbAction, quiet: true as const }] : []),
+      ] }];
   const zone = s.zoneMinutes ?? c.zoneMinutes;
   if (c.earlier > 0) rows.push({ kind: "event", key: "earlier", text: say("panel.earlier", l, { count: c.earlier }), tone: "dim" });
   // A group made a moment ago (P2d): only the person, and 叫人 first; a quiet chat with others, that nobody spoke.
   if (c.kind === "group" && c.count <= 1 && c.items.every((i) => i.kind !== "message")) rows.push({ kind: "empty", key: "alone", text: say("panel.alone", l), items: [{ key: "alone-invite", label: say("panel.invite", l), primary: true, action: { op: "page", page: "invite" } }] });
   else if (c.items.every((i) => i.kind !== "message")) rows.push(text("quiet", say("page.group.empty", l)));
+  let last: string | undefined;
   for (const i of c.items) {
     if (i.kind === "joined") rows.push({ kind: "event", key: `joined-${i.id}`, text: say("page.group.joined", l, { name: i.who }), time: hhmm(i.at, zone), tone: "dim" });
     else if (i.kind === "note") rows.push({ kind: "event", key: `note-${i.id}`, text: say("page.group.hops", l), tone: "dim" });
     // Someone left, as who came in is said (S19, Q13①); the 群主 who left, with who took it over (P7c).
     else if (i.kind === "left") rows.push({ kind: "event", key: `left-${i.id}`, text: i.heir !== undefined ? say("page.group.leftHeir", l, { name: i.who, heir: i.heir }) : say("page.group.left", l, { name: i.who }), time: hhmm(i.at, zone), tone: "dim" });
     else {
-      rows.push({ kind: "message", key: `msg-${i.id}`, item: i, ...(i.mine && c.as !== undefined ? { badge: c.as } : {}), ...(i.mark ? { tag: say("page.group.mark", l) } : {}), time: hhmm(i.at, zone), body: mentionSpans(i.text, me === "" ? "" : `@${me}`) });
+      if (last === undefined || Date.parse(i.at) - Date.parse(last) >= STAMP_GAP_MS) rows.push({ kind: "event", key: `stamp-${i.id}`, text: stampOf(i.at, s.now, l, zone), tone: "dim" });
+      last = i.at;
+      rows.push({
+        kind: "message", key: `msg-${i.id}`, item: i, side: i.mine ? "right" : "left", ...(c.kind === "group" && !i.mine ? { name: i.who } : {}),
+        ...(i.mine && c.as !== undefined ? { badge: c.as } : {}), ...(i.mark ? { tag: say("page.group.mark", l) } : {}), time: hhmm(i.at, zone), body: mentionSpans(i.text, me === "" ? "" : `@${me}`),
+      });
       // What the host saw when a borrowed computer did the work (spec §7.4).
       if (i.facts !== undefined) rows.push(text(`facts-${i.id}`, factsLine(i.facts, l), i.facts.every((f) => f.ok) ? "success" : "error"));
     }
-    rows.push(...(after.get(i.id) ?? []));
   }
-  rows.push(...last);
-  const [lead = "", trail = ""] = say("page.group.say", l, { name: "\u0000" }).split("\u0000");
-  rows.push({ kind: "input", key: "say", field: "say", placeholder: say("page.group.say", l, { name: me }), ...(c.as !== undefined ? { compose: { as: c.as, lead: [lead.trim(), trail.trim()], placeholder: say("page.group.sayHint", l), submitLabel: say("page.group.send", l) } } : {}) });
+  rows.push(...barRows(v, s, c));
+  rows.push({ kind: "input", key: "say", field: "say", placeholder: say("page.group.sayAs", l, { name: me }), ...(c.as !== undefined ? { compose: { as: c.as, placeholder: say("page.group.sayAs", l, { name: me }), submitLabel: say("page.group.send", l) } } : {}) });
   return rows;
 }
 
@@ -499,13 +484,14 @@ function chatRows(v: GbView, s: PaneState, c: GbChat): GbRow[] {
 const MEMBER_ROWS = 200;
 
 /**
- * 群信息 (P6, Q17): 叫人, 静音 and the owner's 进群要我同意 first, then every member, the owner first, who you are — the
+ * 群信息 (P6, Q17): 叫人, 静音, 自动回 and the owner's 进群要我同意 first, then every member, the owner first, who you are — the
  * person picked ② on 2026-11-03, as WhatsApp and Telegram lay it out: what is pressed often above, the list below it.
  */
 function infoRows(v: GbView, s: PaneState, c: GbChat): GbRow[] {
   const l = v.lang;
   const key = `${c.owner}/${c.id}`;
   const muted = v.muted.venues.includes(key);
+  const auto = c.as !== undefined && (v.avatars.find((a) => a.id === c.as?.id)?.autos ?? []).some((x) => x.venue === key);
   const members = c.members ?? [];
   const keeper = c.keeper ?? c.owner;
   const others = members.filter((m) => m.id !== c.as?.id);
@@ -520,6 +506,8 @@ function infoRows(v: GbView, s: PaneState, c: GbChat): GbRow[] {
       kind: "menu", key: "info-menu", items: [
         { key: "info-invite", label: say("panel.invite", l), go: true, action: { op: "page", page: "invite" } },
         { key: "info-mute", label: say("panel.mute", l), on: muted, action: { op: "mute", venue: key, on: !muted } },
+        // 自动回 beside 静音 (S14): moved here from the bar, which only says 交给 agent 回.
+        ...(c.as !== undefined ? [{ key: "info-auto", label: say("panel.info.auto", l), hint: say("panel.info.autoHint", l, { name: c.as.name }), on: auto, action: { op: "auto", avatar: c.as.id, venue: key, on: !auto } as GbAction }] : []),
         ...(c.isOwner ? [{ key: "info-approve", label: say("panel.invite.approve", l), on: c.rules?.approve === true, action: { op: "link-rules", approve: c.rules?.approve !== true } as GbAction }] : []),
       ],
     },

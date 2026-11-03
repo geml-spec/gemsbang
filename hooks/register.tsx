@@ -8,11 +8,12 @@
 // (a 需要你 card, one of five kinds, with the words it would send), im_read
 // (with the 底子 entries given to the avatar) and im_remember (an entry
 // waiting for the person's yes), as the avatar this session speaks for. What the person sees: the
-// pane — 需要你 and the total inbox, a chat, 群信息, 叫人, 我 with its 底子, the
+// pane, laid out as WeChat's — the chats, the ones that need them first; a chat as bubbles,
+// what needs them there in a bar above its box; 群信息, 叫人, 我 with its 底子, the
 // account, the sign-in — and a line above the prompt with the first thing that needs them,
 // its options and how many more, or that gemsbang cannot work or nobody is
 // logged in. 被叫到 (architecture §6.3): when someone calls one of the
-// person's avatars, the pane asks them — 回, 以后这个群自动回, 不回 — and a
+// person's avatars, the chat's bar asks them — 交给 agent 回 — and a
 // press, or a chat set to answer on its own (for the avatar this session
 // speaks for), starts an agent in the background that reads the chat and
 // writes what to say, with no tools; its answer goes back as the avatar.
@@ -35,7 +36,7 @@ import { GEMSBANG_BLUE, GEMSBANG_MARK_CHAR } from '../dist/hosts/claude-code/gem
 import { LOCKUP, MARK as BRAND_MARK } from '../dist/hosts/claude-code/gb-brand.js'
 import { fieldAction, gbBand, GB_PANE_ID, groupAsOf, paneRows } from '../dist/hosts/claude-code/gb-panel.js'
 import type { GbAction, GbField, GbPage, GbPress, GbRow, JoinView, PaneState, Span, Tint, Tone } from '../dist/hosts/claude-code/gb-panel.js'
-import { barSvg, chatPicSvg, chipSvg, countSvg, dangerSvg, linkSvg, peopleColor, personSvg, pillSvg, qrSvg, RULE_SVG, switchSvg, tagSvg, textWidth } from '../dist/hosts/claude-code/gb-svg.js'
+import { barSvg, chatRowPicSvg, countSvg, dangerSvg, flagSvg, linkSvg, mutedSvg, peopleColor, personSvg, pillSvg, qrSvg, RULE_SVG, switchSvg, tagSvg, textWidth } from '../dist/hosts/claude-code/gb-svg.js'
 import { qrModules } from '../dist/core/qr.js'
 import type { Pic } from '../dist/hosts/claude-code/gb-svg.js'
 import { BRIDGE_TIMEOUT_MS, decodeResponse, encodeRequest, SLOW_TIMEOUT_MS, unreadableText } from '../dist/hosts/claude-code/protocol.js'
@@ -58,7 +59,6 @@ const viewAtom = atom({ plugin: 'gemsbang', key: 'view' } as const, null as Gems
 const chatAtom = atom({ plugin: 'gemsbang', key: 'chat' } as const, null as GemsbangJson)
 const linkAtom = atom({ plugin: 'gemsbang', key: 'link' } as const, null as GemsbangJson)
 const pageAtom = atom({ plugin: 'gemsbang', key: 'page' } as const, 'inbox' as string)
-const filterAtom = atom({ plugin: 'gemsbang', key: 'filter' } as const, null as string | null)
 const addressAtom = atom({ plugin: 'gemsbang', key: 'address' } as const, null as string | null)
 const addingAtom = atom({ plugin: 'gemsbang', key: 'adding' } as const, null as string | null)
 const accountAtom = atom({ plugin: 'gemsbang', key: 'account' } as const, null as GemsbangJson)
@@ -66,8 +66,6 @@ const accountAtom = atom({ plugin: 'gemsbang', key: 'account' } as const, null a
 const groupAsAtom = atom({ plugin: 'gemsbang', key: 'groupAs' } as const, '' as string)
 const groupAvatarAtom = atom({ plugin: 'gemsbang', key: 'groupAvatar' } as const, null as string | null)
 const pastedAtom = atom({ plugin: 'gemsbang', key: 'pasted' } as const, [] as GemsbangJson)
-const needsOpenAtom = atom({ plugin: 'gemsbang', key: 'needsOpen' } as const, false as boolean)
-const mutedOpenAtom = atom({ plugin: 'gemsbang', key: 'mutedOpen' } as const, false as boolean)
 const writingAtom = atom({ plugin: 'gemsbang', key: 'writing' } as const, null as string | null)
 /** The inbox's ＋ open (P1b); 建群's list of avatars open (P2c); 用链接进群 once the link was read (P3). */
 const plusOpenAtom = atom({ plugin: 'gemsbang', key: 'plusOpen' } as const, false as boolean)
@@ -591,7 +589,6 @@ async function act($: EngineInterface, action: GbAction, surface?: string): Prom
       if (action.page === 'avatars') await readAllows($)
       return
     }
-    case 'filter': await update($, filterAtom, () => action.avatar); return
     case 'open': {
       const r = await run($, 'open', { owner: action.owner, id: action.id })
       if (r?.ok === true) await update($, pageAtom, () => 'chat')
@@ -656,7 +653,6 @@ async function act($: EngineInterface, action: GbAction, surface?: string): Prom
       return
     }
     // Each atom named where it is written: the engine lists a module's state by reading its calls.
-    case 'more': if (action.what === 'needs') await update($, needsOpenAtom, () => true); else await update($, mutedOpenAtom, () => true); return
     case 'write': await update($, writingAtom, () => action.card); return
     case 'edit': await update($, editingAtom, () => action.card); await update($, repoOpenAtom, () => false); return
     case 'lang-open': await update($, langOpenAtom, () => action.open); return
@@ -790,7 +786,7 @@ const toneOf = (tone: Tone): Record<string, unknown> => (tone === 'dim' ? { dimC
 // ---- where the surface takes pictures: the canvas's GbInbox ------------------------------------------------------
 // A desktop Button holds words only and draws them in its own colour and weight, so what keeps a colour (an avatar's
 // pill and initial, a chat's picture, a count, a colour bar) is an Svg beside the words, and the words that open
-// something are each a plain Button labelled with them; a picture that is a press by itself (a filter chip) has a blank
+// something are each a plain Button labelled with them; a picture that is a press by itself (我's link) has a blank
 // Button laid over it, painted last, the one layout the desktop takes a press through (gemworks' board learnt it).
 // The greys carry alpha so they read on a light and a dark ground.
 const HEADING = '#8a8986'
@@ -798,15 +794,15 @@ const RULE = '#8a898666'
 const SHADE = '#8a89861a'
 const MARK = { backgroundColor: '#fff4d6', color: '#9a6100' } as const
 const TINT: Readonly<Record<Tint, string>> = { call: '#2a6fdb', ask: '#9a6100', error: 'error', dim: HEADING }
-/** A card in its chat, which only the person sees (GbChat): a dashed blue rim on a blue wash. */
-const OWN_CARD = { borderStyle: 'dashed', borderColor: '#2a6fdb59', backgroundColor: '#2a6fdb0d' } as const
+/** What needs the person in a chat, the bar above its box that only they see (S14): a blue rim on a blue wash. */
+const BAR = { borderStyle: 'round', borderColor: '#2a6fdb59', backgroundColor: '#2a6fdb0d' } as const
+/** A chat's bubbles (S13): another's on a grey wash, the person's own on a blue one, each in a rim of its own colour. */
+const THEIRS = { borderStyle: 'round', borderColor: '#8a898633', backgroundColor: '#8a89861a' } as const
+const MINE = { borderStyle: 'round', borderColor: '#2a6fdb40', backgroundColor: '#2a6fdb1f' } as const
 
 function rule(els: Els, key: string): unknown {
   return <els.Box key={key} marginTop={1}><els.Svg source={RULE_SVG} alt="—" height={1} /></els.Box>
 }
-/** A chat row's height in CSS pixels: its colour bar is this tall, and the row with it. */
-const CHAT_ROW_PX = 54
-
 /** The person's wordmark (docs/brand/, made small by scripts/brand.mjs), at half the size it was made at. */
 function drawLockup(els: Els, key: string): unknown {
   return <els.Svg key={key} source={LOCKUP.source} alt="Gems'Bang" width={Math.round(LOCKUP.width / 2)} height={LOCKUP.height / 2} />
@@ -845,6 +841,11 @@ function drawSpans(els: Els, key: string, line: Span[]): unknown {
 
 function pressButton($: EngineInterface, els: Els, b: GbPress): unknown {
   return <els.Button key={b.key} label={b.label} {...(b.primary ? { variant: 'primary' } : {})} onPress={() => keep(act($, b.action), $)} />
+}
+
+/** A press in a chat's bar or the inbox's head: the desktop's own button, never its dark primary one, so the pane reads as a chat's and not a list of jobs. */
+function barButton($: EngineInterface, els: Els, b: GbPress): unknown {
+  return <els.Button key={b.key} label={b.label} onPress={() => keep(act($, b.action), $)} />
 }
 
 /** The rows the canvas draws as pictures; undefined for the rest, drawn as words. */
@@ -892,33 +893,22 @@ function drawPictured($: EngineInterface, els: Els, row: GbRow, columns: number,
           {rule(els, `${row.key}-rule`)}
         </Box>
       )
+      // The inbox's (WeChat's head): the wordmark, the version, then 我 (a link, with how many 底子 entries wait) and ＋; a rule under it.
       return (
-        <Box key={row.key} gap={1} alignItems="center">
-          {drawLockup(els, 'head-lockup')}
-          {row.count !== undefined && drawPic(els, 'head-count', countSvg(row.count, { small: true }))}
-          <Box flexGrow={1} />
-          {version !== null && <Text dimColor>{version}</Text>}
+        <Box key={row.key} flexDirection="column">
+          <Box gap={1} alignItems="center">
+            {drawLockup(els, 'head-lockup')}
+            <Box flexGrow={1} />
+            {version !== null && <Text dimColor>{version}</Text>}
+            {row.actions.flatMap((b) => [
+              b.primary ? barButton($, els, b) : picPress($, els, b.key, linkSvg(b.label), b.action),
+              ...(b.count !== undefined ? [drawPic(els, `${b.key}-count`, countSvg(b.count, { small: true }))] : []),
+            ])}
+          </Box>
+          {rule(els, `${row.key}-rule`)}
         </Box>
       )
     }
-    // The bar under it: a chip per avatar to narrow the inbox to (the one on is not a press), then 我的分身 (a link) and
-    // 建群; a rule under the bar.
-    case 'chips': return (
-      <Box key={row.key} flexDirection="column">
-        <Box gap={1} alignItems="center" flexWrap="wrap">
-          {row.items.map((c) => {
-            const p = c.badge !== undefined ? pillSvg(c.badge, { filled: c.on }) : chipSvg(c.label, c.on)
-            return c.on ? drawPic(els, c.key, p) : picPress($, els, c.key, p, c.action)
-          })}
-          <Box flexGrow={1} />
-          {(row.actions ?? []).flatMap((b) => [
-            b.primary ? pressButton($, els, b) : picPress($, els, b.key, linkSvg(b.label), b.action),
-            ...(b.count !== undefined ? [drawPic(els, `${b.key}-count`, countSvg(b.count, { small: true }))] : []),
-          ])}
-        </Box>
-        <Box marginTop={1}><Svg source={RULE_SVG} alt="—" height={1} /></Box>
-      </Box>
-    )
     case 'section': return row.badge !== undefined ? undefined : (
       <Box key={row.key} gap={1} marginTop={1} alignItems="center">
         <Text bold color={HEADING}>{row.text}</Text>
@@ -939,91 +929,68 @@ function drawPictured($: EngineInterface, els: Els, row: GbRow, columns: number,
         {row.press !== undefined && picPress($, els, row.press.key, linkSvg(row.press.label), row.press.action)}
       </Box>
     )
-    // In its chat, GbChat's card: only the person sees it — what kind, its words, what 回 does, the answers, that it stays.
-    case 'need': if (row.inChat === true) return (
-      <Box key={row.key} flexDirection="column" gap={1} marginY={1} {...OWN_CARD} paddingX={1} paddingY={1}>
-        <Box gap={1} alignItems="center">
-          <Box flexShrink={1} minWidth={0}><Text color={TINT[row.tint]} wrap="truncate-end">{row.label}</Text></Box>
+    // What needs the person in a chat (S14–S16), the bar above its box that only they see. A call or a task on one line:
+    // its words (red when a round failed), 还有 N 件, its press. A card: whose and what kind with 还有 N 件 at the right,
+    // what it is and what it checked, the words it would send set off, a borrow's switches, the answers and 自己写.
+    case 'need': {
+      if (row.line === true) return (
+        <Box key={row.key} gap={1} alignItems="center" marginTop={1} {...BAR} paddingX={1} paddingY={1}>
+          <Box flexDirection="column" flexShrink={1} minWidth={0}>
+            {row.body.map((line, i) => <Text key={`${row.key}-l${i}`} wrap="wrap" {...(i === 0 && row.tone === 'error' ? { color: 'error' } : i > 0 || row.tone === 'dim' ? { color: HEADING } : {})}>{line.map((x) => x.text).join('')}</Text>)}
+          </Box>
           <Box flexGrow={1} />
-          <Text color={HEADING}>{row.expires}</Text>
+          {row.more !== undefined && <Box flexShrink={0}><Text color={HEADING}>{row.more}</Text></Box>}
+          {row.options.map((b) => <Box key={`${b.key}-box`} flexShrink={0}>{barButton($, els, b)}</Box>)}
         </Box>
-        {row.body.map((line, i) => drawSpans(els, `${row.key}-l${i}`, line))}
-        {row.hint !== undefined && <Text color={HEADING} wrap="wrap">{row.hint}</Text>}
-        {row.quote !== undefined && <Text wrap="wrap">{row.quote}</Text>}
-        {row.toggles.map((t) => <Button key={t.key} plain label={`${t.on ? '☑' : '☐'} ${t.label}`} onPress={press(t.action)} />)}
-        {(row.options.length > 0 || row.own !== undefined) && (
-          <Box gap={1} flexWrap="wrap">
-            {row.options.map((b) => pressButton($, els, b))}
-            {row.own !== undefined && <Button key={`${row.key}-write`} label={row.own.label} onPress={press({ op: 'write', card: row.own.writing ? null : row.key })} />}
+      )
+      return (
+        <Box key={row.key} flexDirection="column" gap={1} marginTop={1} {...BAR} paddingX={1} paddingY={1}>
+          <Box gap={1} alignItems="center">
+            {row.badge !== undefined && drawPic(els, `${row.key}-who`, personSvg(row.badge.name, row.badge.color, 16))}
+            <Box flexShrink={1} minWidth={0}><Text color={TINT[row.tint]} wrap="truncate-end">{row.label}</Text></Box>
+            <Box flexGrow={1} />
+            {row.more !== undefined && <Text color={HEADING}>{row.more}</Text>}
           </Box>
-        )}
-        {row.own !== undefined && row.own.writing && Input !== undefined && (
-          <Input key={`${row.key}-own`} placeholder={row.own.placeholder} onSubmit={(value: string) => keep(submit($, 'need-own', value, row.own?.target), $)} />
-        )}
-        {row.foot !== undefined && <Text color={HEADING} wrap="wrap">{row.foot}</Text>}
-      </Box>
-    )
-    // A card: its avatar's colour down the edge; the pill, what kind, when; its words; the words it would send set off; the answers.
-    return (
-      <Box key={row.key} flexDirection="column" gap={1} marginBottom={1} position="relative" overflow="hidden" borderStyle="round" borderColor={RULE} paddingX={1} paddingY={1}>
-        {row.badge !== undefined && edgeBar(els, `${row.key}-edge`, row.badge.color, row.badge.name)}
-        <Box gap={1} alignItems="center">
-          {row.badge !== undefined && drawPic(els, `${row.key}-pill`, pillSvg(row.badge))}
-          <Box flexShrink={1} minWidth={0}><Text bold color={TINT[row.tint]} wrap="truncate-end">{row.label}</Text></Box>
-          <Box flexGrow={1} />
-          <Text color={HEADING}>{row.expires}</Text>
+          {row.body.map((line, i) => drawSpans(els, `${row.key}-l${i}`, line))}
+          {row.quote !== undefined && (
+            <Box key={`${row.key}-quote`} position="relative" paddingLeft={1}>
+              {edgeBar(els, `${row.key}-quote-edge`, '#8a898666', '', 3)}
+              <Text wrap="wrap">{row.quote}</Text>
+            </Box>
+          )}
+          {row.toggles.map((t) => <Button key={t.key} plain label={`${t.on ? '☑' : '☐'} ${t.label}`} onPress={press(t.action)} />)}
+          {(row.options.length > 0 || row.own !== undefined) && (
+            <Box gap={1} flexWrap="wrap">
+              {row.options.map((b) => barButton($, els, b))}
+              {row.own !== undefined && <Button key={`${row.key}-write`} label={row.own.label} onPress={press({ op: 'write', card: row.own.writing ? null : row.key })} />}
+            </Box>
+          )}
+          {row.own !== undefined && row.own.writing && Input !== undefined && (
+            <Input key={`${row.key}-own`} placeholder={row.own.placeholder} onSubmit={(value: string) => keep(submit($, 'need-own', value, row.own?.target), $)} />
+          )}
         </Box>
-        {row.body.map((line, i) => drawSpans(els, `${row.key}-l${i}`, line))}
-        {row.quote !== undefined && (
-          <Box key={`${row.key}-quote`} position="relative" paddingLeft={1}>
-            {edgeBar(els, `${row.key}-quote-edge`, '#8a898666', '', 3)}
-            <Text wrap="wrap">{row.quote}</Text>
-          </Box>
-        )}
-        {row.toggles.map((t) => <Button key={t.key} plain label={`${t.on ? '☑' : '☐'} ${t.label}`} onPress={press(t.action)} />)}
-        {(row.options.length > 0 || row.own !== undefined) && (
-          <Box gap={1} flexWrap="wrap">
-            {row.options.map((b) => pressButton($, els, b))}
-            {row.own !== undefined && <Button key={`${row.key}-write`} label={row.own.label} onPress={press({ op: 'write', card: row.own.writing ? null : row.key })} />}
-          </Box>
-        )}
-        {row.own !== undefined && row.own.writing && Input !== undefined && (
-          <Input key={`${row.key}-own`} placeholder={row.own.placeholder} onSubmit={(value: string) => keep(submit($, 'need-own', value, row.own?.target), $)} />
-        )}
-      </Box>
-    )
-    // 需要你 folded: 还有 N 件 with the first of them, and 展开; the muted ones apart.
-    case 'fold': return (
-      <Box key={row.key} gap={1} alignItems="center" marginBottom={1} borderStyle="round" borderColor={RULE} paddingX={1}>
-        {row.more !== undefined && <Box flexShrink={0}><Text>{row.more.lead}</Text></Box>}
-        {row.more?.badge !== undefined && drawPic(els, 'fold-pill', pillSvg(row.more.badge))}
-        {row.more !== undefined && <Box flexShrink={1} minWidth={0}><Text wrap="truncate-end">{row.more.first}</Text></Box>}
-        <Box flexGrow={1} />
-        {row.muted !== undefined && <Box flexShrink={0}><Button key={row.muted.key} plain dimColor label={row.muted.label} onPress={press(row.muted.action)} /></Box>}
-        {row.more !== undefined && <Box flexShrink={0}><Button key={row.more.key} plain label={row.more.open} onPress={press(row.more.action)} /></Box>}
-      </Box>
-    )
-    // A chat: its avatar's colour at the edge, its picture, its name with whose it is, when; its last line and the unread.
+      )
+    }
+    // A chat (WeChat's row, S11): its picture with the avatar in it at the corner and the unread (a grey dot when muted);
+    // its name and when; the red words while it needs the person, then its last line; a muted chat's mark at the right.
     // The name and the last line are each a plain Button labelled with them: they open it.
     case 'chat': {
       const r = row.row
-      const second = r.last !== undefined ? truncate(`${r.last.who}：${r.last.text}`, Math.max(8, columns - 16)) : ''
+      const room = Math.max(8, columns - 16 - (row.flag !== undefined ? cellWidth(row.flag) + 1 : 0) - (row.muted === true ? 3 : 0))
+      const second = r.last !== undefined ? truncate(`${r.last.who}：${r.last.text}`, room) : ''
       return (
-        <Box key={row.key} alignItems="center" hover={{ backgroundColor: SHADE }}>
-          {drawPic(els, `${row.key}-edge`, barSvg(r.as.color, CHAT_ROW_PX, r.as.name))}
-          <Box flexGrow={1} minWidth={0} gap={1} alignItems="center" paddingX={1}>
-            {drawPic(els, `${row.key}-pic`, chatPicSvg(r.kind, r.name))}
-            <Box flexDirection="column" flexGrow={1} minWidth={0}>
-              <Box gap={1} alignItems="center">
-                <Box flexShrink={1} minWidth={0}><Button key={`${row.key}-go`} plain label={truncate(r.name, Math.max(8, columns - 30))} onPress={press(row.action)} /></Box>
-                {drawPic(els, `${row.key}-pill`, pillSvg(r.as, { small: true }))}
-                <Box flexGrow={1} />
-                <Text color={HEADING}>{r.time}</Text>
-              </Box>
-              <Box gap={1} alignItems="center">
-                <Box flexGrow={1} flexShrink={1} minWidth={0}>{second !== '' && <Button key={`${row.key}-last`} plain dimColor label={second} onPress={press(row.action)} />}</Box>
-                {r.unread > 0 && drawPic(els, `${row.key}-unread`, countSvg(r.unread))}
-              </Box>
+        <Box key={row.key} gap={1} alignItems="center" paddingX={1} hover={{ backgroundColor: SHADE }}>
+          {drawPic(els, `${row.key}-pic`, chatRowPicSvg(r.kind, r.name, r.as, r.unread, row.muted === true))}
+          <Box flexDirection="column" flexGrow={1} minWidth={0}>
+            <Box gap={1} alignItems="center">
+              <Box flexShrink={1} minWidth={0}><Button key={`${row.key}-go`} plain label={truncate(r.name, Math.max(8, columns - 24))} onPress={press(row.action)} /></Box>
+              <Box flexGrow={1} />
+              <Text color={HEADING}>{r.time}</Text>
+            </Box>
+            <Box gap={1} alignItems="center">
+              {row.flag !== undefined && drawPic(els, `${row.key}-flag`, flagSvg(row.flag))}
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>{second !== '' && <Button key={`${row.key}-last`} plain dimColor label={second} onPress={press(row.action)} />}</Box>
+              {row.muted === true && drawPic(els, `${row.key}-muted`, mutedSvg(r.name))}
             </Box>
           </Box>
         </Box>
@@ -1117,8 +1084,9 @@ function drawPictured($: EngineInterface, els: Els, row: GbRow, columns: number,
       <Box key={row.key} flexDirection="column" gap={1} marginTop={1}>
         {row.items.flatMap((it) => [
           <Box key={`${it.key}-row`} gap={1} alignItems="center">
-            <Box position="relative" flexShrink={1} minWidth={0}>
+            <Box position="relative" flexShrink={1} minWidth={0} flexDirection="column">
               <Text {...(it.danger === true ? { color: 'error' } : {})}>{it.label}</Text>
+              {it.hint !== undefined && <Text color={HEADING} wrap="wrap">{it.hint}</Text>}
               {it.on === undefined && (
                 <Box position="absolute" top={0} left={0} right={0} bottom={0}>
                   <Button key={it.key} plain label={blankOf(textWidth(it.label, 13) + 13)} onPress={press(it.action)} />
@@ -1197,9 +1165,9 @@ function drawPictured($: EngineInterface, els: Els, row: GbRow, columns: number,
         <Box gap={1}>{row.items.map((b) => pressButton($, els, b))}</Box>
       </Box>
     )
-    // A call handed to the agent, while it answers: its card in the chat, folded to one grey line (agent 在回…).
+    // A call handed to the agent, while it answers: the bar, one grey line (agent 在回…).
     case 'pending': return (
-      <Box key={row.key} marginY={1} {...OWN_CARD} paddingX={1}>
+      <Box key={row.key} marginTop={1} {...BAR} paddingX={1} paddingY={1}>
         <Text color={HEADING}>{row.text}</Text>
       </Box>
     )
@@ -1209,37 +1177,31 @@ function drawPictured($: EngineInterface, els: Els, row: GbRow, columns: number,
         <Text color={HEADING} wrap="wrap">{`${row.time !== undefined ? '● ' : ''}${row.text}${row.time !== undefined ? ` · ${row.time}` : ''}`}</Text>
       </Box>
     )
-    // A line said: the speaker's picture (the person's own, their avatar's colour), the name with 分身 where an agent said it and
-    // the time, then the words with the person's avatar's mention set off.
+    // A line said, as a bubble (S13): another's at the left under their name in a group, the person's own at the right in
+    // their avatar's colour, each beside the speaker's picture; 分身 under it where an agent said it; the person's
+    // avatar's mention set off. A gap keeps a bubble off the far side, as WeChat's.
     case 'message': {
-      const i = row.item
+      const i = row.item, right = row.side === 'right'
       return (
-        <Box key={row.key} gap={1} marginTop={1}>
+        <Box key={row.key} gap={1} marginTop={1} flexDirection={right ? 'row-reverse' : 'row'}>
           {drawPic(els, `${row.key}-pic`, personSvg(i.who, row.badge?.color))}
-          <Box flexDirection="column" flexGrow={1} minWidth={0}>
-            <Box gap={1} alignItems="center">
-              <Text bold>{i.who}</Text>
-              {row.tag !== undefined && drawPic(els, `${row.key}-tag`, tagSvg(row.tag))}
-              <Text color={HEADING}>{`· ${row.time}`}</Text>
-            </Box>
-            {drawSpans(els, `${row.key}-words`, row.body)}
+          <Box flexDirection="column" flexShrink={1} minWidth={0} alignItems={right ? 'flex-end' : 'flex-start'}>
+            {row.name !== undefined && <Text color={HEADING}>{row.name}</Text>}
+            <Box flexShrink={1} minWidth={0} paddingX={1} {...(right ? MINE : THEIRS)}>{drawSpans(els, `${row.key}-words`, row.body)}</Box>
+            {row.tag !== undefined && drawPic(els, `${row.key}-tag`, tagSvg(row.tag))}
           </Box>
+          <Box flexShrink={0} width={6} />
         </Box>
       )
     }
-    // The chat's box: a rule, 「以 <pill> 说」, the field (Enter sends, and says so beside it).
+    // The chat's box (S13): a rule, then the field the width of the pane, 「以 John 说…」 in it; Enter sends, and 发送 says so beside it.
     case 'input': {
       if (row.compose === undefined || Input === undefined) return undefined
       const c = row.compose
       return (
         <Box key={`${row.key}-box`} flexDirection="column" marginTop={1}>
           {rule(els, `${row.key}-rule`)}
-          <Box gap={1} alignItems="center" marginTop={1}>
-            {c.lead[0] !== '' && <Text color={HEADING}>{c.lead[0]}</Text>}
-            {drawPic(els, `${row.key}-as`, pillSvg(c.as))}
-            {c.lead[1] !== '' && <Text color={HEADING}>{c.lead[1]}</Text>}
-          </Box>
-          <Box width="100%">
+          <Box width="100%" marginTop={1}>
             <Input key={row.key} placeholder={c.placeholder} submitLabel={c.submitLabel} onSubmit={(value: string) => keep(submit($, row.field, value, row.target), $)} />
           </Box>
         </Box>
@@ -1266,52 +1228,40 @@ function drawRow($: EngineInterface, els: Els, row: GbRow, columns: number, vers
           : <Text bold>{row.title}</Text>}
         {row.open === undefined && row.sub !== undefined && <Box flexShrink={1} minWidth={0}><Text dimColor wrap="truncate-end">{row.sub}</Text></Box>}
         <Box flexGrow={1} />
-        {row.actions.map((b) => <Button key={b.key} plain label={b.label} onPress={press(b.action)} />)}
-      </Box>
-    )
-    case 'chips': return (
-      <Box key={row.key} gap={1} flexWrap="wrap">
-        {row.items.map((c) => (
-          <Button key={c.key} plain onPress={press(c.action)}>
-            <Text>{c.badge !== undefined && <Text color={c.badge.color} bold>{`${c.badge.initial} `}</Text>}<Text {...(c.on ? { bold: true, underline: true } : { dimColor: true })}>{c.label}</Text></Text>
-          </Button>
-        ))}
-        {(row.actions ?? []).length > 0 && <Box flexGrow={1} />}
-        {(row.actions ?? []).map((b) => <Button key={b.key} plain label={b.count !== undefined ? `${b.label} ${b.count}` : b.label} onPress={press(b.action)} />)}
-      </Box>
-    )
-    case 'fold': return (
-      <Box key={row.key} gap={2} flexWrap="wrap">
-        {[row.more, row.muted].filter((b): b is GbPress => b !== undefined).map((b) => <Button key={b.key} label={b.label} onPress={press(b.action)} />)}
+        {row.actions.map((b) => <Button key={b.key} plain label={b.count !== undefined ? `${b.label} ${b.count}` : b.label} onPress={press(b.action)} />)}
       </Box>
     )
     case 'chat': {
-      // A Button holds words only: the name line is one, the last line another, the time and the unread beside them.
+      // A Button holds words only: the name line is one, the last line another; the time, the red words while the chat
+      // needs the person, the unread (a dot when muted) beside them.
       const r = row.row
-      const second = r.last !== undefined ? truncate(`${r.last.who}：${r.last.text}`, Math.max(8, columns - 8)) : ''
+      const room = Math.max(8, columns - 8 - (row.flag !== undefined ? cellWidth(row.flag) + 1 : 0))
+      const second = r.last !== undefined ? truncate(`${r.last.who}：${r.last.text}`, room) : ''
       return (
         <Box key={row.key} flexDirection="column" paddingX={1}>
           <Box gap={1}>
             <Button key={`${row.key}-go`} plain onPress={press(row.action)}>
-              <Text><Text color={r.as.color} bold>{`${r.as.initial} `}</Text><Text bold>{truncate(r.name, Math.max(8, columns - 24))}</Text><Text dimColor>{` · ${r.as.name}`}</Text></Text>
+              <Text><Text color={r.as.color} bold>{`${r.as.initial} `}</Text><Text bold>{truncate(r.name, Math.max(8, columns - 24))}</Text></Text>
             </Button>
             <Box flexGrow={1} />
             <Text dimColor>{r.time}</Text>
           </Box>
-          {second !== '' && (
+          {(second !== '' || row.flag !== undefined) && (
             <Box gap={1}>
-              <Box flexShrink={1} minWidth={0}><Button key={`${row.key}-last`} plain dimColor label={second} onPress={press(row.action)} /></Box>
+              {row.flag !== undefined && <Text color="error">{row.flag}</Text>}
+              <Box flexShrink={1} minWidth={0}>{second !== '' && <Button key={`${row.key}-last`} plain dimColor label={second} onPress={press(row.action)} />}</Box>
               <Box flexGrow={1} />
-              {r.unread > 0 && <Text color={r.as.color} bold>{String(r.unread)}</Text>}
+              {r.unread > 0 && (row.muted === true ? <Text dimColor>●</Text> : <Text color="error" bold>{String(r.unread)}</Text>)}
             </Box>
           )}
         </Box>
       )
     }
+    // A line said: another's at the left under their name, the person's own at the right (S13); 分身 where an agent said it.
     case 'message': {
-      const i = row.item
+      const i = row.item, right = row.side === 'right'
       return (
-        <Box key={row.key} flexDirection="column" paddingX={1}>
+        <Box key={row.key} flexDirection="column" paddingX={1} alignItems={right ? 'flex-end' : 'flex-start'}>
           <Box gap={1}>
             {row.badge !== undefined && badge(row.badge, `${row.key}-badge`)}
             <Text bold>{i.who}</Text>
@@ -1419,7 +1369,10 @@ function drawRow($: EngineInterface, els: Els, row: GbRow, columns: number, vers
     )
     case 'menu': return (
       <Box key={row.key} flexDirection="column">
-        {row.items.map((it) => <Button key={it.key} plain {...(it.danger === true ? { color: 'error' } : {})} label={it.on !== undefined ? `${it.on ? '☑' : '☐'} ${it.label}` : it.go === true ? `${it.label} ›` : it.label} onPress={press(it.action)} />)}
+        {row.items.flatMap((it) => [
+          <Button key={it.key} plain {...(it.danger === true ? { color: 'error' } : {})} label={it.on !== undefined ? `${it.on ? '☑' : '☐'} ${it.label}` : it.go === true ? `${it.label} ›` : it.label} onPress={press(it.action)} />,
+          ...(it.hint !== undefined ? [<Text key={`${it.key}-hint`} dimColor wrap="wrap">{`  ${it.hint}`}</Text>] : []),
+        ])}
       </Box>
     )
     // The terminal copies: the words, and a press that copies them; no QR code (it draws no pictures).
@@ -1452,13 +1405,23 @@ function drawRow($: EngineInterface, els: Els, row: GbRow, columns: number, vers
         <Box><Button key={`${row.key}-button`} label={row.label} onPress={press({ op: 'copy', text: row.text })} /></Box>
       </Box>
     )
-    case 'need': return (
+    // The bar of what needs the person in a chat: a call or a task, its words and its press; a card, whose and what kind
+    // with 还有 N 件, what it is, what it checked, the words it would send, the switches, the answers, its own words.
+    case 'need': if (row.line === true) return (
+      <Box key={row.key} gap={1} borderStyle="round" borderColor={row.tone === 'error' ? 'error' : 'warning'} paddingX={1}>
+        <Box flexShrink={1} minWidth={0}><Text wrap="wrap" {...toneOf(row.tone)}>{row.body.map((line) => line.map((x) => x.text).join('')).join('\n')}</Text></Box>
+        <Box flexGrow={1} />
+        {row.more !== undefined && <Text dimColor>{row.more}</Text>}
+        {row.options.map((b) => <Button key={b.key} label={b.label} onPress={press(b.action)} />)}
+      </Box>
+    )
+    return (
       <Box key={row.key} flexDirection="column" borderStyle="round" borderColor={row.tone === 'error' ? 'error' : 'warning'} paddingX={1}>
         <Box gap={1}>
           {row.badge !== undefined && badge(row.badge, `${row.key}-badge`)}
           <Box flexShrink={1} minWidth={0}><Text dimColor wrap="truncate-end">{row.head}</Text></Box>
           <Box flexGrow={1} />
-          <Text dimColor>{row.expires}</Text>
+          {row.more !== undefined && <Text dimColor>{row.more}</Text>}
         </Box>
         <Text wrap="wrap" {...toneOf(row.tone)}>{row.summary}</Text>
         {row.checked !== undefined && <Text dimColor wrap="wrap">{row.checked}</Text>}
@@ -1617,17 +1580,17 @@ export const register: Register = (on) => {
     const els = elementsOf($, e)
     const { Box, Text, Svg } = els
     const columns: number = e.props.bodyColumns
-    const [view, chat, link, page, filter, address, groupAs, problem, setup, version, now, needsOpen, mutedOpen, allow, adding, accountNow, writing, editing, plusOpen, asOpen, groupAvatarNow, joiningNow, rotating, inviteBack, node] = await Promise.all([
-      readView($), read($, chatAtom), read($, linkAtom), read($, pageAtom), read($, filterAtom), read($, addressAtom), read($, groupAsAtom), read($, problemAtom), read($, setupAtom), read($, versionAtom), $.clock.now(),
-      read($, needsOpenAtom), read($, mutedOpenAtom), read($, allowAtom), read($, addingAtom), read($, accountAtom), read($, writingAtom), read($, editingAtom), read($, plusOpenAtom), read($, asOpenAtom), read($, groupAvatarAtom), read($, joiningAtom),
+    const [view, chat, link, page, address, groupAs, problem, setup, version, now, allow, adding, accountNow, writing, editing, plusOpen, asOpen, groupAvatarNow, joiningNow, rotating, inviteBack, node] = await Promise.all([
+      readView($), read($, chatAtom), read($, linkAtom), read($, pageAtom), read($, addressAtom), read($, groupAsAtom), read($, problemAtom), read($, setupAtom), read($, versionAtom), $.clock.now(),
+      read($, allowAtom), read($, addingAtom), read($, accountAtom), read($, writingAtom), read($, editingAtom), read($, plusOpenAtom), read($, asOpenAtom), read($, groupAvatarAtom), read($, joiningAtom),
       read($, rotatingAtom), read($, inviteBackAtom), read($, nodeAtom),
     ])
     const [langOpen, repoOpen, addOpen, loggingOut, allows, leaving, heir] = await Promise.all([read($, langOpenAtom), read($, repoOpenAtom), read($, addOpenAtom), read($, loggingOutAtom), read($, allowsAtom), read($, leavingAtom), read($, heirAtom)])
     const rounds = await readRounds($)
     const session = await $.session.id().catch(() => '')
     const state: PaneState = {
-      page: (PAGES as readonly string[]).includes(page) ? page as GbPage : 'inbox', filter, chat: chat as unknown as GbChat | null, link: link as unknown as GbLink | null, address, groupAs, session, problem: problem ?? setup, now: new Date(now).toISOString(),
-      needsOpen, mutedOpen, allow: (allow as unknown as Record<string, { person?: boolean; venue?: boolean }>) ?? {}, adding, account: accountNow as unknown as GbAccount | null, writing, editing, plusOpen, asOpen, groupAvatar: groupAvatarNow, joining: joiningNow as unknown as JoinView | null,
+      page: (PAGES as readonly string[]).includes(page) ? page as GbPage : 'inbox', chat: chat as unknown as GbChat | null, link: link as unknown as GbLink | null, address, groupAs, session, problem: problem ?? setup, now: new Date(now).toISOString(),
+      allow: (allow as unknown as Record<string, { person?: boolean; venue?: boolean }>) ?? {}, adding, account: accountNow as unknown as GbAccount | null, writing, editing, plusOpen, asOpen, groupAvatar: groupAvatarNow, joining: joiningNow as unknown as JoinView | null,
       // The chats where this session's agent answers a call handed to it, while it does.
       replying: Object.values(rounds).map((r) => `${r.owner}/${r.id}`),
       rotating, inviteBack: inviteBack === 'info' ? 'info' : 'chat', langOpen, repoOpen, addOpen, loggingOut, version, allows: (allows as unknown as Record<string, GbAllow[]> | null) ?? {}, leaving, heir,

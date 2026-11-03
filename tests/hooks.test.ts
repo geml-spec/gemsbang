@@ -23,6 +23,10 @@ const ROW2 = { owner: 'a-00000000c1', id: 'g-000000000b', kind: 'group', name: '
 const VIEW = (extra: Record<string, unknown> = {}) => ({ relay: RELAY, loggedIn: true, lang: 'zh', person: 'p-0000000001', avatars: [JOHN, LILY], rows: [ROW2, ROW], unread: 2, needs: [] as unknown[], muted: { avatars: [], venues: [] }, notes: [], bodies: {}, synced: '2026-11-01T12:00:00Z', ...extra })
 /** A 需要你 card as the client lists it (gemsbang/ops.ts GbNeed). */
 const NEED = (id: string, extra: Record<string, unknown> = {}) => ({ id, avatar: LILY.id, kind: 'promise', summary: '王老师问周五能不能来当志愿者', checked: '你周五下午是空的', draft: '周五我可以去，几点集合？', options: [{ label: '能去', text: '周五我可以去，几点集合？' }, { label: '去不了', text: '这周五去不了' }], expires: '1970-01-01T11:00:00Z', at: '2026-11-01T11:00:00Z', state: 'open', avatarName: 'Lily 爸爸', group: '三年二班家长', badge: LILY, muted: false, venue: { owner: 'a-00000000c1', id: 'g-000000000b' }, ...extra })
+/** 三年二班家长 (ROW2), where the cards are. */
+const CHAT2 = { owner: 'a-00000000c1', id: 'g-000000000b', kind: 'group', name: '三年二班家长', count: 12, as: LILY, earlier: 0, isOwner: false, zoneMinutes: 480, items: [
+  { kind: 'message', id: 'm-7', avatar: 'a-00000000c2', who: '王老师', text: '周五春游能来当志愿者吗？', at: '2026-11-01T11:00:00Z', mark: false, mine: false },
+] }
 const CHAT = { owner: JOHN.id, id: 'g-000000000a', kind: 'group', name: '设置页改版', count: 4, as: JOHN, earlier: 0, isOwner: true, zoneMinutes: 480, items: [
   { kind: 'joined', id: 'member-2', avatar: 'a-00000000b1', who: '李四', at: '2026-11-01T06:01:00Z' },
   { kind: 'message', id: 'm-1', avatar: 'a-00000000b1', who: '李四', text: 'v4 稿子在这', at: '2026-11-01T06:02:00Z', mark: true, mine: false },
@@ -252,29 +256,28 @@ test('the box (architecture §5.2, §6.2): no poll — the module waits on the b
   expect(calls(w, 'wait').length > stopped, 'signed in: waiting again').toBe(true)
 })
 
-test('the total inbox (spec §7.1): a bar with a filter per avatar, 我 and 建群; every chat with its avatar\'s initial, its last line, its time and its unread; a chat opens, its lines show `身份` where an agent said it, and the box says as the avatar there', async ($, on) => {
+test('the total inbox (spec §7.1, S11, direction ①): WeChat\'s — the name with the unread, 我 and ＋; every chat with its avatar\'s initial, its time, its last line and its unread, no filters; a chat opens, its lines show `身份` where an agent said it, a stamp where the talk picks up, and the box says as the avatar there', async ($, on) => {
   const w = world(on)
   w.answers['open'] = () => ({ ok: true, chat: CHAT, view: w.view })
   w.answers['say'] = (args) => ({ ok: true, chat: { ...CHAT, items: [...CHAT.items, { kind: 'message', id: 'p-1', avatar: JOHN.id, who: 'John', text: args['text'], at: '2026-11-01T06:09:00Z', mark: false, mine: true }] }, view: w.view })
   await start($, on)
   await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
   const text = await paneText($)
-  expect(text).toContain('Gemsbang 2 条未读 全部 J John L Lily 爸爸 [我] [＋]')
-  expect(text).toContain('L 三年二班家长 · Lily 爸爸 19:31 [你的身份：我看一下，晚点回。]')
-  expect(text).toContain('J 设置页改版 · John 14:05 [李四：@John Safari 里导出按钮没反应] 2')
-  expect(text, 'with chats, a link is pasted in 建群').not.toContain('贴进群链接')
+  expect(text).toContain('Gemsbang 2 条未读 [我] [＋] L 三年二班家长 19:31 [你的身份：我看一下，晚点回。]')
+  expect(text).toContain('J 设置页改版 14:05 [李四：@John Safari 里导出按钮没反应] 2')
+  expect(text, 'no filters, no 对话 heading').not.toContain('全部')
   const pane = await mountPane($)
   await pane.press({ key: `chat-${JOHN.id}-g-000000000a-go` })
   expect(calls(w, 'open').at(-1)?.args).toEqual({ owner: JOHN.id, id: 'g-000000000a' })
   await pane.unmount()
   const chat = await paneText($)
   expect(chat).toContain('[‹] 设置页改版 4 人 · 你在这里是 John ›')
-  expect(chat).toContain('李四 进群了 李四 身份 14:02 v4 稿子在这 <以 John 说>')
+  expect(chat).toContain('李四 进群了 14:02 李四 身份 14:02 v4 稿子在这 <以 John 说…>')
   const again = await mountPane($)
   await again.input({ key: 'say', text: '我看一下' })
   expect(calls(w, 'say').at(-1)?.args).toEqual({ owner: JOHN.id, id: 'g-000000000a', text: '我看一下' })
   await again.unmount()
-  expect(await paneText($)).toContain('J John 14:09 我看一下')
+  expect(await paneText($)).toContain('14:09 J John 14:09 我看一下')
 })
 
 type DrawnNode = { type: string; key?: string; props?: Record<string, unknown>; children?: (DrawnNode | string)[] }
@@ -286,35 +289,38 @@ const all = (el: DrawnNode | string, type: string, out: DrawnNode[] = []): Drawn
 }
 const mountDesktop = ($: Engine) => $.ui.mount({ plugin: 'gemsbang', surface: 'desktop', component: 'Pane', requestId: 'gemsbang-board', props: PANE })
 
-test('the inbox where the surface takes pictures (GbInbox): the count beside the name; pills, chats\' pictures, unread counts and colour bars as pictures; a chip pressed through the blank button laid over it narrows the inbox; a chat opens from its name; 自己写 opens its field', async ($, on) => {
+test('the inbox where the surface takes pictures (S11, S13–S15, direction ①): WeChat\'s rows — each chat\'s picture with the avatar at its corner and the unread, the red words while it needs the person, first — and no 需要你 card; 我 a blank button over its link; a chat opens from its name; there its lines are bubbles, the card the bar above the box, 自己写 opening its field', async ($, on) => {
   const w = world(on)
   w.view = VIEW({ needs: [NEED('need-1', { draft: '周五我可以去，几点集合？' })] })
-  w.answers['open'] = () => ({ ok: true, chat: CHAT, view: w.view })
+  w.answers['open'] = () => ({ ok: true, chat: CHAT2, view: w.view })
   await start($, on)
   await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
   let pane = await mountDesktop($)
   let drawn = (await pane.drawn()) as unknown as DrawnNode
   const alts = all(drawn, 'Svg').map((x) => String(x.props?.['alt']))
-  expect(alts.slice(0, 2)).toEqual(["Gems'Bang", '1'])
-  for (const a of ['John', 'Lily 爸爸', '三年二班家长', '设置页改版', '2', '我']) expect(alts, a).toContain(a)
-  expect(all(drawn, 'Button').map((b) => String(b.props?.['label'])).filter((l) => /^\u3000+$/.test(l)).length, 'the chips and 我 are blank buttons over their pictures').toBeGreaterThanOrEqual(3)
-  await pane.press({ key: `filter-${LILY.id}` })
-  await pane.unmount()
-  pane = await mountDesktop($)
-  drawn = (await pane.drawn()) as unknown as DrawnNode
+  expect(alts[0]).toBe("Gems'Bang")
+  expect(alts.filter((a) => a.includes(' · '))).toEqual(['三年二班家长 · Lily 爸爸', '设置页改版 · John'])
+  expect(alts, 'the red words before its last line').toContain('[等你定]')
+  expect(alts, 'no avatar pills, no colour bars').not.toContain('John')
+  expect(all(drawn, 'Button').map((b) => String(b.props?.['label'])).filter((l) => /^\u3000+$/.test(l)).length, '我 a blank button over its link').toBe(1)
+  expect(all(drawn, 'Button').some((b) => String(b.key ?? b.props?.['key']).startsWith('need-')), 'no card in the inbox').toBe(false)
   const chats = all(drawn, 'Button').map((b) => String(b.key ?? b.props?.['key'] ?? '')).filter((k) => k.startsWith('chat-') && k.endsWith('-go'))
-  expect(chats).toEqual([`chat-${ROW2.owner}-${ROW2.id}-go`])
-  await pane.press({ key: `need-inbox-${LILY.id}-need-1-write` })
-  await pane.unmount()
-  pane = await mountDesktop($)
-  drawn = (await pane.drawn()) as unknown as DrawnNode
-  expect(all(drawn, 'Input').map((x) => String(x.key ?? x.props?.['key']))).toContain(`need-inbox-${LILY.id}-need-1-own`)
+  expect(chats).toEqual([`chat-${ROW2.owner}-${ROW2.id}-go`, `chat-${ROW.owner}-${ROW.id}-go`])
   await pane.press({ key: `chat-${ROW2.owner}-${ROW2.id}-go` })
   expect(calls(w, 'open').at(-1)?.args).toEqual({ owner: ROW2.owner, id: ROW2.id })
   await pane.unmount()
+  pane = await mountDesktop($)
+  drawn = (await pane.drawn()) as unknown as DrawnNode
+  expect(all(drawn, 'Input').map((x) => String(x.props?.['placeholder'])).at(-1)).toBe('以 Lily 爸爸 说…')
+  await pane.press({ key: `need-${LILY.id}-need-1-write` })
+  await pane.unmount()
+  pane = await mountDesktop($)
+  drawn = (await pane.drawn()) as unknown as DrawnNode
+  expect(all(drawn, 'Input').map((x) => String(x.key ?? x.props?.['key']))).toContain(`need-${LILY.id}-need-1-own`)
+  await pane.unmount()
 })
 
-test('群信息 and 叫人 (P4, P6, Q17): the head opens 群信息 — the members, 叫人 ›, 静音 and the owner\'s 进群要我同意; 叫人 shows the link and the line, each copied on a press in the terminal; ‹ goes back to 群信息; 换一个链接 asks first, 换 swaps it', async ($, on) => {
+test('群信息 and 叫人 (P4, P6, Q17): the head opens 群信息 — the members, 叫人 ›, 静音, 自动回 and the owner\'s 进群要我同意; 叫人 shows the link and the line, each copied on a press in the terminal; ‹ goes back to 群信息; 换一个链接 asks first, 换 swaps it', async ($, on) => {
   const w = world(on)
   let rules = { forward: true, approve: false }
   const chat = () => ({ ...CHAT, members: [{ id: 'a-00000000b1', name: '李四' }, { id: JOHN.id, name: 'John' }], rules })
@@ -328,7 +334,7 @@ test('群信息 and 叫人 (P4, P6, Q17): the head opens 群信息 — the membe
   await go(`chat-${JOHN.id}-g-000000000a-go`)
   await go('head-chat-open')
   let text = await paneText($)
-  expect(text).toContain('设置页改版 · 群信息 [叫人 ›] [☐ 静音] [☐ 进群要我同意] 成员 2 J John 你 · 群主 李 李四')
+  expect(text).toContain('设置页改版 · 群信息 [叫人 ›] [☐ 静音] [☐ 自动回] 有人叫到 John，交给 agent 回，不再问你；五种事照样问你 [☐ 进群要我同意] 成员 2 J John 你 · 群主 李 李四')
   await go('info-approve')
   expect(calls(w, 'link-rules').at(-1)?.args).toEqual({ owner: JOHN.id, id: 'g-000000000a', approve: true })
   expect(await paneText($), 'the chat read again: the switch shows the rule').toContain('[☑ 进群要我同意]')
@@ -528,7 +534,7 @@ test('不用问 in 我 (S23, P8a): the standing ones read through the client whe
   expect(await paneText($)).not.toContain('不用问')
 })
 
-test('底子 (S27, P8a, P9b′): an agent\'s entry waits — 我 on the inbox\'s bar counts it, 我 shows it with 记下 · 不记, 记下 goes through the client; 改 makes the page 底子 alone and an entry added is given to the avatar this session plays; im_remember goes through the client as this session', async ($, on) => {
+test('底子 (S27, P8a, P9b′): an agent\'s entry waits — 我 on the inbox\'s head counts it, 我 shows it with 记下 · 不记, 记下 goes through the client; 改 makes the page 底子 alone and an entry added is given to the avatar this session plays; im_remember goes through the client as this session', async ($, on) => {
   const w = world(on)
   const NUT = { id: 'base-3', label: '家人', text: 'Lily 对花生过敏', for: [LILY.id], state: 'pending', by: LILY.id, who: '王老师', at: 't' }
   w.view = VIEW({ base: [NUT], bodies: { [SESSION]: LILY.id } })
@@ -552,8 +558,9 @@ test('底子 (S27, P8a, P9b′): an agent\'s entry waits — 我 on the inbox\'s
   expect(calls(w, 'tool-remember').at(-1)?.args).toEqual({ label: '家人', text: 'Lily 对花生过敏', who: '王老师', session: SESSION })
 })
 
-test('需要你 (spec §7.3): the line above the prompt names the first card and offers its options, a press answers it; the inbox leads with the cards, the words they would send and 自己写; im_ask goes through the client as this session', async ($, on) => {
+test('需要你 (spec §7.3, S15, direction ①): the line above the prompt names the first card and offers its options, a press answers it; in the inbox the chat it is about comes first with [等你定]; in that chat the bar above the box, the words it would send and 自己写, 还有 1 件; im_ask goes through the client as this session', async ($, on) => {
   const w = world(on)
+  w.answers['open'] = () => ({ ok: true, chat: CHAT2, view: w.view })
   w.view = VIEW({ needs: [NEED('need-1'), NEED('need-2', { kind: 'pay', summary: '春游车费 30 元', options: [{ label: '付', text: '车费我转了' }, { label: '不付' }] })] })
   w.answers['answer'] = () => { w.view = VIEW({ needs: [] }); return { ok: true, view: w.view } }
   w.answers['tool-ask'] = () => ({ ok: true, text: '已经问了本人（花钱）', sent: 'need-3' })
@@ -561,9 +568,13 @@ test('需要你 (spec §7.3): the line above the prompt names the first card and
   expect(await bandText($)).toBe('@ 答应事情 · 王老师问周五能不能来当志愿者 [能去] [去不了] 还有 1 件 [打开]')
   const band = await $.ui.mount({ plugin: 'gemsbang', surface: 'terminal', component: 'AbovePrompt', props: BAND })
   await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  expect(await paneText($)).toContain('L 三年二班家长 19:31 [等你定] [你的身份：我看一下，晚点回。]')
+  const inbox = await mountPane($)
+  await inbox.press({ key: `chat-${ROW2.owner}-${ROW2.id}-go` })
+  await inbox.unmount()
   const text = await paneText($)
-  expect(text).toContain('需要你 2 L Lily 爸爸 · 答应事情 · 来自「三年二班家长」 11 小时后过期')
-  expect(text).toContain('王老师问周五能不能来当志愿者 它查了什么：你周五下午是空的 将要发出：「周五我可以去，几点集合？」 [能去] [去不了] <自己写一句，回车发出>')
+  expect(text).toContain('L Lily 爸爸 · 答应事情 · 11 小时后过期 还有 1 件')
+  expect(text).toContain('王老师问周五能不能来当志愿者 它查了什么：你周五下午是空的 将要发出：「周五我可以去，几点集合？」 [能去] [去不了] <自己写一句，回车发出> <以 Lily 爸爸 说…>')
   await band.press({ key: 'band-answer-1' })
   await band.unmount()
   expect(calls(w, 'answer').at(-1)?.args).toEqual({ avatar: LILY.id, need: 'need-1', choice: 1 })
@@ -606,12 +617,13 @@ test('任务 (spec §7.4, §5 rule 8; once called 借电脑): a job waiting for 
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'b4', command: 'git push origin main', agentId: 'agent-7' } as never)).deny, 'its job over, the agent is no longer held').toBeUndefined()
 })
 
-test('被叫到 (architecture §6.3): a call shows in the pane and on the line with its one step, 交给 agent 回 (and 以后这个群自动回 in the pane); 交给 agent 回 starts an agent in the background with the round\'s prompt, which may use no tool, and its answer goes back as the avatar; a chat set to answer on its own is answered, after the wait that brings it, by the session that speaks for the avatar', async ($, on) => {
+test('被叫到 (architecture §6.3, S14): a call shows in the pane — its chat first with [有人@我], the bar in it — and on the line with its one step, 交给 agent 回; 交给 agent 回 starts an agent in the background with the round\'s prompt, which may use no tool, and its answer goes back as the avatar; a chat set to answer on its own is answered, after the wait that brings it, by the session that speaks for the avatar', async ($, on) => {
   const w = world(on)
   const CALL = { avatar: JOHN.id, owner: JOHN.id, id: 'g-000000000a', kind: 'group', group: '设置页改版', lines: [{ id: 'm-4', who: '李四', text: '@John 周五前能给稿子反馈吗？', reason: 'mention', at: '2026-11-01T06:11:00Z' }], last: 'm-4', at: '2026-11-01T06:11:00Z', auto: false, badge: JOHN, muted: false }
   const PROMPT = '你是「John」，在「设置页改版」里。你是一个人在这个场合里的分身：他让你回这一轮，小事自己办。\n\n最近的消息：\n李四：@John 周五前能给稿子反馈吗？\n'
   const ROUND = { avatar: JOHN.id, owner: JOHN.id, id: 'g-000000000a', group: '设置页改版', replyTo: 'm-4', hops: 0, prompt: PROMPT, description: '回「设置页改版」' }
   w.view = VIEW({ calls: [CALL] })
+  w.answers['open'] = () => ({ ok: true, chat: CHAT, view: w.view })
   w.answers['wake'] = () => { w.view = VIEW(); return { ok: true, view: w.view, round: ROUND } }
   const spawned: { prompt: string; description: string }[] = []
   on('agent.spawn', ($, e) => { spawned.push({ prompt: e.prompt, description: e.description }); return { agentId: `agent-${spawned.length}`, model: 'm' } })
@@ -621,9 +633,11 @@ test('被叫到 (architecture §6.3): a call shows in the pane and on the line w
   const clock = await start($, on)
   expect(await bandText($)).toContain('被叫到 · 设置页改版 · 李四：@John 周五前能给稿子反馈吗？ [交给 agent 回]')
   await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
-  const text = await paneText($)
-  expect(text).toContain('需要你 1 J John · 被叫到 · 来自「设置页改版」')
-  expect(text).toContain('李四：@John 周五前能给稿子反馈吗？ [交给 agent 回] [以后这个群自动回]')
+  expect(await paneText($)).toContain('[＋] J 设置页改版 14:05 [有人@我] [李四：@John Safari 里导出按钮没反应] 2 L 三年二班家长')
+  const inbox = await mountPane($)
+  await inbox.press({ key: `chat-${JOHN.id}-g-000000000a-go` })
+  await inbox.unmount()
+  expect(await paneText($)).toContain('v4 稿子在这 李四 @ 了你 [交给 agent 回] <以 John 说…>')
   const pane = await mountPane($)
   await pane.press({ key: `wake-reply-${JOHN.id}-g-000000000a` })
   await pane.unmount()
@@ -649,6 +663,7 @@ test('a round that fails (B3): no agent to run it, an error, stopped, or its wor
   const CALL = { avatar: JOHN.id, owner: JOHN.id, id: 'g-000000000a', kind: 'group', group: '设置页改版', lines: [{ id: 'm-4', who: '李四', text: '@John 周五前能给稿子反馈吗？', reason: 'mention', at: '2026-11-01T06:11:00Z' }], last: 'm-4', at: '2026-11-01T06:11:00Z', auto: false, badge: JOHN, muted: false }
   const ROUND = { avatar: JOHN.id, owner: JOHN.id, id: 'g-000000000a', group: '设置页改版', replyTo: 'm-4', hops: 0, since: 'm-2', prompt: '你是「John」，在「设置页改版」里。\n', description: '回「设置页改版」' }
   w.view = VIEW({ calls: [CALL] })
+  w.answers['open'] = () => ({ ok: true, chat: CHAT, view: w.view })
   w.answers['wake'] = () => ({ ok: true, view: w.view, round: ROUND })
   let spawns = 0
   on('agent.spawn', () => { spawns += 1; return spawns === 1 ? { deny: 'no agents here' } : { agentId: `agent-${spawns}`, model: 'm' } })
@@ -656,6 +671,9 @@ test('a round that fails (B3): no agent to run it, an error, stopped, or its wor
   on('turn.complete', () => ({ text: '' }))
   await start($, on)
   await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  const inbox = await mountPane($)
+  await inbox.press({ key: `chat-${JOHN.id}-g-000000000a-go` })
+  await inbox.unmount()
   const handOver = async () => { const pane = await mountPane($); await pane.press({ key: `wake-reply-${JOHN.id}-g-000000000a` }); await pane.unmount() }
   const failed = () => calls(w, 'round-failed').map((r) => r.args['why'])
   await handOver()
