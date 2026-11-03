@@ -2,12 +2,13 @@
 // own. It asks the bundled CLI
 // (dist/gemsbang.mjs: one JSON request on stdin, one JSON answer on stdout),
 // every request one call of the client (src/gemsbang/ops.ts), which keeps
-// its home in ~/.gemsbang. What the model gets: four tools — im_join, which follows only a gemsbang invitation the
+// its home in ~/.gemsbang. What the model gets: five tools — im_join, which follows only a gemsbang invitation the
 // person pasted, and asks the person in gemsbang's own dialog (their email
 // and code too, never through the model); im_say, im_ask
-// (a 需要你 card, one of five kinds, with the words it would send) and
-// im_read, as the avatar this session speaks for. What the person sees: the
-// pane — 需要你 and the total inbox, a chat, 叫人, 我的分身, the settings, the
+// (a 需要你 card, one of five kinds, with the words it would send), im_read
+// (with the 底子 entries given to the avatar) and im_remember (an entry
+// waiting for the person's yes), as the avatar this session speaks for. What the person sees: the
+// pane — 需要你 and the total inbox, a chat, 群信息, 叫人, 我 with its 底子, the
 // account, the sign-in — and a line above the prompt with the first thing that needs them,
 // its options and how many more, or that gemsbang cannot work or nobody is
 // logged in. 被叫到 (architecture §6.3): when someone calls one of the
@@ -30,9 +31,13 @@ import { atom, read, update } from 'claude-code'
 import type { GemsbangJson } from '../types'
 import { cellWidth, truncate } from '../dist/hosts/claude-code/cells.js'
 import { fitToBudget } from '../dist/hosts/claude-code/budget.js'
-import { GEMSBANG_BLUE, GEMSBANG_MARK_CHAR, GEMSBANG_MARK_SVG } from '../dist/hosts/claude-code/gemsbang.js'
-import { fieldAction, gbBand, GB_PANE_ID, paneRows } from '../dist/hosts/claude-code/gb-panel.js'
-import type { GbAction, GbField, GbPage, GbRow, PaneState, Tone } from '../dist/hosts/claude-code/gb-panel.js'
+import { GEMSBANG_BLUE, GEMSBANG_MARK_CHAR } from '../dist/hosts/claude-code/gemsbang.js'
+import { LOCKUP, MARK as BRAND_MARK } from '../dist/hosts/claude-code/gb-brand.js'
+import { fieldAction, gbBand, GB_PANE_ID, groupAsOf, paneRows } from '../dist/hosts/claude-code/gb-panel.js'
+import type { GbAction, GbField, GbPage, GbPress, GbRow, JoinView, PaneState, Span, Tint, Tone } from '../dist/hosts/claude-code/gb-panel.js'
+import { barSvg, chatPicSvg, chipSvg, countSvg, dangerSvg, linkSvg, peopleColor, personSvg, pillSvg, qrSvg, RULE_SVG, switchSvg, tagSvg, textWidth } from '../dist/hosts/claude-code/gb-svg.js'
+import { qrModules } from '../dist/core/qr.js'
+import type { Pic } from '../dist/hosts/claude-code/gb-svg.js'
 import { BRIDGE_TIMEOUT_MS, decodeResponse, encodeRequest, SLOW_TIMEOUT_MS, unreadableText } from '../dist/hosts/claude-code/protocol.js'
 import type { BridgeRequest, BridgeResponse } from '../dist/hosts/claude-code/protocol.js'
 import { nodeMajor, toolArgs } from '../dist/hosts/claude-code/readers.js'
@@ -41,7 +46,7 @@ import type { Fact } from '../dist/core/avatar/borrow.js'
 import { invitesIn, parseInvite } from '../dist/core/avatar/invite.js'
 import { say } from '../dist/core/avatar/words.js'
 import type { Lang } from '../dist/core/avatar/words.js'
-import type { GbAccount, GbChat, GbLink, GbResult, GbRound, GbView } from '../dist/gemsbang/ops.js'
+import type { GbAccount, GbAllow, GbChat, GbLink, GbResult, GbRound, GbView } from '../dist/gemsbang/ops.js'
 
 const problemAtom = atom({ plugin: 'gemsbang', key: 'problem' } as const, null as string | null)
 const nodeAtom = atom({ plugin: 'gemsbang', key: 'node' } as const, null as string | null)
@@ -57,17 +62,38 @@ const filterAtom = atom({ plugin: 'gemsbang', key: 'filter' } as const, null as 
 const addressAtom = atom({ plugin: 'gemsbang', key: 'address' } as const, null as string | null)
 const addingAtom = atom({ plugin: 'gemsbang', key: 'adding' } as const, null as string | null)
 const accountAtom = atom({ plugin: 'gemsbang', key: 'account' } as const, null as GemsbangJson)
-const groupAsAtom = atom({ plugin: 'gemsbang', key: 'groupAs' } as const, 'new' as string)
+/** The avatar a new group is made as: one picked, 'new', or '' for the one the person last spoke as (Q1). */
+const groupAsAtom = atom({ plugin: 'gemsbang', key: 'groupAs' } as const, '' as string)
 const groupAvatarAtom = atom({ plugin: 'gemsbang', key: 'groupAvatar' } as const, null as string | null)
 const pastedAtom = atom({ plugin: 'gemsbang', key: 'pasted' } as const, [] as GemsbangJson)
 const needsOpenAtom = atom({ plugin: 'gemsbang', key: 'needsOpen' } as const, false as boolean)
 const mutedOpenAtom = atom({ plugin: 'gemsbang', key: 'mutedOpen' } as const, false as boolean)
+const writingAtom = atom({ plugin: 'gemsbang', key: 'writing' } as const, null as string | null)
+/** The inbox's ＋ open (P1b); 建群's list of avatars open (P2c); 用链接进群 once the link was read (P3). */
+const plusOpenAtom = atom({ plugin: 'gemsbang', key: 'plusOpen' } as const, false as boolean)
+const asOpenAtom = atom({ plugin: 'gemsbang', key: 'asOpen' } as const, false as boolean)
+const joiningAtom = atom({ plugin: 'gemsbang', key: 'joining' } as const, null as GemsbangJson)
+/** The card of 我 whose 改 is open: one at a time. */
+const editingAtom = atom({ plugin: 'gemsbang', key: 'editing' } as const, null as string | null)
+/** 叫人's 换一个链接 asked (P4c); the page 叫人 was opened from (群信息, or an empty group's chat). */
+const rotatingAtom = atom({ plugin: 'gemsbang', key: 'rotating' } as const, false as boolean)
+const inviteBackAtom = atom({ plugin: 'gemsbang', key: 'inviteBack' } as const, 'chat' as string)
+/** 我's languages open, a card's 任务 field open (P8); 账号与登录's 加一种登录方式 open, 退出这台设备的登录 asked (P10). */
+const langOpenAtom = atom({ plugin: 'gemsbang', key: 'langOpen' } as const, false as boolean)
+const repoOpenAtom = atom({ plugin: 'gemsbang', key: 'repoOpen' } as const, false as boolean)
+const addOpenAtom = atom({ plugin: 'gemsbang', key: 'addOpen' } as const, false as boolean)
+const loggingOutAtom = atom({ plugin: 'gemsbang', key: 'loggingOut' } as const, false as boolean)
+/** Each avatar's standing 以后不用问 (S23), read when 我 opens. */
+const allowsAtom = atom({ plugin: 'gemsbang', key: 'allows' } as const, {} as GemsbangJson)
+/** 退出群 asked (P7); the one the 群主 picked to keep the group (P7b). */
+const leavingAtom = atom({ plugin: 'gemsbang', key: 'leaving' } as const, false as boolean)
+const heirAtom = atom({ plugin: 'gemsbang', key: 'heir' } as const, null as string | null)
 const allowAtom = atom({ plugin: 'gemsbang', key: 'allow' } as const, {} as GemsbangJson)
 const borrowingAtom = atom({ plugin: 'gemsbang', key: 'borrowing' } as const, {} as GemsbangJson)
 const roundsAtom = atom({ plugin: 'gemsbang', key: 'rounds' } as const, {} as GemsbangJson)
 
 const PANE_TITLE = 'Gemsbang'
-const PAGES: readonly GbPage[] = ['inbox', 'chat', 'invite', 'avatars', 'settings', 'account', 'new-group']
+const PAGES: readonly GbPage[] = ['inbox', 'chat', 'info', 'invite', 'avatars', 'account', 'new-group', 'join']
 /** After a start that got no answer, a call or a prompt starts again at most this often; sooner when no Node was found. */
 const START_RETRY_MS = 60_000
 const NODE_RETRY_MS = 10_000
@@ -95,7 +121,7 @@ const TOOLS = [
   },
   {
     name: 'im_ask',
-    description: 'Ask your person, as the avatar this session speaks for, about one of five things only: a promise asked of them (promise), money (pay), taking a side (stance), a task that needs their computer (borrow), something gone wrong (error). Give the chat, a one-line summary, what you checked, the exact words you would send, and options each a short form of those words; gemsbang shows the card to your person alone and sends the words they choose, as your avatar. placeholder: true says a short waiting line in the chat meanwhile. Do not answer for them before they do.',
+    description: 'Ask your person, as the avatar this session speaks for, about one of five things only: a promise asked of them (promise), money (pay), taking a side (stance), a task that needs their computer (borrow), something gone wrong (error). Give the chat, a one-line summary, what you checked, the exact words you would send, and options each a short form of those words; gemsbang shows the card to your person alone and sends the words they choose, as your avatar. Nothing is said in the chat until they answer; do not answer for them before they do.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -106,10 +132,23 @@ const TOOLS = [
         draft: { type: 'string', description: 'The words you would send if they agree.' },
         options: { type: 'array', maxItems: 4, items: { type: 'object', properties: { label: { type: 'string' }, text: { type: 'string', description: 'The words this option sends.' } }, required: ['label'], additionalProperties: false } },
         replyTo: { type: 'string', description: 'The message it answers, by its id.' },
-        placeholder: { type: 'boolean' },
         expires: { type: 'string', description: 'ISO time, only when the matter itself has a deadline; without it the card waits until your person answers.' },
       },
       required: ['venue', 'kind', 'summary'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'im_remember',
+    description: 'Keep something about your person that will help later — family, time zone, preferences — in their notes (底子), as the avatar this session speaks for, when someone in a chat told it. It waits in their pane until they press Keep; until then do not take it as so. Never for what they would not want written down.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        label: { type: 'string', description: 'What it is about, a word or two (家人, 时区).' },
+        text: { type: 'string', description: 'What to keep, in one line.' },
+        who: { type: 'string', description: 'Who said it, by the name they go by in the chat.' },
+      },
+      required: ['text'],
       additionalProperties: false,
     },
   },
@@ -128,7 +167,7 @@ type Borrowed = { avatar: string; work: string; worktree: string; commands: stri
 const borrowed = (was: GemsbangJson): Record<string, Borrowed> => ({ ...((was as unknown as Record<string, Borrowed> | null) ?? {}) })
 const readBorrowing = async ($: EngineInterface): Promise<Record<string, Borrowed>> => borrowed(await read($, borrowingAtom))
 /** A round's agent of this session, by its id (`pending:<chat>` until its id is known): where its answer goes, replying to which line with how many hops, its prompt's first line. */
-type Rounding = { avatar: string; owner: string; id: string; replyTo: string; hops: number; head: string }
+type Rounding = { avatar: string; owner: string; id: string; replyTo: string; hops: number; since?: string; head: string }
 const roundings = (was: GemsbangJson): Record<string, Rounding> => ({ ...((was as unknown as Record<string, Rounding> | null) ?? {}) })
 const readRounds = async ($: EngineInterface): Promise<Record<string, Rounding>> => roundings(await read($, roundsAtom))
 /** A pending borrowed agent known by its id at last; once is enough. */
@@ -234,7 +273,8 @@ async function startBridge($: EngineInterface): Promise<void> {
     if ('problem' in found) { await setProblem($, found.problem); return }
     await update($, nodeAtom, () => found.node)
   }
-  const r = await gb($, 'status', {}, SLOW_TIMEOUT_MS)
+  // The first session after the install is kept (Q14): only there does the line above the prompt say nobody is signed in.
+  const r = await gb($, 'status', { session: await $.session.id().catch(() => '') }, SLOW_TIMEOUT_MS)
   if (r === undefined) { scheduleStartRetry($); return }
   startTries = 0
   await afterSync($)
@@ -269,7 +309,7 @@ async function afterSync($: EngineInterface): Promise<void> {
   await pickUp($)
   const chat = (await read($, chatAtom)) as unknown as GbChat | null
   const page = await read($, pageAtom)
-  if (chat !== null && (page === 'chat' || page === 'invite')) await gb($, 'open', { owner: chat.owner, id: chat.id })
+  if (chat !== null && (page === 'chat' || page === 'info' || page === 'invite')) await gb($, 'open', { owner: chat.owner, id: chat.id })
 }
 
 let waitAlive = false
@@ -310,16 +350,21 @@ async function pickUp($: EngineInterface): Promise<void> {
   try {
     const view = await readView($)
     const session = await $.session.id().catch(() => '')
-    const avatar = view?.bodies?.[session]
+    // A session given none plays the avatar the person last spoke as (S21); the client keeps that on its first round.
+    const avatar = view?.bodies?.[session] ?? view?.recent
     if (view === null || avatar === undefined) return
     const busy = new Set(Object.values(await readBorrowing($)).map((b) => b.work))
+    const played = new Set(view.played ?? [])
+    const root = (await read($, rootAtom)) ?? ''
     for (const w of view.work ?? []) {
-      if (w.avatar !== avatar || w.state !== 'waiting' || busy.has(w.id)) continue
-      const taken = await gb($, 'work-take', { session, avatar, work: w.id, root: (await read($, rootAtom)) ?? '' }, SLOW_TIMEOUT_MS)
+      // Its own avatar's; one no open session plays (B1), only where this session is in that avatar's repository, so a session elsewhere never fails it.
+      const mine = w.avatar === avatar || (!played.has(w.avatar) && w.repo !== undefined && insideOf(root, w.repo))
+      if (!mine || w.state !== 'waiting' || busy.has(w.id)) continue
+      const taken = await gb($, 'work-take', { session, avatar: w.avatar, work: w.id, root }, SLOW_TIMEOUT_MS)
       if (taken?.ok !== true || taken.work === undefined) continue
       const t = taken.work
       const key = `pending:${w.id}`
-      await update($, borrowingAtom, (was) => ({ ...borrowed(was), [key]: { avatar, work: w.id, worktree: t.worktree, commands: t.commands, facts: [] } }) as unknown as GemsbangJson)
+      await update($, borrowingAtom, (was) => ({ ...borrowed(was), [key]: { avatar: w.avatar, work: w.id, worktree: t.worktree, commands: t.commands, facts: [] } }) as unknown as GemsbangJson)
       let why: string | undefined
       try {
         const r = await $.agent.spawn({ prompt: t.prompt, description: say('borrow.description', view.lang, { summary: t.summary }), subagentType: 'general-purpose', cwd: t.worktree })
@@ -330,7 +375,7 @@ async function pickUp($: EngineInterface): Promise<void> {
       }
       if (why === undefined) continue
       await update($, borrowingAtom, (was) => { const all = borrowed(was); delete all[key]; return all as unknown as GemsbangJson })
-      await gb($, 'work-done', { avatar, work: w.id, ok: false, reason: why })
+      await gb($, 'work-done', { avatar: w.avatar, work: w.id, ok: false, reason: why })
     }
     // The chats set to answer on their own (architecture §6.3), for the avatar this session speaks for.
     const asked = await gb($, 'rounds', { session })
@@ -354,16 +399,22 @@ async function startRound($: EngineInterface, round: GbRound): Promise<void> {
   if (Object.values(await readRounds($)).some((x) => `${x.owner}/${x.id}` === chat)) return
   const key = `pending:${chat}`
   const head = round.prompt.split('\n')[0] ?? ''
-  await update($, roundsAtom, (was) => ({ ...roundings(was), [key]: { avatar: round.avatar, owner: round.owner, id: round.id, replyTo: round.replyTo, hops: round.hops, head } }) as unknown as GemsbangJson)
+  const held: Rounding = { avatar: round.avatar, owner: round.owner, id: round.id, replyTo: round.replyTo, hops: round.hops, ...(round.since !== undefined ? { since: round.since } : {}), head }
+  await update($, roundsAtom, (was) => ({ ...roundings(was), [key]: held }) as unknown as GemsbangJson)
   try {
     const r = await $.agent.spawn({ prompt: round.prompt, description: round.description, subagentType: 'general-purpose' })
     if (r.deny === undefined) {
       if (r.agentId !== undefined) { const id = r.agentId; await update($, roundsAtom, (was) => adoptRound(roundings(was), key, id)) }
       return
     }
-  } catch { /* no agent: the call was let go; the person can answer in the chat themself */ }
+  } catch { /* no agent to run it */ }
   await update($, roundsAtom, (was) => { const all = roundings(was); delete all[key]; return all as unknown as GemsbangJson })
+  await roundFailed($, held, 'noAgent')
 }
+
+/** A round that said nothing in its chat by error (B3): its call comes back to the person, with why. */
+const roundFailed = ($: EngineInterface, r: Rounding, why: 'noAgent' | 'aborted' | 'refused' | 'error' | 'notSent'): Promise<unknown> =>
+  gb($, 'round-failed', { avatar: r.avatar, owner: r.owner, id: r.id, replyTo: r.replyTo, ...(r.since !== undefined ? { since: r.since } : {}), why })
 
 const adoptRound = (all: Record<string, Rounding>, key: string, id: string): GemsbangJson => {
   const x = all[key]
@@ -468,7 +519,7 @@ async function serveTool($: EngineInterface, name: ToolName, event: unknown): Pr
     const url = typeof args['url'] === 'string' ? args['url'] : ''
     return { result: `${name}: ${await joinFlow($, url, { session })}` }
   }
-  const r = await gb($, name === 'im_say' ? 'tool-say' : name === 'im_ask' ? 'tool-ask' : 'tool-read', { ...args, session })
+  const r = await gb($, name === 'im_say' ? 'tool-say' : name === 'im_ask' ? 'tool-ask' : name === 'im_remember' ? 'tool-remember' : 'tool-read', { ...args, session })
   if (r === undefined) return unavailable()
   return { result: `${name}: ${r.ok ? r.text ?? '' : r.reason}` }
 }
@@ -478,7 +529,7 @@ async function serveTool($: EngineInterface, name: ToolName, event: unknown): Pr
 async function openPane($: EngineInterface, page?: GbPage): Promise<{ isPlaced: boolean; reason?: string }> {
   if (page !== undefined) await update($, pageAtom, () => page)
   const opened = await $.ui.open({ id: GB_PANE_ID, title: PANE_TITLE })
-  $.clock.after(0, () => { void reload($).catch(() => undefined) })
+  $.clock.after(0, () => { void reload($).then(() => (page === 'avatars' ? readAllows($) : undefined)).catch(() => undefined) })
   return opened
 }
 
@@ -499,15 +550,45 @@ async function run($: EngineInterface, call: string, args: Record<string, unknow
   return r
 }
 
+/** Whether a path is the repository or inside it, on any system (separators, a drive's case on Windows). */
+function insideOf(path: string, repo: string): boolean {
+  const norm = (p: string): string => p.split('\\').join('/').replace(/\/+$/, '')
+  const a = norm(path), b = norm(repo)
+  const same = (x: string, y: string): boolean => (/^[A-Za-z]:/.test(y) ? x.toLowerCase() === y.toLowerCase() : x === y)
+  return a !== '' && b !== '' && (same(a, b) || same(a.slice(0, b.length + 1), `${b}/`))
+}
+
+/** 我's 不用问 (S23): each avatar's, read through the client when the page opens. */
+async function readAllows($: EngineInterface): Promise<void> {
+  const view = await readView($)
+  const out: Record<string, GbAllow[]> = {}
+  for (const a of view?.avatars ?? []) { const r = await gb($, 'allows', { avatar: a.id }); if (r?.ok === true) out[a.id] = r.allows ?? [] }
+  await update($, allowsAtom, () => out as unknown as GemsbangJson)
+}
+
 /** A press. */
 async function act($: EngineInterface, action: GbAction, surface?: string): Promise<void> {
   const l = await langNow($)
   const chat = (await read($, chatAtom)) as unknown as GbChat | null
   switch (action.op) {
     case 'page': {
+      const from = await read($, pageAtom)
       await update($, pageAtom, () => action.page)
+      await update($, rotatingAtom, () => false)
+      await update($, langOpenAtom, () => false)
+      await update($, repoOpenAtom, () => false)
+      await update($, addOpenAtom, () => false)
+      await update($, loggingOutAtom, () => false)
+      await update($, leavingAtom, () => false)
+      await update($, heirAtom, () => null)
+      if (action.page === 'invite') await update($, inviteBackAtom, () => (from === 'info' ? 'info' : 'chat'))
+      await update($, editingAtom, () => null)
+      await update($, plusOpenAtom, () => false)
+      if (action.page === 'new-group') { await update($, groupAsAtom, () => ''); await update($, asOpenAtom, () => false); await update($, groupAvatarAtom, () => null) }
+      if (action.page === 'join') await update($, joiningAtom, () => null)
       if (action.page === 'invite' && chat !== null) { await update($, linkAtom, () => null); await run($, 'link', { owner: chat.owner, id: chat.id }) }
       if (action.page === 'account') { await update($, accountAtom, () => null); await account($, run($, 'account', {})) }
+      if (action.page === 'avatars') await readAllows($)
       return
     }
     case 'filter': await update($, filterAtom, () => action.avatar); return
@@ -522,12 +603,38 @@ async function act($: EngineInterface, action: GbAction, surface?: string): Prom
       $.ui.toast(say(copied ? 'panel.copied' : 'panel.copyFailed', l))
       return
     }
-    case 'rotate': if (chat !== null) await run($, 'rotate', { owner: chat.owner, id: chat.id }); return
-    case 'link-rules': if (chat !== null) await run($, 'link-rules', { owner: chat.owner, id: chat.id, ...(action.forward !== undefined ? { forward: action.forward } : {}), ...(action.approve !== undefined ? { approve: action.approve } : {}) }); return
+    case 'rotate': {
+      if (chat !== null) await run($, 'rotate', { owner: chat.owner, id: chat.id })
+      await update($, rotatingAtom, () => false)
+      return
+    }
+    case 'rotate-ask': await update($, rotatingAtom, () => action.open); return
+    // The rules changed on the service: the chat read again, so 群信息's switch shows them.
+    case 'link-rules': {
+      if (chat === null) return
+      const r = await run($, 'link-rules', { owner: chat.owner, id: chat.id, ...(action.forward !== undefined ? { forward: action.forward } : {}), ...(action.approve !== undefined ? { approve: action.approve } : {}) })
+      if (r?.ok === true) await gb($, 'open', { owner: chat.owner, id: chat.id })
+      return
+    }
     case 'mark': await run($, 'mark', { avatar: action.avatar, mark: action.mark }); return
     case 'bind': await run($, 'bind', { session: await $.session.id().catch(() => ''), avatar: action.avatar }); return
-    case 'group-as': await update($, groupAsAtom, () => action.as); return
+    case 'group-as': {
+      await update($, groupAsAtom, () => action.as)
+      await update($, asOpenAtom, () => false)
+      if (action.as !== 'new') await update($, groupAvatarAtom, () => null)
+      return
+    }
+    case 'plus': await update($, plusOpenAtom, (was) => !was); return
+    case 'choose': await update($, asOpenAtom, () => action.open); return
+    case 'group-avatar': await update($, groupAvatarAtom, () => action.name); return
+    case 'join-as': await joinHere($, { as: action.as }); return
+    case 'join-name': await joinHere($, { name: action.name }); return
+    case 'join-switch': await update($, joiningAtom, (was) => ({ ...((was as unknown as JoinView | null) ?? {}), switching: true }) as unknown as GemsbangJson); return
+    case 'join-new': await update($, joiningAtom, (was) => ({ ...((was as unknown as JoinView | null) ?? {}), naming: true }) as unknown as GemsbangJson); return
+    case 'join-blank': await update($, joiningAtom, (was) => ({ ...((was as unknown as JoinView | null) ?? {}), blank: action.text }) as unknown as GemsbangJson); return
+    case 'join-cancel': await update($, joiningAtom, () => null); await update($, pageAtom, () => 'inbox'); return
     case 'logout': {
+      await update($, loggingOutAtom, () => false)
       await run($, 'logout', {})
       await update($, pageAtom, () => 'inbox')
       await update($, chatAtom, () => null)
@@ -550,6 +657,17 @@ async function act($: EngineInterface, action: GbAction, surface?: string): Prom
     }
     // Each atom named where it is written: the engine lists a module's state by reading its calls.
     case 'more': if (action.what === 'needs') await update($, needsOpenAtom, () => true); else await update($, mutedOpenAtom, () => true); return
+    case 'write': await update($, writingAtom, () => action.card); return
+    case 'edit': await update($, editingAtom, () => action.card); await update($, repoOpenAtom, () => false); return
+    case 'lang-open': await update($, langOpenAtom, () => action.open); return
+    case 'lang': {
+      await run($, 'lang', { lang: action.lang })
+      await update($, langOpenAtom, () => false)
+      return
+    }
+    case 'repo-open': await update($, repoOpenAtom, () => action.open); return
+    case 'add-open': await update($, addOpenAtom, () => action.open); return
+    case 'logout-ask': await update($, loggingOutAtom, () => action.open); return
     case 'mute': await run($, 'mute', { ...(action.avatar !== undefined ? { avatar: action.avatar } : {}), ...(action.venue !== undefined ? { venue: action.venue } : {}), on: action.on }); return
     case 'work-now': await run($, 'work-now', { avatar: action.avatar, work: action.work }); return
     case 'wake': {
@@ -558,13 +676,35 @@ async function act($: EngineInterface, action: GbAction, surface?: string): Prom
       return
     }
     case 'auto': await run($, 'auto', { avatar: action.avatar, venue: action.venue, on: action.on }); return
+    // 退出群 (S19, P7): asked or let go; the 群主's pick; out — then the inbox, the chat gone from it.
+    case 'leave-ask': await update($, leavingAtom, () => action.open); await update($, heirAtom, () => null); return
+    case 'heir': await update($, heirAtom, () => action.avatar); return
+    case 'leave': {
+      if (chat === null) return
+      const r = await run($, 'leave', { owner: chat.owner, id: chat.id, ...(action.heir !== undefined ? { heir: action.heir } : {}) })
+      if (r?.ok !== true) return
+      await update($, leavingAtom, () => false)
+      await update($, heirAtom, () => null)
+      await update($, chatAtom, () => null)
+      await update($, pageAtom, () => 'inbox')
+      return
+    }
+    // 底子 (S27): given to other avatars, 删, 记下 or 不记 — each through the client, the view back.
+    case 'base-for': await run($, 'base-set', { item: action.item, for: action.for }); return
+    case 'base-drop': await run($, 'base-set', { item: action.item, drop: true }); return
+    case 'base-keep': await run($, 'base-set', { item: action.item, keep: action.keep }); return
+    case 'allow-off': {
+      const r = await run($, 'allows', { avatar: action.avatar, allow: action.allow })
+      if (r?.ok === true) { const list = r.allows ?? []; await update($, allowsAtom, (was) => ({ ...((was as unknown as Record<string, GbAllow[]> | null) ?? {}), [action.avatar]: list }) as unknown as GemsbangJson) }
+      return
+    }
     case 'resend': {
       const email = await read($, addressAtom)
       if (email !== null) { const r = await run($, 'login-start', { email }); if (r?.ok === true) $.ui.toast(r.text ?? '') }
       return
     }
     case 'change-address': await update($, addressAtom, () => null); return
-    case 'add-cancel': await update($, addingAtom, () => null); return
+    case 'add-cancel': await update($, addingAtom, () => null); await update($, addOpenAtom, () => false); return
     case 'method-remove': await account($, run($, 'method-remove', { id: action.id })); return
     case 'device-revoke': await account($, run($, 'device-revoke', { id: action.id })); return
     case 'devices-revoke-others': await account($, run($, 'devices-revoke-others', {})); return
@@ -578,24 +718,59 @@ async function account($: EngineInterface, call: Promise<GbResult | undefined>):
   if (r?.ok === true && r.account !== undefined) await update($, accountAtom, () => r.account as unknown as GemsbangJson)
 }
 
+/** 用链接进群 in the pane (P3): the link read; already in, its chat opens; else the pane asks which avatar. */
+async function peekHere($: EngineInterface, url: string): Promise<void> {
+  const r = await run($, 'link-info', { url })
+  if (r?.ok !== true) return
+  const i = r.info as { group: { name: string; count: number }; owner?: { name: string }; suggestions: { text: string; blank?: boolean }[]; you?: { pick: { kind: string; avatar?: string } } }
+  const pick = i.you?.pick ?? { kind: 'choose' }
+  if (pick.kind === 'in') { await joinHere($, {}, url); return }
+  const view: JoinView = { url, group: i.group.name, count: i.group.count, ...(i.owner !== undefined ? { owner: i.owner.name } : {}), pick, suggestions: i.suggestions ?? [] }
+  await update($, joiningAtom, () => view as unknown as GemsbangJson)
+}
+
+/** In by the link read (as one of theirs, with a name, or as it already is); its chat opens, or the owner is asked first. */
+async function joinHere($: EngineInterface, body: Record<string, unknown>, url?: string): Promise<void> {
+  const j = (await read($, joiningAtom)) as unknown as JoinView | null
+  const link = url ?? j?.url
+  if (link === undefined) return
+  const r = await run($, 'join', { url: link, ...body })
+  if (r?.ok !== true) return
+  await update($, joiningAtom, () => null)
+  const joined = r.joined as { venue: { owner: string; id: string; name: string }; pending?: string } | undefined
+  if (joined === undefined) return
+  if (joined.pending !== undefined) { $.ui.toast(say('panel.join.pending', await langNow($), { group: joined.venue.name })); await update($, pageAtom, () => 'inbox'); return }
+  await run($, 'open', { owner: joined.venue.owner, id: joined.venue.id })
+}
+
 /** Enter in a field: its one call, or what the pane keeps until the next. */
 async function submit($: EngineInterface, field: GbField, value: string, target?: string): Promise<void> {
-  const [chat, address, adding, groupAs, groupAvatar] = await Promise.all([read($, chatAtom), read($, addressAtom), read($, addingAtom), read($, groupAsAtom), read($, groupAvatarAtom)])
+  const [chat, address, adding, groupAs, groupAvatar, joining, view] = await Promise.all([read($, chatAtom), read($, addressAtom), read($, addingAtom), read($, groupAsAtom), read($, groupAvatarAtom), read($, joiningAtom), readView($)])
   const session = await $.session.id().catch(() => '')
-  const a = fieldAction(field, value, { chat: chat as unknown as GbChat | null, address, adding, groupAs, session, ...(groupAvatar !== null ? { groupAvatar } : {}) }, target)
+  const blank = (joining as unknown as JoinView | null)?.blank ?? null
+  // 好了 on a card's name as it was (P8b): nothing to rename, the card folds.
+  if (field === 'rename' && view?.avatars.find((x) => x.id === target)?.name === value.trim()) { await update($, editingAtom, () => null); return }
+  // A new 底子 entry is given to the avatar this session plays (S27), as 我 shows it.
+  const baseFor = view?.bodies?.[session] ?? view?.recent ?? view?.avatars[0]?.id
+  const a = fieldAction(field, value, { chat: chat as unknown as GbChat | null, address, adding, groupAs: groupAsOf(view ?? EMPTY_VIEW, groupAs), session, blank, ...(groupAvatar !== null ? { groupAvatar } : {}), ...(baseFor !== undefined ? { baseFor } : {}) }, target)
   if (a === undefined) return
   if ('local' in a) {
     if (a.local === 'email') { const r = await run($, 'login-start', { email: a.email }); if (r?.ok === true) await update($, addressAtom, () => a.email) }
     else if (a.local === 'add-email') { const r = await run($, 'method-start', { email: a.email }); if (r?.ok === true) await update($, addingAtom, () => a.email) }
     else if (a.local === 'group-avatar') await update($, groupAvatarAtom, () => a.name)
-    else $.ui.toast(await joinFlow($, a.url, undefined))
+    else if (a.local === 'join-name') await joinHere($, { name: a.name })
+    else await peekHere($, a.url)
     return
   }
   const r = await run($, a.call, a.args)
   if (r?.ok !== true) return
   if (a.call === 'login-verify') { await update($, addressAtom, () => null); await update($, pageAtom, () => 'inbox'); startWaiting($) }
-  if (a.call === 'method-verify') { await update($, addingAtom, () => null); await account($, Promise.resolve(r)) }
-  if (a.call === 'group') { await update($, groupAvatarAtom, () => null); await update($, groupAsAtom, () => 'new') }
+  if (a.call === 'method-verify') { await update($, addingAtom, () => null); await update($, addOpenAtom, () => false); await account($, Promise.resolve(r)) }
+  // 好了 (P8b, P8a): the name or the default name saved, the field folds; a repository named, its field folds.
+  if (field === 'rename' || field === 'default-name') await update($, editingAtom, () => null)
+  if (field === 'repo') await update($, repoOpenAtom, () => false)
+  if (a.call === 'group') { await update($, groupAvatarAtom, () => null); await update($, groupAsAtom, () => ''); await update($, asOpenAtom, () => false) }
+  if (field === 'need-own') await update($, writingAtom, () => null)
 }
 
 const keep = (p: Promise<void>, $: EngineInterface): void => { void p.catch((err: unknown) => $.ui.toast(`gemsbang：${reasonOf(err)}`)) }
@@ -612,16 +787,484 @@ function elementsOf($: EngineInterface, e: Parameters<EngineInterface['ui']['res
 
 const toneOf = (tone: Tone): Record<string, unknown> => (tone === 'dim' ? { dimColor: true } : tone === 'error' ? { color: 'error' } : tone === 'success' ? { color: 'success' } : {})
 
-function drawRow($: EngineInterface, els: Els, row: GbRow, columns: number): unknown {
+// ---- where the surface takes pictures: the canvas's GbInbox ------------------------------------------------------
+// A desktop Button holds words only and draws them in its own colour and weight, so what keeps a colour (an avatar's
+// pill and initial, a chat's picture, a count, a colour bar) is an Svg beside the words, and the words that open
+// something are each a plain Button labelled with them; a picture that is a press by itself (a filter chip) has a blank
+// Button laid over it, painted last, the one layout the desktop takes a press through (gemworks' board learnt it).
+// The greys carry alpha so they read on a light and a dark ground.
+const HEADING = '#8a8986'
+const RULE = '#8a898666'
+const SHADE = '#8a89861a'
+const MARK = { backgroundColor: '#fff4d6', color: '#9a6100' } as const
+const TINT: Readonly<Record<Tint, string>> = { call: '#2a6fdb', ask: '#9a6100', error: 'error', dim: HEADING }
+/** A card in its chat, which only the person sees (GbChat): a dashed blue rim on a blue wash. */
+const OWN_CARD = { borderStyle: 'dashed', borderColor: '#2a6fdb59', backgroundColor: '#2a6fdb0d' } as const
+
+function rule(els: Els, key: string): unknown {
+  return <els.Box key={key} marginTop={1}><els.Svg source={RULE_SVG} alt="—" height={1} /></els.Box>
+}
+/** A chat row's height in CSS pixels: its colour bar is this tall, and the row with it. */
+const CHAT_ROW_PX = 54
+
+/** The person's wordmark (docs/brand/, made small by scripts/brand.mjs), at half the size it was made at. */
+function drawLockup(els: Els, key: string): unknown {
+  return <els.Svg key={key} source={LOCKUP.source} alt="Gems'Bang" width={Math.round(LOCKUP.width / 2)} height={LOCKUP.height / 2} />
+}
+
+function drawPic(els: Els, key: string, p: Pic): unknown {
+  return <els.Svg key={key} source={p.source} alt={p.alt} width={p.width} height={p.height} />
+}
+
+/** A blank label about `px` wide: ideographic spaces, which HTML does not collapse as it does plain ones. */
+const blankOf = (px: number): string => '\u3000'.repeat(Math.max(1, Math.floor((px - 12) / 13)))
+
+/** A picture that is a press by itself: the picture, and over it a blank Button, painted last. */
+function picPress($: EngineInterface, els: Els, key: string, p: Pic, action: GbAction): unknown {
+  const { Box, Button } = els
+  return (
+    <Box key={`${key}-box`} flexShrink={0} position="relative" alignItems="center">
+      {drawPic(els, `${key}-pic`, p)}
+      <Box position="absolute" top={0} left={0} right={0} bottom={0} justifyContent="center" alignItems="center">
+        <Button key={key} plain label={blankOf(p.width)} onPress={() => keep(act($, action), $)} />
+      </Box>
+    </Box>
+  )
+}
+
+/** A colour bar down the left edge of a box, as tall as the box (a tall picture, cut by it). */
+function edgeBar(els: Els, key: string, color: string, alt: string, width = 4): unknown {
+  return <els.Box key={key} position="absolute" top={0} left={0} bottom={0} overflow="hidden">{drawPic(els, `${key}-pic`, barSvg(color, 2000, alt, width))}</els.Box>
+}
+
+/** A card's words: each line a Text, the mention of the person's avatar set off. */
+function drawSpans(els: Els, key: string, line: Span[]): unknown {
+  const { Text } = els
+  return <Text key={key} wrap="wrap">{line.map((x, i) => (x.mark === true ? <Text key={`m${i}`} bold {...MARK}>{x.text}</Text> : x.text))}</Text>
+}
+
+function pressButton($: EngineInterface, els: Els, b: GbPress): unknown {
+  return <els.Button key={b.key} label={b.label} {...(b.primary ? { variant: 'primary' } : {})} onPress={() => keep(act($, b.action), $)} />
+}
+
+/** The rows the canvas draws as pictures; undefined for the rest, drawn as words. */
+function drawPictured($: EngineInterface, els: Els, row: GbRow, columns: number, version: string | null): unknown {
+  const { Box, Text, Button, Input, Svg } = els
+  const press = (a: GbAction) => () => keep(act($, a), $)
+  switch (row.kind) {
+    // The inbox's name: the mark, Gemsbang, how many things wait; at the right the version, as every page's head shows it.
+    case 'head': {
+      // A chat's, 群信息's and 叫人's head (P4–P6): ‹, the name and what is under it on one line; a group's opens 群信息, its › at the right.
+      if (row.back !== undefined && row.backLabel === undefined) {
+        const said = `${row.title}  ${row.sub ?? ''}`
+        return (
+          <Box key={row.key} flexDirection="column">
+            <Box gap={1} alignItems="center">
+              <Box flexShrink={0}><Button key={`${row.key}-back`} plain label="‹" onPress={press(row.back)} /></Box>
+              <Box flexShrink={1} minWidth={0} gap={1} alignItems="center" position="relative">
+                <Box flexShrink={0}><Text bold>{row.title}</Text></Box>
+                {row.sub !== undefined && <Box flexShrink={1} minWidth={0}><Text color={HEADING} wrap="truncate-end">{row.sub}</Text></Box>}
+                {row.open !== undefined && (
+                  <Box position="absolute" top={0} left={0} right={0} bottom={0} justifyContent="center">
+                    <Button key={`${row.key}-open`} plain label={blankOf(textWidth(said, 13) + 13)} onPress={press(row.open)} />
+                  </Box>
+                )}
+              </Box>
+              <Box flexGrow={1} />
+              {row.open !== undefined && <Button key={`${row.key}-go`} plain dimColor label="›" onPress={press(row.open)} />}
+              {row.actions.map((b) => (b.quiet === true ? <Button key={b.key} plain dimColor label={b.label} onPress={press(b.action)} /> : pressButton($, els, b)))}
+            </Box>
+            {rule(els, `${row.key}-rule`)}
+          </Box>
+        )
+      }
+      if (row.key !== 'head-inbox') return (
+        <Box key={row.key} flexDirection="column">
+          <Box gap={1} alignItems="center">
+            {row.back !== undefined && <Box flexShrink={0}><Button key={`${row.key}-back`} plain label={row.backLabel !== undefined ? `‹ ${row.backLabel}` : '‹'} onPress={press(row.back)} /></Box>}
+            <Box flexDirection="column" flexShrink={1} minWidth={0}>
+              <Text bold wrap="truncate-end">{row.title}</Text>
+              {row.sub !== undefined && <Text color={HEADING} wrap="truncate-end">{row.sub}</Text>}
+            </Box>
+            <Box flexGrow={1} />
+            {row.actions.map((b) => (b.quiet === true ? <Button key={b.key} plain dimColor label={b.label} onPress={press(b.action)} /> : pressButton($, els, b)))}
+          </Box>
+          {rule(els, `${row.key}-rule`)}
+        </Box>
+      )
+      return (
+        <Box key={row.key} gap={1} alignItems="center">
+          {drawLockup(els, 'head-lockup')}
+          {row.count !== undefined && drawPic(els, 'head-count', countSvg(row.count, { small: true }))}
+          <Box flexGrow={1} />
+          {version !== null && <Text dimColor>{version}</Text>}
+        </Box>
+      )
+    }
+    // The bar under it: a chip per avatar to narrow the inbox to (the one on is not a press), then 我的分身 (a link) and
+    // 建群; a rule under the bar.
+    case 'chips': return (
+      <Box key={row.key} flexDirection="column">
+        <Box gap={1} alignItems="center" flexWrap="wrap">
+          {row.items.map((c) => {
+            const p = c.badge !== undefined ? pillSvg(c.badge, { filled: c.on }) : chipSvg(c.label, c.on)
+            return c.on ? drawPic(els, c.key, p) : picPress($, els, c.key, p, c.action)
+          })}
+          <Box flexGrow={1} />
+          {(row.actions ?? []).flatMap((b) => [
+            b.primary ? pressButton($, els, b) : picPress($, els, b.key, linkSvg(b.label), b.action),
+            ...(b.count !== undefined ? [drawPic(els, `${b.key}-count`, countSvg(b.count, { small: true }))] : []),
+          ])}
+        </Box>
+        <Box marginTop={1}><Svg source={RULE_SVG} alt="—" height={1} /></Box>
+      </Box>
+    )
+    case 'section': return row.badge !== undefined ? undefined : (
+      <Box key={row.key} gap={1} marginTop={1} alignItems="center">
+        <Text bold color={HEADING}>{row.text}</Text>
+        {row.note !== undefined && <Text color={HEADING}>{row.note}</Text>}
+        {row.press !== undefined && <Box flexGrow={1} />}
+        {row.press !== undefined && picPress($, els, row.press.key, linkSvg(row.press.label), row.press.action)}
+      </Box>
+    )
+    // 底子's 给 (P8c): the pills — given with ✓, not given faded — each pressed to give or not; 删 at the right.
+    case 'give': return (
+      <Box key={row.key} gap={1} alignItems="center" flexWrap="wrap">
+        <Text color={HEADING}>{row.lead}</Text>
+        {row.items.map((it) => {
+          const p = pillSvg(it.badge, { tick: it.on, faded: !it.on })
+          return it.action !== undefined ? picPress($, els, it.key, p, it.action) : drawPic(els, it.key, p)
+        })}
+        <Box flexGrow={1} />
+        {row.press !== undefined && picPress($, els, row.press.key, linkSvg(row.press.label), row.press.action)}
+      </Box>
+    )
+    // In its chat, GbChat's card: only the person sees it — what kind, its words, what 回 does, the answers, that it stays.
+    case 'need': if (row.inChat === true) return (
+      <Box key={row.key} flexDirection="column" gap={1} marginY={1} {...OWN_CARD} paddingX={1} paddingY={1}>
+        <Box gap={1} alignItems="center">
+          <Box flexShrink={1} minWidth={0}><Text color={TINT[row.tint]} wrap="truncate-end">{row.label}</Text></Box>
+          <Box flexGrow={1} />
+          <Text color={HEADING}>{row.expires}</Text>
+        </Box>
+        {row.body.map((line, i) => drawSpans(els, `${row.key}-l${i}`, line))}
+        {row.hint !== undefined && <Text color={HEADING} wrap="wrap">{row.hint}</Text>}
+        {row.quote !== undefined && <Text wrap="wrap">{row.quote}</Text>}
+        {row.toggles.map((t) => <Button key={t.key} plain label={`${t.on ? '☑' : '☐'} ${t.label}`} onPress={press(t.action)} />)}
+        {(row.options.length > 0 || row.own !== undefined) && (
+          <Box gap={1} flexWrap="wrap">
+            {row.options.map((b) => pressButton($, els, b))}
+            {row.own !== undefined && <Button key={`${row.key}-write`} label={row.own.label} onPress={press({ op: 'write', card: row.own.writing ? null : row.key })} />}
+          </Box>
+        )}
+        {row.own !== undefined && row.own.writing && Input !== undefined && (
+          <Input key={`${row.key}-own`} placeholder={row.own.placeholder} onSubmit={(value: string) => keep(submit($, 'need-own', value, row.own?.target), $)} />
+        )}
+        {row.foot !== undefined && <Text color={HEADING} wrap="wrap">{row.foot}</Text>}
+      </Box>
+    )
+    // A card: its avatar's colour down the edge; the pill, what kind, when; its words; the words it would send set off; the answers.
+    return (
+      <Box key={row.key} flexDirection="column" gap={1} marginBottom={1} position="relative" overflow="hidden" borderStyle="round" borderColor={RULE} paddingX={1} paddingY={1}>
+        {row.badge !== undefined && edgeBar(els, `${row.key}-edge`, row.badge.color, row.badge.name)}
+        <Box gap={1} alignItems="center">
+          {row.badge !== undefined && drawPic(els, `${row.key}-pill`, pillSvg(row.badge))}
+          <Box flexShrink={1} minWidth={0}><Text bold color={TINT[row.tint]} wrap="truncate-end">{row.label}</Text></Box>
+          <Box flexGrow={1} />
+          <Text color={HEADING}>{row.expires}</Text>
+        </Box>
+        {row.body.map((line, i) => drawSpans(els, `${row.key}-l${i}`, line))}
+        {row.quote !== undefined && (
+          <Box key={`${row.key}-quote`} position="relative" paddingLeft={1}>
+            {edgeBar(els, `${row.key}-quote-edge`, '#8a898666', '', 3)}
+            <Text wrap="wrap">{row.quote}</Text>
+          </Box>
+        )}
+        {row.toggles.map((t) => <Button key={t.key} plain label={`${t.on ? '☑' : '☐'} ${t.label}`} onPress={press(t.action)} />)}
+        {(row.options.length > 0 || row.own !== undefined) && (
+          <Box gap={1} flexWrap="wrap">
+            {row.options.map((b) => pressButton($, els, b))}
+            {row.own !== undefined && <Button key={`${row.key}-write`} label={row.own.label} onPress={press({ op: 'write', card: row.own.writing ? null : row.key })} />}
+          </Box>
+        )}
+        {row.own !== undefined && row.own.writing && Input !== undefined && (
+          <Input key={`${row.key}-own`} placeholder={row.own.placeholder} onSubmit={(value: string) => keep(submit($, 'need-own', value, row.own?.target), $)} />
+        )}
+      </Box>
+    )
+    // 需要你 folded: 还有 N 件 with the first of them, and 展开; the muted ones apart.
+    case 'fold': return (
+      <Box key={row.key} gap={1} alignItems="center" marginBottom={1} borderStyle="round" borderColor={RULE} paddingX={1}>
+        {row.more !== undefined && <Box flexShrink={0}><Text>{row.more.lead}</Text></Box>}
+        {row.more?.badge !== undefined && drawPic(els, 'fold-pill', pillSvg(row.more.badge))}
+        {row.more !== undefined && <Box flexShrink={1} minWidth={0}><Text wrap="truncate-end">{row.more.first}</Text></Box>}
+        <Box flexGrow={1} />
+        {row.muted !== undefined && <Box flexShrink={0}><Button key={row.muted.key} plain dimColor label={row.muted.label} onPress={press(row.muted.action)} /></Box>}
+        {row.more !== undefined && <Box flexShrink={0}><Button key={row.more.key} plain label={row.more.open} onPress={press(row.more.action)} /></Box>}
+      </Box>
+    )
+    // A chat: its avatar's colour at the edge, its picture, its name with whose it is, when; its last line and the unread.
+    // The name and the last line are each a plain Button labelled with them: they open it.
+    case 'chat': {
+      const r = row.row
+      const second = r.last !== undefined ? truncate(`${r.last.who}：${r.last.text}`, Math.max(8, columns - 16)) : ''
+      return (
+        <Box key={row.key} alignItems="center" hover={{ backgroundColor: SHADE }}>
+          {drawPic(els, `${row.key}-edge`, barSvg(r.as.color, CHAT_ROW_PX, r.as.name))}
+          <Box flexGrow={1} minWidth={0} gap={1} alignItems="center" paddingX={1}>
+            {drawPic(els, `${row.key}-pic`, chatPicSvg(r.kind, r.name))}
+            <Box flexDirection="column" flexGrow={1} minWidth={0}>
+              <Box gap={1} alignItems="center">
+                <Box flexShrink={1} minWidth={0}><Button key={`${row.key}-go`} plain label={truncate(r.name, Math.max(8, columns - 30))} onPress={press(row.action)} /></Box>
+                {drawPic(els, `${row.key}-pill`, pillSvg(r.as, { small: true }))}
+                <Box flexGrow={1} />
+                <Text color={HEADING}>{r.time}</Text>
+              </Box>
+              <Box gap={1} alignItems="center">
+                <Box flexGrow={1} flexShrink={1} minWidth={0}>{second !== '' && <Button key={`${row.key}-last`} plain dimColor label={second} onPress={press(row.action)} />}</Box>
+                {r.unread > 0 && drawPic(els, `${row.key}-unread`, countSvg(r.unread))}
+              </Box>
+            </Box>
+          </Box>
+        </Box>
+      )
+    }
+    // A card of 我 (GbAvatars): the avatar's colour down the edge, its pill and 改 at the right; a grey label and its value a line;
+    // 改 opens its fields under a rule. The shared card has no name.
+    case 'card': return (
+      <Box key={row.key} flexDirection="column" gap={1} marginBottom={1} position="relative" overflow="hidden" borderStyle="round" borderColor={RULE} paddingX={1} paddingY={1}>
+        {row.badge !== undefined && edgeBar(els, `${row.key}-edge`, row.badge.color, row.badge.name)}
+        {row.top !== undefined && drawRow($, els, row.top, columns, version)}
+        {row.top === undefined && (row.badge !== undefined || row.edit !== undefined) && (
+          <Box gap={1} alignItems="center">
+            {row.badge !== undefined && drawPic(els, `${row.key}-pill`, pillSvg(row.badge))}
+            {row.tag !== undefined && <Text color={HEADING}>{row.tag}</Text>}
+            <Box flexGrow={1} />
+            {row.edit !== undefined && picPress($, els, row.edit.key, linkSvg(row.edit.label), row.edit.action)}
+          </Box>
+        )}
+        {row.lines.map((x) => (
+          <Box key={x.key} gap={1} alignItems="center">
+            <Box width={8} flexShrink={0}><Text color={HEADING} wrap="truncate-end">{x.label}</Text></Box>
+            {x.choice !== undefined && els.Select !== undefined
+              ? <els.Select key={`${x.key}-choice`} options={x.choice.options} value={x.choice.value} onSelect={(value: string) => keep(run($, 'lang', { lang: value }).then(() => undefined), $)} />
+              : <Box flexShrink={1} minWidth={0}><Text wrap="wrap" {...toneOf(x.tone ?? 'plain')}>{x.value}</Text></Box>}
+            <Box flexGrow={1} />
+            {(x.presses ?? []).map((b) => picPress($, els, b.key, linkSvg(b.label), b.action))}
+          </Box>
+        ))}
+        {row.fields.length > 0 && row.plain !== true && rule(els, `${row.key}-rule`)}
+        {row.fields.map((f) => drawRow($, els, f, columns, version))}
+      </Box>
+    )
+    // 我's own lines and 账号与登录's ways in (P8a, P10a): the label in grey in its column, the value with a grey note
+    // after it, a press as a link at the right, or › (the words laid over with a blank Button, so the row goes).
+    case 'kv': return (
+      <Box key={row.key} gap={1} alignItems="center">
+        <Box width={8} flexShrink={0}><Text color={HEADING} wrap="truncate-end">{row.label}</Text></Box>
+        <Box flexShrink={1} minWidth={0} position="relative">
+          <Text wrap="wrap" {...toneOf(row.tone ?? 'plain')}>{row.value}{row.note !== undefined && <Text color={HEADING}>{`${row.value !== '' ? ' · ' : ''}${row.note}`}</Text>}</Text>
+          {row.go !== undefined && (
+            <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+              <Button key={`${row.key}-open`} plain label={blankOf(textWidth(row.value, 13) + 13)} onPress={press(row.go)} />
+            </Box>
+          )}
+        </Box>
+        <Box flexGrow={1} />
+        {row.press !== undefined && picPress($, els, row.press.key, linkSvg(row.press.label), row.press.action)}
+        {row.go !== undefined && <Button key={`${row.key}-go`} plain dimColor label="›" onPress={press(row.go)} />}
+      </Box>
+    )
+    // 账号与登录's devices (P10a): the name, a grey line under it, 这台 in grey or 退出 as a link at the right; a rule between.
+    case 'item': return (
+      <Box key={row.key} flexDirection="column" gap={1}>
+        {row.rule === true && <Svg key={`${row.key}-rule`} source={RULE_SVG} alt="—" height={1} />}
+        <Box gap={1} alignItems="center">
+          <Box flexDirection="column" flexShrink={1} minWidth={0}>
+            <Text wrap="wrap">{row.title}</Text>
+            {row.sub !== undefined && <Text color={HEADING} wrap="wrap">{row.sub}</Text>}
+          </Box>
+          <Box flexGrow={1} />
+          {row.tag !== undefined && <Text color={HEADING}>{row.tag}</Text>}
+          {row.press !== undefined && picPress($, els, row.press.key, linkSvg(row.press.label), row.press.action)}
+        </Box>
+      </Box>
+    )
+    // Presses side by side; one that signs out or leaves in red, as a picture (a desktop Button keeps its own colour).
+    case 'buttons': return !row.items.some((b) => b.danger === true) ? undefined : (
+      <Box key={row.key} gap={1} alignItems="center" marginTop={1}>
+        {row.items.map((b) => (b.disabled === true ? drawPic(els, b.key, dangerSvg(b.label, { grey: true })) : b.danger === true ? picPress($, els, b.key, dangerSvg(b.label), b.action) : pressButton($, els, b)))}
+      </Box>
+    )
+    // 群信息's members (P6): a round initial in their colour, the name, 你 · 群主 in grey; a rule between.
+    case 'people': return (
+      <Box key={row.key} flexDirection="column" gap={1} marginTop={1}>
+        {row.items.flatMap((m, i) => [
+          ...(i > 0 ? [<Svg key={`${m.key}-rule`} source={RULE_SVG} alt="—" height={1} />] : []),
+          <Box key={m.key} gap={1} alignItems="center">
+            {drawPic(els, `${m.key}-pic`, personSvg(m.name, m.color, 24))}
+            <Text>{m.name}</Text>
+            {m.note !== undefined && <Text color={HEADING}>{m.note}</Text>}
+          </Box>,
+        ])}
+        {row.rest !== undefined && <Svg key={`${row.key}-rest-rule`} source={RULE_SVG} alt="—" height={1} />}
+        {row.rest !== undefined && <Text key={`${row.key}-rest`} wrap="wrap">{row.rest}</Text>}
+      </Box>
+    )
+    // 群信息's settings (P6 ②, under the head): 叫人 ›, the switches drawn as switches, a rule after each.
+    // The words are Text, so they line up whatever the row does; a row to go to has a blank Button laid over its words.
+    case 'menu': return (
+      <Box key={row.key} flexDirection="column" gap={1} marginTop={1}>
+        {row.items.flatMap((it) => [
+          <Box key={`${it.key}-row`} gap={1} alignItems="center">
+            <Box position="relative" flexShrink={1} minWidth={0}>
+              <Text {...(it.danger === true ? { color: 'error' } : {})}>{it.label}</Text>
+              {it.on === undefined && (
+                <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+                  <Button key={it.key} plain label={blankOf(textWidth(it.label, 13) + 13)} onPress={press(it.action)} />
+                </Box>
+              )}
+            </Box>
+            <Box flexGrow={1} />
+            {it.go === true && <Button key={`${it.key}-go`} plain dimColor label="›" onPress={press(it.action)} />}
+            {it.on !== undefined && picPress($, els, `${it.key}-switch`, switchSvg(it.on, it.label), it.action)}
+          </Box>,
+          <Svg key={`${it.key}-rule`} source={RULE_SVG} alt="—" height={1} />,
+        ])}
+      </Box>
+    )
+    // 叫人's words to pass on (P4): what they are for in grey, the words on a light ground to select, the link's QR code
+    // beside it; no copy press, as the desktop has no clipboard (Q5).
+    case 'share': {
+      const qr = row.qr === true ? qrModules(row.text) : undefined
+      return (
+        <Box key={row.key} flexDirection="column" marginTop={1} gap={1}>
+          <Text color={HEADING}>{row.label}</Text>
+          <Box gap={1} alignItems="flex-start">
+            <Box flexGrow={1} flexShrink={1} minWidth={0} borderStyle="round" borderColor={RULE} backgroundColor={SHADE} paddingX={1}>
+              <Text wrap="wrap">{row.text}</Text>
+            </Box>
+            {qr !== undefined && drawPic(els, `${row.key}-qr`, qrSvg(qr, 84, row.label))}
+          </Box>
+        </Box>
+      )
+    }
+    case 'tip': return (
+      <Box key={row.key} marginTop={1} borderStyle="dashed" borderColor={RULE} paddingX={1}>
+        <Text color={HEADING} wrap="wrap">{row.text}</Text>
+      </Box>
+    )
+    // 链接 7 天有效 · 换一个链接: grey, the press after it a link.
+    case 'line': return (
+      <Box key={row.key} gap={1} alignItems="center" marginTop={1}>
+        {row.text !== '' && <Text color={HEADING}>{row.text}</Text>}
+        {row.text !== '' && row.press !== undefined && <Text color={HEADING}>·</Text>}
+        {row.press !== undefined && picPress($, els, row.press.key, linkSvg(row.press.label), row.press.action)}
+      </Box>
+    )
+    // ＋'s two ways (P1b) and 换's avatars (P2c): a row each, a rule between; the pill before, › or ✓ at the right.
+    case 'list': return (
+      <Box key={row.key} flexDirection="column" marginY={1}>
+        {row.items.map((it, i) => (
+          <Box key={it.key} flexDirection="column">
+            {i > 0 && rule(els, `${it.key}-rule`)}
+            <Box gap={1} alignItems="center" paddingY={1}>
+              {it.badge !== undefined && drawPic(els, `${it.key}-pill`, pillSvg(it.badge, { filled: it.on === true }))}
+              {it.person === true && drawPic(els, `${it.key}-pic`, personSvg(it.label, undefined, 24))}
+              {it.badge === undefined && <Button key={it.key} plain label={it.label} onPress={press(it.action)} />}
+              <Box flexGrow={1} />
+              {it.badge !== undefined && <Button key={it.key} plain dimColor label={row.mark === 'tick' ? (it.on === true ? '✓' : '　') : '›'} onPress={press(it.action)} />}
+              {it.badge === undefined && <Text color={HEADING}>{row.mark === 'tick' ? (it.on === true ? '✓' : '') : '›'}</Text>}
+            </Box>
+          </Box>
+        ))}
+      </Box>
+    )
+    // 以 John 建 · 换 (P2b), 用 John 进「前端周会」？ (P3b): the words around the pill, then the press as a link.
+    case 'pick': return (
+      <Box key={row.key} gap={1} alignItems="center" marginY={1}>
+        {row.lead !== '' && <Text color={HEADING}>{row.lead}</Text>}
+        {drawPic(els, `${row.key}-pill`, pillSvg(row.badge))}
+        {row.trail !== '' && <Text color={HEADING}>{row.trail}</Text>}
+        {row.press !== undefined && <Text color={HEADING}>·</Text>}
+        {row.press !== undefined && picPress($, els, row.press.key, linkSvg(row.press.label), row.press.action)}
+      </Box>
+    )
+    // Nothing here yet (P1c, P2d): a grey line in the middle, the ways on under it.
+    case 'empty': return (
+      <Box key={row.key} flexDirection="column" alignItems="center" gap={1} paddingY={2}>
+        <Text color={HEADING}>{row.text}</Text>
+        <Box gap={1}>{row.items.map((b) => pressButton($, els, b))}</Box>
+      </Box>
+    )
+    // A call handed to the agent, while it answers: its card in the chat, folded to one grey line (agent 在回…).
+    case 'pending': return (
+      <Box key={row.key} marginY={1} {...OWN_CARD} paddingX={1}>
+        <Text color={HEADING}>{row.text}</Text>
+      </Box>
+    )
+    // Who came in, the earlier lines, a reply gone too far: centred and grey, a dot before who came in.
+    case 'event': return (
+      <Box key={row.key} justifyContent="center" marginY={1}>
+        <Text color={HEADING} wrap="wrap">{`${row.time !== undefined ? '● ' : ''}${row.text}${row.time !== undefined ? ` · ${row.time}` : ''}`}</Text>
+      </Box>
+    )
+    // A line said: the speaker's picture (the person's own, their avatar's colour), the name with 分身 where an agent said it and
+    // the time, then the words with the person's avatar's mention set off.
+    case 'message': {
+      const i = row.item
+      return (
+        <Box key={row.key} gap={1} marginTop={1}>
+          {drawPic(els, `${row.key}-pic`, personSvg(i.who, row.badge?.color))}
+          <Box flexDirection="column" flexGrow={1} minWidth={0}>
+            <Box gap={1} alignItems="center">
+              <Text bold>{i.who}</Text>
+              {row.tag !== undefined && drawPic(els, `${row.key}-tag`, tagSvg(row.tag))}
+              <Text color={HEADING}>{`· ${row.time}`}</Text>
+            </Box>
+            {drawSpans(els, `${row.key}-words`, row.body)}
+          </Box>
+        </Box>
+      )
+    }
+    // The chat's box: a rule, 「以 <pill> 说」, the field (Enter sends, and says so beside it).
+    case 'input': {
+      if (row.compose === undefined || Input === undefined) return undefined
+      const c = row.compose
+      return (
+        <Box key={`${row.key}-box`} flexDirection="column" marginTop={1}>
+          {rule(els, `${row.key}-rule`)}
+          <Box gap={1} alignItems="center" marginTop={1}>
+            {c.lead[0] !== '' && <Text color={HEADING}>{c.lead[0]}</Text>}
+            {drawPic(els, `${row.key}-as`, pillSvg(c.as))}
+            {c.lead[1] !== '' && <Text color={HEADING}>{c.lead[1]}</Text>}
+          </Box>
+          <Box width="100%">
+            <Input key={row.key} placeholder={c.placeholder} submitLabel={c.submitLabel} onSubmit={(value: string) => keep(submit($, row.field, value, row.target), $)} />
+          </Box>
+        </Box>
+      )
+    }
+    default: return undefined
+  }
+}
+
+function drawRow($: EngineInterface, els: Els, row: GbRow, columns: number, version: string | null = null): unknown {
   const { Box, Text, Button, Input, Select } = els
   const press = (a: GbAction) => (p?: { surface?: string }) => keep(act($, a, p?.surface), $)
+  if (els.Svg !== undefined) {
+    const pictured = drawPictured($, els, row, columns, version)
+    if (pictured !== undefined) return pictured
+  }
   const badge = (b: { color: string; initial: string }, key: string): unknown => <Text key={key} color={b.color} bold>{b.initial}</Text>
   switch (row.kind) {
     case 'head': return (
       <Box key={row.key} gap={1} alignItems="center">
         {row.back !== undefined && <Button key={`${row.key}-back`} plain dimColor label="‹" onPress={press(row.back)} />}
-        <Text bold>{row.title}</Text>
-        {row.sub !== undefined && <Box flexShrink={1} minWidth={0}><Text dimColor wrap="truncate-end">{row.sub}</Text></Box>}
+        {row.open !== undefined
+          ? <Button key={`${row.key}-open`} plain onPress={press(row.open)}><Text><Text bold>{row.title}</Text>{row.sub !== undefined && <Text dimColor>{` ${row.sub}`}</Text>}<Text dimColor> ›</Text></Text></Button>
+          : <Text bold>{row.title}</Text>}
+        {row.open === undefined && row.sub !== undefined && <Box flexShrink={1} minWidth={0}><Text dimColor wrap="truncate-end">{row.sub}</Text></Box>}
         <Box flexGrow={1} />
         {row.actions.map((b) => <Button key={b.key} plain label={b.label} onPress={press(b.action)} />)}
       </Box>
@@ -633,6 +1276,13 @@ function drawRow($: EngineInterface, els: Els, row: GbRow, columns: number): unk
             <Text>{c.badge !== undefined && <Text color={c.badge.color} bold>{`${c.badge.initial} `}</Text>}<Text {...(c.on ? { bold: true, underline: true } : { dimColor: true })}>{c.label}</Text></Text>
           </Button>
         ))}
+        {(row.actions ?? []).length > 0 && <Box flexGrow={1} />}
+        {(row.actions ?? []).map((b) => <Button key={b.key} plain label={b.count !== undefined ? `${b.label} ${b.count}` : b.label} onPress={press(b.action)} />)}
+      </Box>
+    )
+    case 'fold': return (
+      <Box key={row.key} gap={2} flexWrap="wrap">
+        {[row.more, row.muted].filter((b): b is GbPress => b !== undefined).map((b) => <Button key={b.key} label={b.label} onPress={press(b.action)} />)}
       </Box>
     )
     case 'chat': {
@@ -673,16 +1323,83 @@ function drawRow($: EngineInterface, els: Els, row: GbRow, columns: number): unk
       )
     }
     case 'text': return <Text key={row.key} wrap="wrap" {...toneOf(row.tone)}>{row.text}</Text>
+    case 'event': return <Text key={row.key} wrap="wrap" {...toneOf(row.tone)}>{row.text}</Text>
+    case 'pending': return <Text key={row.key} dimColor>{row.text}</Text>
+    case 'list': return (
+      <Box key={row.key} flexDirection="column">
+        {row.items.map((it) => (
+          <Button key={it.key} plain onPress={press(it.action)}>
+            <Text>{it.badge !== undefined && <Text color={it.badge.color} bold>{`${it.badge.initial} `}</Text>}{it.label}<Text dimColor>{row.mark === 'tick' ? (it.on === true ? ' ✓' : '') : ' ›'}</Text></Text>
+          </Button>
+        ))}
+      </Box>
+    )
+    case 'pick': return (
+      <Box key={row.key} gap={1} flexWrap="wrap">
+        {row.lead !== '' && <Text dimColor>{row.lead}</Text>}
+        <Text><Text color={row.badge.color} bold>{`${row.badge.initial} `}</Text>{row.badge.name}</Text>
+        {row.trail !== '' && <Text dimColor>{row.trail}</Text>}
+        {row.press !== undefined && <Button key={row.press.key} plain label={row.press.label} onPress={press(row.press.action)} />}
+      </Box>
+    )
+    case 'empty': return (
+      <Box key={row.key} flexDirection="column" gap={1}>
+        <Text dimColor>{row.text}</Text>
+        <Box gap={2} flexWrap="wrap">{row.items.map((b) => <Button key={b.key} label={b.label} {...(b.primary ? { variant: 'primary' } : {})} onPress={press(b.action)} />)}</Box>
+      </Box>
+    )
+    // A card of 我: the avatar's initial and name, 改; a line per label and value with its presses; 改's fields under it.
+    case 'card': return (
+      <Box key={row.key} flexDirection="column" borderStyle="round" borderColor={row.badge?.color ?? 'gray'} paddingX={1}>
+        {row.top !== undefined && drawRow($, els, row.top, columns, version)}
+        {row.top === undefined && <Box gap={1}>
+          {row.badge !== undefined && badge(row.badge, `${row.key}-badge`)}
+          {row.title !== undefined && <Text bold>{row.title}</Text>}
+          {row.tag !== undefined && <Text dimColor>{row.tag}</Text>}
+          <Box flexGrow={1} />
+          {row.edit !== undefined && <Button key={row.edit.key} plain label={row.edit.label} onPress={press(row.edit.action)} />}
+        </Box>}
+        {row.lines.map((x) => (
+          <Box key={x.key} gap={1} flexWrap="wrap">
+            <Text dimColor>{`${x.label}：`}</Text>
+            {x.choice !== undefined && Select !== undefined
+              ? <Select key={`${x.key}-choice`} label={x.label} options={x.choice.options} value={x.choice.value} onSelect={(value: string) => keep(run($, 'lang', { lang: value }).then(() => undefined), $)} />
+              : <Text wrap="wrap" {...toneOf(x.tone ?? 'plain')}>{x.value}</Text>}
+            {(x.presses ?? []).map((b) => <Button key={b.key} plain label={b.label} onPress={press(b.action)} />)}
+          </Box>
+        ))}
+        {row.fields.map((f) => drawRow($, els, f, columns, version))}
+      </Box>
+    )
+    case 'item': return (
+      <Box key={row.key} gap={1}>
+        <Text>{row.title}</Text>
+        {row.sub !== undefined && <Text dimColor>{row.sub}</Text>}
+        <Box flexGrow={1} />
+        {row.tag !== undefined && <Text dimColor>{row.tag}</Text>}
+        {row.press !== undefined && <Button key={row.press.key} plain label={row.press.label} onPress={press(row.press.action)} />}
+      </Box>
+    )
     case 'section': return (
       <Box key={row.key} gap={1} marginTop={1}>
         {row.badge !== undefined && badge(row.badge, `${row.key}-badge`)}
         <Text bold dimColor={row.badge === undefined}>{row.text}</Text>
         {row.note !== undefined && <Text dimColor>{row.note}</Text>}
+        {row.press !== undefined && <Button key={row.press.key} plain label={row.press.label} onPress={press(row.press.action)} />}
+      </Box>
+    )
+    case 'give': return (
+      <Box key={row.key} gap={1} flexWrap="wrap">
+        <Text dimColor>{row.lead}</Text>
+        {row.items.map((it) => (it.action !== undefined
+          ? <Button key={it.key} plain label={`${it.on ? '☑' : '☐'} ${it.badge.name}`} onPress={press(it.action)} />
+          : <Text key={it.key}>{`☑ ${it.badge.name}`}</Text>))}
+        {row.press !== undefined && <Button key={row.press.key} plain label={row.press.label} onPress={press(row.press.action)} />}
       </Box>
     )
     case 'input': {
       if (Input === undefined) return <Text key={row.key} dimColor>{row.placeholder}</Text>
-      return <Input key={row.key} placeholder={row.placeholder} {...(row.label !== undefined ? { label: row.label } : {})} onSubmit={(value: string) => keep(submit($, row.field, value, row.target), $)} />
+      return <Input key={row.key} placeholder={row.placeholder} {...(row.label !== undefined ? { label: row.label } : {})} {...(row.submitLabel !== undefined ? { submitLabel: row.submitLabel } : {})} {...(row.value !== undefined ? { value: row.value } : {})} onSubmit={(value: string) => keep(submit($, row.field, value, row.target), $)} />
     }
     case 'select': {
       if (Select === undefined) return <Text key={row.key} dimColor>{`${row.label}：${row.options.find((o) => o.value === row.value)?.label ?? row.value}`}</Text>
@@ -690,10 +1407,45 @@ function drawRow($: EngineInterface, els: Els, row: GbRow, columns: number): unk
     }
     case 'buttons': return (
       <Box key={row.key} gap={2} flexWrap="wrap">
-        {row.items.map((b) => <Button key={b.key} label={b.label} {...(b.primary ? { variant: 'primary' } : {})} onPress={press(b.action)} />)}
+        {row.items.map((b) => (b.disabled === true ? <Text key={b.key} dimColor>{b.label}</Text> : <Button key={b.key} label={b.label} {...(b.primary ? { variant: 'primary' } : {})} {...(b.danger === true ? { color: 'error' } : {})} onPress={press(b.action)} />))}
       </Box>
     )
     case 'toggle': return <Button key={row.key} plain label={`${row.on ? '☑' : '☐'} ${row.label}`} onPress={press(row.action)} />
+    case 'people': return (
+      <Box key={row.key} flexDirection="column">
+        {row.items.map((m) => <Text key={m.key}><Text color={m.color ?? peopleColor(m.name)} bold>{`${([...m.name.trim()][0] ?? '?').toUpperCase()} `}</Text>{m.name}{m.note !== undefined && <Text dimColor>{`  ${m.note}`}</Text>}</Text>)}
+        {row.rest !== undefined && <Text wrap="wrap">{row.rest}</Text>}
+      </Box>
+    )
+    case 'menu': return (
+      <Box key={row.key} flexDirection="column">
+        {row.items.map((it) => <Button key={it.key} plain {...(it.danger === true ? { color: 'error' } : {})} label={it.on !== undefined ? `${it.on ? '☑' : '☐'} ${it.label}` : it.go === true ? `${it.label} ›` : it.label} onPress={press(it.action)} />)}
+      </Box>
+    )
+    // The terminal copies: the words, and a press that copies them; no QR code (it draws no pictures).
+    case 'share': return (
+      <Box key={row.key} flexDirection="column" marginTop={1}>
+        <Text dimColor>{row.label}</Text>
+        <Text wrap="wrap">{row.text}</Text>
+        <Box><Button key={`${row.key}-copy`} label={row.copy} onPress={press({ op: 'copy', text: row.text })} /></Box>
+      </Box>
+    )
+    // How to pass words on where nothing copies: the terminal has its copy presses instead.
+    case 'tip': return row.pictures === true ? null : <Text key={row.key} dimColor wrap="wrap">{row.text}</Text>
+    case 'kv': return (
+      <Box key={row.key} gap={1} flexWrap="wrap">
+        <Text dimColor>{`${row.label}：`}</Text>
+        {row.go !== undefined ? <Button key={`${row.key}-open`} plain label={`${row.value} ›`} onPress={press(row.go)} /> : <Text {...toneOf(row.tone ?? 'plain')}>{row.value}</Text>}
+        {row.note !== undefined && <Text dimColor>{row.note}</Text>}
+        {row.press !== undefined && <Button key={row.press.key} plain label={row.press.label} onPress={press(row.press.action)} />}
+      </Box>
+    )
+    case 'line': return (
+      <Box key={row.key} gap={1}>
+        {row.text !== '' && <Text dimColor>{row.text}</Text>}
+        {row.press !== undefined && <Button key={row.press.key} plain label={row.press.label} onPress={press(row.press.action)} />}
+      </Box>
+    )
     case 'copy': return (
       <Box key={row.key} flexDirection="column">
         <Text wrap="wrap">{row.text}</Text>
@@ -722,9 +1474,9 @@ function drawRow($: EngineInterface, els: Els, row: GbRow, columns: number): unk
   }
 }
 
-function safeRow($: EngineInterface, els: Els, row: GbRow, columns: number): unknown {
+function safeRow($: EngineInterface, els: Els, row: GbRow, columns: number, version: string | null = null): unknown {
   try {
-    return drawRow($, els, row, columns)
+    return drawRow($, els, row, columns, version)
   } catch (err) {
     return <els.Text key={`failed-${row.key}`} color="error">{`gemsbang：${reasonOf(err)}`}</els.Text>
   }
@@ -738,7 +1490,7 @@ export const register: Register = (on) => {
     await update($, setupAtom, () => null)
     await update($, pastedAtom, () => [])
     for (const x of TOOLS) await registerOne($, x.name, () => $.tool.register({ name: x.name, description: x.description, inputSchema: x.inputSchema, isDeferred: false }))
-    await registerOne($, '/gemsbang', () => $.command.register({ name: 'gemsbang', description: 'Gemsbang：总收件箱；/gemsbang avatars 我的分身，/gemsbang settings 设置', argumentHint: '[avatars|settings]' }))
+    await registerOne($, '/gemsbang', () => $.command.register({ name: 'gemsbang', description: 'Gemsbang：总收件箱；/gemsbang avatars 我', argumentHint: '[avatars]' }))
     try {
       const manifest = JSON.parse(String(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`))) as { version?: unknown }
       if (typeof manifest.version === 'string') { const v = manifest.version; await update($, versionAtom, () => v) }
@@ -805,7 +1557,11 @@ export const register: Register = (on) => {
     const round = id === undefined ? undefined : (await readRounds($))[id]
     if (id !== undefined && round !== undefined) {
       await update($, roundsAtom, (was) => { const all = roundings(was); delete all[id]; return all as unknown as GemsbangJson })
-      if (e.reason === 'answer' && !e.isAborted) await gb($, 'round-done', { avatar: round.avatar, owner: round.owner, id: round.id, replyTo: round.replyTo, hops: round.hops, text: e.answer })
+      // Its words into the chat; an agent that judged nothing needs saying folds away. Stopped, refused, an error, or words not sent: the call is the person's again (B3).
+      if (e.reason === 'answer' && !e.isAborted) {
+        const done = await gb($, 'round-done', { avatar: round.avatar, owner: round.owner, id: round.id, replyTo: round.replyTo, hops: round.hops, text: e.answer })
+        if (done?.ok !== true) await roundFailed($, round, 'notSent')
+      } else await roundFailed($, round, e.isAborted || e.reason === 'aborted' ? 'aborted' : e.reason === 'refusal' ? 'refused' : 'error')
       return next(e)
     }
     const b = id === undefined ? undefined : (await readBorrowing($))[id]
@@ -825,6 +1581,7 @@ export const register: Register = (on) => {
   on('tool.call', { tool: 'mcp__gemsbang__im_say' }, ($, e) => serveTool($, 'im_say', e)).catch(() => ({ result: 'gemsbang could not do that' }))
   on('tool.call', { tool: 'mcp__gemsbang__im_ask' }, ($, e) => serveTool($, 'im_ask', e)).catch(() => ({ result: 'gemsbang could not do that' }))
   on('tool.call', { tool: 'mcp__gemsbang__im_read' }, ($, e) => serveTool($, 'im_read', e)).catch(() => ({ result: 'gemsbang could not do that' }))
+  on('tool.call', { tool: 'mcp__gemsbang__im_remember' }, ($, e) => serveTool($, 'im_remember', e)).catch(() => ({ result: 'gemsbang could not do that' }))
 
   // The band: one line under whatever a plugin below drew, only when gemsbang cannot work or nobody is logged in.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -833,8 +1590,8 @@ export const register: Register = (on) => {
     const { Box, Text, Button, Svg } = els
     let band: ReturnType<typeof gbBand>
     try {
-      const [view, problem, setup, now] = await Promise.all([readView($), read($, problemAtom), read($, setupAtom), $.clock.now()])
-      band = gbBand(view, problem ?? setup, new Date(now).toISOString())
+      const [view, problem, setup, now, session] = await Promise.all([readView($), read($, problemAtom), read($, setupAtom), $.clock.now(), $.session.id().catch(() => undefined)])
+      band = gbBand(view, problem ?? setup, new Date(now).toISOString(), session)
     } catch (err) {
       band = { text: `gemsbang：状态带画不出来（${reasonOf(err)}）`, tone: 'error', open: '打开', actions: [], more: 0 }
     }
@@ -844,7 +1601,7 @@ export const register: Register = (on) => {
     const lang = (await readView($).catch(() => null))?.lang ?? 'zh'
     const line = (
       <Box key="gemsbang-band" gap={1} alignItems="center" flexGrow={1}>
-        {Svg !== undefined ? <Svg source={GEMSBANG_MARK_SVG} alt="Gemsbang" width={13} height={13} /> : <Text color={GEMSBANG_BLUE} bold>{GEMSBANG_MARK_CHAR}</Text>}
+        {Svg !== undefined ? <Svg source={BRAND_MARK.source} alt="Gems'Bang" width={14} height={14} /> : <Text color={GEMSBANG_BLUE} bold>{GEMSBANG_MARK_CHAR}</Text>}
         <Box key="band-title" flexShrink={1} minWidth={0}><Text wrap="truncate-end" {...toneOf(band.tone)}>{truncate(band.text, Math.max(6, columns - cellWidth(band.open) - 8 - band.actions.reduce((w, b) => w + cellWidth(b.label) + 5, 0)))}</Text></Box>
         {band.actions.map((b) => <Button key={b.key} {...(Svg === undefined ? { plain: true } : {})} label={b.label} {...(b.primary ? { variant: 'primary' } : {})} onPress={() => keep(act($, b.action), $)} />)}
         <Box key="band-push" flexGrow={1} />
@@ -860,14 +1617,24 @@ export const register: Register = (on) => {
     const els = elementsOf($, e)
     const { Box, Text, Svg } = els
     const columns: number = e.props.bodyColumns
-    const [view, chat, link, page, filter, address, groupAs, problem, setup, version, now, needsOpen, mutedOpen, allow, adding, accountNow] = await Promise.all([
+    const [view, chat, link, page, filter, address, groupAs, problem, setup, version, now, needsOpen, mutedOpen, allow, adding, accountNow, writing, editing, plusOpen, asOpen, groupAvatarNow, joiningNow, rotating, inviteBack, node] = await Promise.all([
       readView($), read($, chatAtom), read($, linkAtom), read($, pageAtom), read($, filterAtom), read($, addressAtom), read($, groupAsAtom), read($, problemAtom), read($, setupAtom), read($, versionAtom), $.clock.now(),
-      read($, needsOpenAtom), read($, mutedOpenAtom), read($, allowAtom), read($, addingAtom), read($, accountAtom),
+      read($, needsOpenAtom), read($, mutedOpenAtom), read($, allowAtom), read($, addingAtom), read($, accountAtom), read($, writingAtom), read($, editingAtom), read($, plusOpenAtom), read($, asOpenAtom), read($, groupAvatarAtom), read($, joiningAtom),
+      read($, rotatingAtom), read($, inviteBackAtom), read($, nodeAtom),
     ])
+    const [langOpen, repoOpen, addOpen, loggingOut, allows, leaving, heir] = await Promise.all([read($, langOpenAtom), read($, repoOpenAtom), read($, addOpenAtom), read($, loggingOutAtom), read($, allowsAtom), read($, leavingAtom), read($, heirAtom)])
+    const rounds = await readRounds($)
     const session = await $.session.id().catch(() => '')
     const state: PaneState = {
       page: (PAGES as readonly string[]).includes(page) ? page as GbPage : 'inbox', filter, chat: chat as unknown as GbChat | null, link: link as unknown as GbLink | null, address, groupAs, session, problem: problem ?? setup, now: new Date(now).toISOString(),
-      needsOpen, mutedOpen, allow: (allow as unknown as Record<string, { person?: boolean; venue?: boolean }>) ?? {}, adding, account: accountNow as unknown as GbAccount | null,
+      needsOpen, mutedOpen, allow: (allow as unknown as Record<string, { person?: boolean; venue?: boolean }>) ?? {}, adding, account: accountNow as unknown as GbAccount | null, writing, editing, plusOpen, asOpen, groupAvatar: groupAvatarNow, joining: joiningNow as unknown as JoinView | null,
+      // The chats where this session's agent answers a call handed to it, while it does.
+      replying: Object.values(rounds).map((r) => `${r.owner}/${r.id}`),
+      rotating, inviteBack: inviteBack === 'info' ? 'info' : 'chat', langOpen, repoOpen, addOpen, loggingOut, version, allows: (allows as unknown as Record<string, GbAllow[]> | null) ?? {}, leaving, heir,
+      // The desktop is a Mac or Windows; a Node found as node.exe is Windows, where Ctrl+C copies.
+      copyKey: node !== null && /\.exe$/i.test(node) ? 'Ctrl+C' : '⌘C',
+      // A card's time in this machine's zone, which the client knows; a view from an older bridge has none (UTC).
+      ...(view?.zoneMinutes !== undefined ? { zoneMinutes: view.zoneMinutes } : {}),
     }
     let rows: GbRow[]
     try {
@@ -875,29 +1642,34 @@ export const register: Register = (on) => {
     } catch (err) {
       rows = [{ kind: 'text', key: 'failed', text: `gemsbang：${reasonOf(err)}`, tone: 'error' }]
     }
-    let body = rows.map((r) => safeRow($, els, r, columns))
+    let body = rows.map((r) => safeRow($, els, r, columns, version))
     // The desktop draws and presses a pane of some 1,100 elements and none past it: the body stops short, and says what it left out.
     if (Svg !== undefined) {
       const fit = fitToBudget(body)
       if (fit.left > 0) body = [...fit.kept, <Text key="rows-cut" dimColor>{`… ${fit.left}`}</Text>]
     }
+    // The inbox's own head carries the mark and the version where the surface takes pictures (GbInbox); every other page has them above it.
+    const marked = Svg !== undefined && rows.some((r) => r.key === 'head-inbox')
     return (
       <Box flexDirection="column">
-        <Box key="mark" gap={1} alignItems="center">
-          {Svg !== undefined ? <Svg source={GEMSBANG_MARK_SVG} alt="Gemsbang" width={16} height={16} /> : <Text color={GEMSBANG_BLUE} bold>{GEMSBANG_MARK_CHAR}</Text>}
-          <Box flexGrow={1} />
-          {version !== null && <Text dimColor>{version}</Text>}
-        </Box>
+        {!marked && (
+          <Box key="mark" gap={1} alignItems="center">
+            {Svg !== undefined ? drawLockup(els, 'mark-lockup') : <Text color={GEMSBANG_BLUE} bold>{GEMSBANG_MARK_CHAR}</Text>}
+            <Box flexGrow={1} />
+            {version !== null && <Text dimColor>{version}</Text>}
+          </Box>
+        )}
         {body}
       </Box>
     )
   })
 
-  // /gemsbang: the pane on the inbox, or 我的分身, or the settings.
+  // /gemsbang: the pane on the inbox, or 我 (/gemsbang settings too: 我 is the settings).
   on('command.run', { command: 'gemsbang' }, async ($, e) => {
     await retryStart($)
     const arg = String(e.args ?? '').trim()
-    const page: GbPage = arg === 'avatars' || arg === '我的分身' ? 'avatars' : arg === 'settings' || arg === '设置' ? 'settings' : 'inbox'
+    // 我 is the person's settings (S22): /gemsbang settings goes there too.
+    const page: GbPage = ['avatars', '我', '我的分身', 'settings', '设置'].includes(arg) ? 'avatars' : 'inbox'
     const opened = await openPane($, page)
     return { text: opened.isPlaced ? 'Gemsbang' : `gemsbang：${opened.reason ?? ''}` }
   }).catch(() => ({ text: 'gemsbang：命令没有完成，原因见输入框上方的状态带' }))

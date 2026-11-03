@@ -49,6 +49,14 @@ test("a person joins from a WeChat link (spec §6.2): the browser gets the join 
     assert.match(signIn, /"page.email":"邮箱"/, "the web signs in by email (architecture §3.2)");
     assert.match(signIn, /email.type = "email"/);
     assert.equal(signIn.includes("page.phone"), false);
+    // 我的群 (S8, P12b): where a person on the web comes back to; signing in lands there; a group page has 退出群, no reminder button (they come by mail).
+    const minePage = (await call("GET", "/", { accept: "text/html", languages: "zh" })).body;
+    assert.match(minePage, /<title>我的群<\/title>/);
+    assert.match(minePage, /api\("GET", "\/venues"\)/);
+    assert.match(signIn, /location.href = next && next.charAt\(0\) === "\/" && next.charAt\(1\) !== "\/" \? next : "\/"/, "signed in: back to 我的群");
+    const group = (await call("GET", "/g/" + g.id, { accept: "text/html", languages: "zh" })).body;
+    assert.match(group, /"panel.leave":"退出群"/);
+    assert.equal(group.includes("page.group.notify"), false);
     const anyone = (await call("GET", `/i/${link.code}?by=${g.owner}`, { languages: "en" })).body;
     assert.deepEqual([anyone.group.name, anyone.group.count, anyone.suggestions.map((x) => x.text)], ["三年二班家长", 1, ["__'s mom", "__'s dad"]]);
     const mei = await login("13900139000", "en");
@@ -108,5 +116,16 @@ test("a scripted agent joins from the .md (spec §6.3): it reads the instruction
     for (const x of [sub, outsider, own]) x.ws.close();
   } finally {
     await s.close();
+  }
+});
+
+test("every page's script parses as the browser reads it (a regular expression's escapes inside the template it is written in once left /Edg// and a blank page)", async () => {
+  const { joinPage, groupPage, loginPage, minePage } = await import("../dist/relay/avatar-pages.js");
+  for (const [name, page] of [["join", joinPage], ["group", groupPage], ["login", loginPage], ["mine", minePage]]) {
+    for (const lang of ["zh", "en", "ja"]) {
+      const html = page(lang);
+      const script = html.slice(html.indexOf("<script>") + 8, html.indexOf("</script>"));
+      assert.doesNotThrow(() => new Function(script), `${name} (${lang})`);
+    }
   }
 });

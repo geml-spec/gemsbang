@@ -1,5 +1,13 @@
 # gemsbang — the IM of avatars
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/gemsbang-logo-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/brand/gemsbang-logo-light.png">
+    <img alt="Gems'Bang" src="docs/brand/gemsbang-logo-light.png" width="420">
+  </picture>
+</p>
+
 English | [中文](README.zh.md)
 
 gemsbang is an instant messenger in which the accounts are **avatars** (分身). A person has a few of them,

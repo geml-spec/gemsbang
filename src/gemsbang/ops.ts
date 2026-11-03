@@ -13,9 +13,10 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { borrowEnvelope, factsOf, repoCommands } from "../core/avatar/borrow.js";
-import { badgesOf, chatOf, inboxOf, itemsOf, venueKey, type Badge, type ChatItem, type InboxRow, type Mirror, type MirrorVenue, type MirrorWork } from "../core/avatar/inbox.js";
+import { badgesOf, chatOf, inboxOf, itemsOf, recentAvatar, venueKey, type Badge, type Card, type ChatItem, type InboxRow, type Mirror, type MirrorVenue, type MirrorWork } from "../core/avatar/inbox.js";
 import { invitePrompt, parseInvite, relayOrigin } from "../core/avatar/invite.js";
-import { orderNeeds, type Need } from "../core/avatar/needs.js";
+import { orderNeeds, type Allow, type Need } from "../core/avatar/needs.js";
+import { baseFor, splitBaseLine, type BaseItem } from "../core/avatar/base.js";
 import { callKey, callOf, callsOf, roundFor, type Call, type Round } from "../core/avatar/calls.js";
 import { readRound, roundPrompt } from "../core/avatar/round.js";
 import { DEFAULT_LANG, isLang, say, type Lang } from "../core/avatar/words.js";
@@ -25,34 +26,53 @@ import { clearCache, readCache, readClient, readMirror, readSeen, writeCache, wr
 
 /** `service`: the service a person signs in to when nobody named another (home.ts's gbService); `device`: what this machine calls itself when it signs in. */
 export interface GbOptions { home: string; now: string; zoneMinutes?: number; fetchImpl?: typeof fetch; service?: string; device?: string }
+/** How long a session is open after it last came for its rounds: each wait of the hooks module is 25 seconds. */
+export const LIVE_MS = 120_000;
 export type Fail = { ok: false; code: string; params?: Record<string, string | number>; reason: string };
 /** A 需要你 card as the pane shows it: the avatar's badge, the chat's name, whether the person muted it; a borrow's, the repository it would work in. */
-export type GbNeed = Need & { avatarName: string; group?: string; badge?: Badge; muted: boolean; repo?: string };
+export type GbNeed = Need & { avatarName: string; group?: string; badge?: Badge; muted: boolean; repo?: string; unplayed?: true };
 /** A job for this machine as the pane shows it (spec §7.4): the avatar's badge and the repository it works in. */
 export type GbWork = MirrorWork & { badge?: Badge; repo?: string };
 /** The pane's whole view: the service, who is signed in, the avatars, 需要你, the inbox, what is wrong. */
 export interface GbView {
   relay: string; loggedIn: boolean; lang: Lang; person?: string; defaultName?: string;
-  avatars: (Badge & { venues: string[]; mark: boolean; muted: boolean; placeholder?: string; repo?: string; autos: { venue: string; name: string }[] })[]; rows: InboxRow[]; unread: number;
+  avatars: (Badge & { venues: string[]; mark: boolean; muted: boolean; repo?: string; autos: { venue: string; name: string }[] })[]; rows: InboxRow[]; unread: number;
   /** Who called the person's avatars, newest first (architecture §6.3); none from a bridge older than them. */
   calls?: GbCalled[];
   needs: GbNeed[]; muted: { avatars: string[]; venues: string[] };
+  /** The person's 底子 (S27), the entries an agent left waiting for their yes with it. */
+  base?: BaseItem[];
+  /** The first session after the install (Q14): nobody signed in, only it shows the line above the prompt. */
+  firstSession?: string;
   /** The jobs for this person's computers (spec §7.4); none from a bridge older than them. */
   work?: GbWork[];
   synced?: string; offline?: string; notes: { url: string; at: string }[]; bodies: Record<string, string>;
+  /** The avatar the person last spoke as (Q1): a new group's and a new session's, unasked. */
+  recent?: string;
+  /** The avatars an open session of this machine plays (seen within LIVE_MS). */
+  played?: string[];
+  /** This machine's zone, in minutes east of UTC: the pane writes a card's time in it, as the client writes a chat's. */
+  zoneMinutes?: number;
 }
 /** One chat for the pane; `zoneMinutes`, the machine's zone, for the times of its lines. */
-export interface GbChat { owner: string; id: string; kind: "group" | "dm"; name: string; count: number; as: Badge | undefined; items: ChatItem[]; earlier: number; isOwner: boolean; rules?: { forward: boolean; approve: boolean }; zoneMinutes?: number }
+/** `members`, who is in it by name (群信息, P6); `keeper`, its 群主 (S19). */
+export interface GbChat { owner: string; id: string; kind: "group" | "dm"; name: string; count: number; as: Badge | undefined; members?: Card[]; keeper?: string; items: ChatItem[]; earlier: number; isOwner: boolean; rules?: { forward: boolean; approve: boolean }; zoneMinutes?: number }
 export interface GbLink { code: string; url: string; line: string; days: number; forward: boolean; approve: boolean; isOwner: boolean; group: string }
 /** A job taken by this machine: where the borrowed agent works, what it may run, its first turn. */
 export interface GbTaken { id: string; avatar: string; summary: string; worktree: string; branch: string; commands: string[]; prompt: string }
 /** A call on one of the person's avatars as the pane shows it (architecture §6.3): its badge, and whether the person muted it. */
-export type GbCalled = Call & { badge?: Badge; muted: boolean };
-/** A round for the plugin to run: the prompt, the agent's description, where its answer goes and with how many hops. */
-export interface GbRound { avatar: string; owner: string; id: string; group: string; replyTo: string; hops: number; prompt: string; description: string }
+/** `unplayed`: a chat set to answer on its own, but no open session of this machine plays the avatar, so the person is asked (B1). `failed`: the last round handed this call ended in an error, so it is asked again, and why (B3). */
+export type GbCalled = Call & { badge?: Badge; muted: boolean; unplayed?: true; failed?: RoundWhy };
+/** A standing 以后不用问 as 我 shows it (S23): who asked, by name, and the chat's name. */
+export type GbAllow = Allow & { who?: string; group?: string };
+/** A round for the plugin to run: the prompt, the agent's description, where its answer goes and with how many hops; `since`, the line let go before it, for the call to come back to when it fails. */
+export interface GbRound { avatar: string; owner: string; id: string; group: string; replyTo: string; hops: number; since?: string; prompt: string; description: string }
+/** Why a round said nothing in its chat by error (B3): no agent to run it, stopped, refused, an error, or its words not sent. An agent that judged nothing needs saying is not one. */
+export const ROUND_WHYS = ["noAgent", "aborted", "refused", "error", "notSent"] as const;
+export type RoundWhy = typeof ROUND_WHYS[number];
 /** The account as the pane shows it (architecture §3.1): the ways in, and the devices signed in with the avatars their agents play. */
 export interface GbAccount { methods: { id: string; kind: string; shown: string; at: string }[]; devices: { id: string; name: string; at: string; current: boolean; avatars: { id: string; name: string }[] }[] }
-export type GbResult = ({ ok: true; view?: GbView; chat?: GbChat; link?: GbLink; info?: Record<string, unknown>; joined?: Record<string, unknown>; text?: string; sent?: string; work?: GbTaken; round?: GbRound; rounds?: GbRound[]; account?: GbAccount }) | Fail;
+export type GbResult = ({ ok: true; view?: GbView; chat?: GbChat; link?: GbLink; info?: Record<string, unknown>; joined?: Record<string, unknown>; text?: string; sent?: string; work?: GbTaken; round?: GbRound; rounds?: GbRound[]; account?: GbAccount; allows?: GbAllow[] }) | Fail;
 
 const obj = (v: unknown): Record<string, unknown> => (typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 const str = (v: unknown): string | undefined => (typeof v === "string" && v !== "" ? v : undefined);
@@ -61,7 +81,7 @@ const CHAT_LINES = 200;
 /** A sync reads at most this many answers of the box (a page each, or a gap filled) before it saves what it has. */
 const SYNC_ROUNDS = 20;
 /** The documents of an avatar of the person's whose update says to read a piece again. */
-const PIECES: Readonly<Record<string, string>> = { "joined.geml": "venues", "needs.geml": "needs", "requests.geml": "needs", "work.geml": "work", "rules.geml": "marks", "templates.geml": "placeholders", "auto.geml": "autos" };
+const PIECES: Readonly<Record<string, string>> = { "joined.geml": "venues", "needs.geml": "needs", "requests.geml": "needs", "work.geml": "work", "rules.geml": "marks", "auto.geml": "autos" };
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
 /** How this machine names itself to the service when it signs in: its system, and Claude Code. */
 export const deviceName = (platform: string = process.platform): string => `${platform === "darwin" ? "Mac" : platform === "win32" ? "Windows" : platform === "linux" ? "Linux" : platform} · Claude Code`;
@@ -118,17 +138,23 @@ export class Gb {
 
   view(m: Mirror | undefined, offline?: string): GbView {
     const c = this.client;
+    const played = this.played();
     const seen = readSeen(this.o.home);
     const box = m === undefined ? { badges: [], rows: [], unread: 0 } : inboxOf(m, seen, this.o.now, { ...(this.o.zoneMinutes !== undefined ? { zoneMinutes: this.o.zoneMinutes } : {}) });
     const marks = m?.marks ?? {};
-    const avatars = box.badges.map((b) => ({ ...b, venues: (m?.venues ?? []).filter((v) => v.as === b.id).map((v) => v.name), mark: marks[b.id] ?? true, muted: c.muted.avatars.includes(b.id), ...(m?.placeholders?.[b.id] !== undefined ? { placeholder: m.placeholders[b.id] } : {}), ...(c.repos[b.id] !== undefined ? { repo: c.repos[b.id] } : {}), autos: (m?.autos?.[b.id] ?? []).map((k) => ({ venue: k, name: m?.venues.find((x) => venueKey(x.owner, x.id) === k)?.name ?? k })) }));
-    const needs = orderNeeds(m?.needs ?? []).map((n) => ({ ...n, ...(box.badges.find((b) => b.id === n.avatar) !== undefined ? { badge: box.badges.find((b) => b.id === n.avatar)! } : {}), muted: c.muted.avatars.includes(n.avatar) || (n.venue !== undefined && c.muted.venues.includes(venueKey(n.venue.owner, n.venue.id))) , ...(n.kind === "borrow" && c.repos[n.avatar] !== undefined ? { repo: c.repos[n.avatar] } : {}) }));
-    const calls: GbCalled[] = m === undefined ? [] : callsOf(m, { dismissed: c.dismissed, autos: m.autos ?? {} }).map((x) => ({ ...x, ...(box.badges.find((b) => b.id === x.avatar) !== undefined ? { badge: box.badges.find((b) => b.id === x.avatar)! } : {}), muted: c.muted.avatars.includes(x.avatar) || c.muted.venues.includes(venueKey(x.owner, x.id)) }));
+    const avatars = box.badges.map((b) => ({ ...b, venues: (m?.venues ?? []).filter((v) => v.as === b.id).map((v) => v.name), mark: marks[b.id] ?? true, muted: c.muted.avatars.includes(b.id), ...(c.repos[b.id] !== undefined ? { repo: c.repos[b.id] } : {}), autos: (m?.autos?.[b.id] ?? []).map((k) => ({ venue: k, name: m?.venues.find((x) => venueKey(x.owner, x.id) === k)?.name ?? k })) }));
+    const needs = orderNeeds(m?.needs ?? []).map((n) => ({ ...n, ...(box.badges.find((b) => b.id === n.avatar) !== undefined ? { badge: box.badges.find((b) => b.id === n.avatar)! } : {}), muted: c.muted.avatars.includes(n.avatar) || (n.venue !== undefined && c.muted.venues.includes(venueKey(n.venue.owner, n.venue.id))) , ...(n.kind === "borrow" && c.repos[n.avatar] !== undefined ? { repo: c.repos[n.avatar] } : {}), ...(n.kind === "borrow" && !played.has(n.avatar) ? { unplayed: true as const } : {}) }));
+    const calls: GbCalled[] = m === undefined ? [] : callsOf(m, { dismissed: c.dismissed, autos: m.autos ?? {} }).map((x) => ({ ...x, ...(box.badges.find((b) => b.id === x.avatar) !== undefined ? { badge: box.badges.find((b) => b.id === x.avatar)! } : {}), muted: c.muted.avatars.includes(x.avatar) || c.muted.venues.includes(venueKey(x.owner, x.id)) }))
+      // B1: a chat that answers on its own, for an avatar no open session plays, asks the person as any call does.
+      .map((x) => (x.auto && !played.has(x.avatar) ? { ...x, auto: false, unplayed: true as const } : x))
+      // B3: the last round handed it ended in an error: asked again, as any call is, and told why.
+      .map((x) => { const why = this.failedOf(x); return why !== undefined ? { ...x, auto: false, failed: why } : x; });
     const work = (m?.work ?? []).map((w) => ({ ...w, ...(box.badges.find((b) => b.id === w.avatar) !== undefined ? { badge: box.badges.find((b) => b.id === w.avatar)! } : {}), ...(c.repos[w.avatar] !== undefined ? { repo: c.repos[w.avatar] } : {}) }));
     return {
       relay: this.origin, loggedIn: c.token !== undefined, lang: this.lang,
       ...(c.person !== undefined ? { person: c.person } : {}), ...(m?.defaultName !== undefined ? { defaultName: m.defaultName } : {}),
-      avatars, rows: box.rows, unread: box.unread, needs, calls, muted: c.muted, work, ...(m !== undefined ? { synced: m.at } : {}), ...(offline !== undefined ? { offline } : {}), notes: c.notes, bodies: c.bodies,
+      avatars, rows: box.rows, unread: box.unread, needs, calls, muted: c.muted, work, ...(m !== undefined ? { synced: m.at } : {}), ...(offline !== undefined ? { offline } : {}), notes: c.notes, bodies: c.bodies, ...(m?.base !== undefined ? { base: m.base } : {}), ...(c.firstSession !== undefined ? { firstSession: c.firstSession } : {}), ...(m !== undefined && recentAvatar(m) !== undefined ? { recent: recentAvatar(m)! } : {}), played: [...played],
+      ...(this.o.zoneMinutes !== undefined ? { zoneMinutes: this.o.zoneMinutes } : {}),
     };
   }
 
@@ -230,12 +256,9 @@ export class Gb {
       const defaultName = str(b["defaultName"]);
       if (defaultName !== undefined) m.defaultName = defaultName; else delete m.defaultName;
       m.avatars = (Array.isArray(b["avatars"]) ? b["avatars"] : []) as Mirror["avatars"];
+      m.base = (Array.isArray(b["base"]) ? b["base"] : []) as BaseItem[];
     }
     if (stale.has("me") || stale.has("marks")) m.marks = await this.latestOf(m.avatars, "rules.geml", (v) => (typeof v["mark"] === "boolean" ? v["mark"] : undefined), true);
-    if (stale.has("me") || stale.has("placeholders")) {
-      const texts = await this.latestOf(m.avatars, "templates.geml", (v) => ("text" in v ? (typeof v["text"] === "string" ? v["text"] : null) : undefined), null);
-      m.placeholders = Object.fromEntries(Object.entries(texts).filter((e): e is [string, string] => typeof e[1] === "string"));
-    }
     if (stale.has("me") || stale.has("autos")) {
       const autos: Record<string, string[]> = {};
       for (const a of m.avatars) {
@@ -257,6 +280,8 @@ export class Gb {
         if (known !== undefined) {
           known.name = str(v["name"]) ?? known.name;
           if (Array.isArray(v["members"])) known.members = v["members"] as MirrorVenue["members"];
+          if (typeof v["keeper"] === "string") known.keeper = v["keeper"];
+          if (Array.isArray(v["former"])) known.former = v["former"] as Card[];
           known.as = as;
           next.push(known);
         } else {
@@ -289,7 +314,8 @@ export class Gb {
     if (one.status !== 200) return undefined;
     const b = obj(one.body), venue = obj(b["venue"]);
     const blocks = (Array.isArray(b["blocks"]) ? b["blocks"] : []) as MirrorVenue["blocks"];
-    return { owner, id, kind: (venue["kind"] ?? listed["kind"]) === "dm" ? "dm" : "group", name: str(venue["name"]) ?? str(listed["name"]) ?? id, members: (Array.isArray(venue["members"]) ? venue["members"] : []) as MirrorVenue["members"], as, ...(b["rules"] !== undefined ? { rules: b["rules"] as MirrorVenue["rules"] } : {}), blocks: blocks.slice(-CHAT_LINES) };
+    const keeper = str(venue["keeper"]), former = Array.isArray(venue["former"]) ? (venue["former"] as Card[]) : undefined;
+    return { owner, id, kind: (venue["kind"] ?? listed["kind"]) === "dm" ? "dm" : "group", name: str(venue["name"]) ?? str(listed["name"]) ?? id, members: (Array.isArray(venue["members"]) ? venue["members"] : []) as MirrorVenue["members"], as, ...(b["rules"] !== undefined ? { rules: b["rules"] as MirrorVenue["rules"] } : {}), blocks: blocks.slice(-CHAT_LINES), ...(keeper !== undefined ? { keeper } : {}), ...(former !== undefined && former.length > 0 ? { former } : {}) };
   }
 
   /** The blocks' values of one of an avatar's own documents; out of reach or refused, none. */
@@ -413,7 +439,8 @@ export class Gb {
 
   private chat(m: Mirror, v: MirrorVenue): GbChat {
     const c = chatOf(v, m);
-    return { owner: v.owner, id: v.id, kind: v.kind, name: c.name, count: c.count, as: c.as, items: c.items, earlier: c.earlier, isOwner: v.owner === v.as, ...(v.rules !== undefined ? { rules: v.rules } : {}), ...(this.o.zoneMinutes !== undefined ? { zoneMinutes: this.o.zoneMinutes } : {}) };
+    const keeper = v.keeper ?? v.owner;
+    return { owner: v.owner, id: v.id, kind: v.kind, name: c.name, count: c.count, as: c.as, members: v.members.map((x) => ({ id: x.id, name: x.name })), keeper, items: c.items, earlier: c.earlier, isOwner: keeper === v.as, ...(v.rules !== undefined ? { rules: v.rules } : {}), ...(this.o.zoneMinutes !== undefined ? { zoneMinutes: this.o.zoneMinutes } : {}) };
   }
 
   /** One chat brought up to date and shown, its last line marked seen. */
@@ -460,7 +487,7 @@ export class Gb {
   private linkOf(v: MirrorVenue, link: Record<string, unknown>): GbLink {
     const code = str(link["code"]) ?? "";
     const days = Math.max(1, Math.ceil((Date.parse(str(link["expires"]) ?? this.o.now) - Date.parse(this.o.now)) / 86_400_000));
-    return { code, url: `${this.origin}${str(link["path"]) ?? `/i/${code}`}`, line: invitePrompt(this.origin, code, v.name, this.lang), days, forward: link["forward"] !== false, approve: link["approve"] === true, isOwner: v.owner === v.as, group: v.name };
+    return { code, url: `${this.origin}${str(link["path"]) ?? `/i/${code}`}`, line: invitePrompt(this.origin, code, v.name, this.lang), days, forward: link["forward"] !== false, approve: link["approve"] === true, isOwner: (v.keeper ?? v.owner) === v.as, group: v.name };
   }
 
   /** The group's link to hand out, and the line for someone's agent; `rotate`, a new one in its place. */
@@ -550,12 +577,6 @@ export class Gb {
     return { ok: true, view: this.view(readMirror(this.o.home)) };
   }
 
-  /** What an avatar says while it waits for the person; empty, the language's own. */
-  placeholder(args: Record<string, unknown>): Promise<GbResult> {
-    const text = str(args["text"]);
-    return this.call("POST", `/avatars/${str(args["avatar"]) ?? ""}/placeholder`, { text: text ?? null }).then((r) => this.thenSync(r));
-  }
-
   // --- 被叫到 (architecture §6.3) ---
 
   /** The chat brought up to date, without marking it seen: a round reads what is there now. */
@@ -565,8 +586,20 @@ export class Gb {
     return this.mirrorVenue(owner, id);
   }
 
-  private roundOut(r: Round): GbRound {
-    return { avatar: r.avatar, owner: r.owner, id: r.id, group: r.group, replyTo: r.replyTo, hops: r.hops, prompt: roundPrompt(r.input), description: say("round.description", this.lang, { group: r.group }) };
+  /** The 底子 entries an avatar may use (S27): the kept ones given to it, as a round's prompt carries them. */
+  private baseOf(m: Mirror, avatar: string): { label: string; text: string }[] {
+    return baseFor(m.base ?? [], avatar).map((x) => ({ label: x.label, text: x.text }));
+  }
+
+  private roundOut(r: Round, since: string | undefined): GbRound {
+    return { avatar: r.avatar, owner: r.owner, id: r.id, group: r.group, replyTo: r.replyTo, hops: r.hops, ...(since !== undefined ? { since } : {}), prompt: roundPrompt(r.input), description: say("round.description", this.lang, { group: r.group }) };
+  }
+
+  /** Why the last round handed this call failed, while the line it answered still calls the avatar (B3); a line of its own since, and the call is a new one. */
+  private failedOf(call: Call): RoundWhy | undefined {
+    const f = this.client.failed?.[callKey(call.avatar, call.owner, call.id)];
+    if (f === undefined || !call.lines.some((l) => l.id === f.last)) return undefined;
+    return (ROUND_WHYS as readonly string[]).includes(f.why) ? (f.why as RoundWhy) : "error";
   }
 
   /**
@@ -591,10 +624,61 @@ export class Gb {
       if (r.status !== 200) return this.refused(r);
     }
     this.client.dismissed[key] = call.last;
+    if (this.client.failed !== undefined) delete this.client.failed[key];
     this.save();
     const synced = choice === "auto" ? await this.sync() : { ok: true as const, view: this.view(at.m) };
     if (!synced.ok || choice === "no") return synced;
-    return { ...synced, round: this.roundOut(roundFor(at.v, call, { name, why: choice === "auto" ? "auto" : "asked", mark: at.m.marks?.[avatar] ?? true })) };
+    return { ...synced, round: this.roundOut(roundFor(at.v, call, { name, why: choice === "auto" ? "auto" : "asked", mark: at.m.marks?.[avatar] ?? true, base: this.baseOf(at.m, avatar) }), since) };
+  }
+
+  /** An avatar's standing 以后不用问 (S23), named from the chats this machine keeps; or one taken back (撤 in 我). */
+  async allows(args: Record<string, unknown>): Promise<GbResult> {
+    const avatar = str(args["avatar"]) ?? "", key = str(args["allow"]);
+    const r = key === undefined ? await this.call("GET", `/avatars/${avatar}/allows`) : await this.call("POST", `/avatars/${avatar}/allows`, { allow: key });
+    if (this.isFail(r)) return r;
+    if (r.status !== 200) return this.refused(r);
+    const m = readMirror(this.o.home);
+    const name = (id: string): string | undefined => m?.venues.flatMap((v) => v.members).find((x) => x.id === id)?.name;
+    const group = (v: { owner: string; id: string }): string | undefined => m?.venues.find((x) => x.owner === v.owner && x.id === v.id)?.name;
+    const list = Array.isArray(obj(r.body)["allows"]) ? (obj(r.body)["allows"] as Allow[]) : [];
+    return { ok: true, allows: list.map((x) => ({ ...x, ...(x.person !== undefined && name(x.person) !== undefined ? { who: name(x.person)! } : {}), ...(x.venue !== undefined && group(x.venue) !== undefined ? { group: group(x.venue)! } : {}) })) };
+  }
+
+  /**
+   * 退出群 (S19): the session's avatar out of a group — its 群主 naming who keeps it (`heir`); the group gone when it was
+   * the last one. Its muting goes with it; the chat leaves the list once the box says so.
+   */
+  async leave(args: Record<string, unknown>): Promise<GbResult> {
+    const owner = str(args["owner"]) ?? "", id = str(args["id"]) ?? "", heir = str(args["heir"]);
+    const at = this.mirrorVenue(owner, id);
+    if (at === undefined) return this.fail("client.noVenue");
+    const r = await this.call("POST", `/venues/${owner}/${id}/leave`, { as: at.v.as, ...(heir !== undefined ? { heir } : {}) });
+    if (this.isFail(r)) return r;
+    if (r.status !== 200) return this.refused(r);
+    const key = venueKey(owner, id);
+    if (this.client.muted.venues.includes(key)) { this.client.muted.venues = this.client.muted.venues.filter((x) => x !== key); this.save(); }
+    return this.sync();
+  }
+
+  /** The chats brought up to date; the first session that asks is kept as the first after the install (Q14). */
+  status(args: Record<string, unknown>): Promise<GbResult> {
+    const session = str(args["session"]);
+    if (session !== undefined && session !== "" && this.client.firstSession === undefined) { this.client.firstSession = session; this.save(); }
+    return this.sync();
+  }
+
+  /** 底子 (S27): an entry the person writes in 我 — 「家人：Lily，8 岁」, split at its colon — given to the avatars they name. */
+  baseAdd(args: Record<string, unknown>): Promise<GbResult> {
+    const { label, text } = splitBaseLine(str(args["text"]) ?? "");
+    const given = Array.isArray(args["for"]) ? args["for"] : [];
+    return this.call("POST", "/base", { label, text, for: given }).then((r) => (this.isFail(r) ? r : r.status !== 201 ? this.refused(r) : this.sync()));
+  }
+
+  /** 底子: one changed by the person — new words, other avatars, 删; a waiting one 记下 or 不记. */
+  baseSet(args: Record<string, unknown>): Promise<GbResult> {
+    const body: Record<string, unknown> = {};
+    for (const k of ["text", "for", "drop", "keep"]) if (args[k] !== undefined) body[k] = args[k];
+    return this.call("POST", `/base/${str(args["item"]) ?? ""}`, body).then((r) => this.thenSync(r));
   }
 
   /** A chat set to answer on its own, or taken back (撤 in 我的分身). */
@@ -605,17 +689,20 @@ export class Gb {
   /** The rounds this session runs on its own: the calls in chats set to answer on their own, for the avatar it speaks for; each let go as it is handed out. */
   async rounds(args: Record<string, unknown>): Promise<GbResult> {
     const session = str(args["session"]);
-    const avatar = session === undefined ? undefined : this.client.bodies[session];
+    if (session !== undefined) { this.client.seen = { ...(this.client.seen ?? {}), [session]: this.o.now }; this.save(); }
+    const avatar = session === undefined ? undefined : this.sessionAvatar(session);
     const m = readMirror(this.o.home);
     if (avatar === undefined || m === undefined) return { ok: true, rounds: [] };
     const name = m.avatars.find((a) => a.id === avatar)?.name ?? avatar;
     const out: GbRound[] = [];
     for (const call of callsOf(m, { dismissed: this.client.dismissed, autos: m.autos ?? {} })) {
-      if (call.avatar !== avatar || !call.auto) continue;
+      // One that failed is the person's again (B3), not handed out once more.
+      if (call.avatar !== avatar || !call.auto || this.failedOf(call) !== undefined) continue;
       const v = m.venues.find((x) => x.owner === call.owner && x.id === call.id);
       if (v === undefined) continue;
-      this.client.dismissed[callKey(avatar, call.owner, call.id)] = call.last;
-      out.push(this.roundOut(roundFor(v, call, { name, why: "auto", mark: m.marks?.[avatar] ?? true })));
+      const key = callKey(avatar, call.owner, call.id), since = this.client.dismissed[key];
+      this.client.dismissed[key] = call.last;
+      out.push(this.roundOut(roundFor(v, call, { name, why: "auto", mark: m.marks?.[avatar] ?? true, base: this.baseOf(m, avatar) }), since));
     }
     if (out.length > 0) this.save();
     return { ok: true, rounds: out };
@@ -626,9 +713,15 @@ export class Gb {
     const avatar = str(args["avatar"]) ?? "", owner = str(args["owner"]) ?? "", id = str(args["id"]) ?? "", replyTo = str(args["replyTo"]);
     const hops = typeof args["hops"] === "number" ? args["hops"] : 0;
     const out = readRound(typeof args["text"] === "string" ? args["text"] : "", "reply");
-    if (out.reply === undefined && out.ask === undefined) return { ok: true };
+    if (out.reply === undefined && out.ask === undefined && out.remember === undefined) return { ok: true };
     const token = await this.avatarToken(avatar);
     if (this.isFail(token)) return token;
+    // One the agent would keep about the person (S27): waiting in 我's 底子 for their yes.
+    if (out.remember !== undefined) {
+      const r = await this.call("POST", "/base", out.remember, token);
+      if (this.isFail(r)) return r;
+      if (r.status !== 201) return this.refused(r);
+    }
     if (out.reply !== undefined) {
       const r = await this.call("POST", `/venues/${owner}/${id}/messages`, { text: out.reply, id: `r-${randomBytes(5).toString("hex")}`, hops, ...(replyTo !== undefined ? { replyTo } : {}) }, token);
       if (this.isFail(r)) return r;
@@ -642,6 +735,26 @@ export class Gb {
       if (r.status !== 201) return this.refused(r);
     }
     return this.sync();
+  }
+
+  /**
+   * A round that said nothing in its chat by error (B3): its call comes back
+   * — the line let go before it again, unless the person let a later one go
+   * meanwhile — marked with why, and asked as any call is until the person
+   * hands it over again or lets it go.
+   */
+  roundFailed(args: Record<string, unknown>): GbResult {
+    const avatar = str(args["avatar"]) ?? "", owner = str(args["owner"]) ?? "", id = str(args["id"]) ?? "", replyTo = str(args["replyTo"]) ?? "", since = str(args["since"]);
+    const given = str(args["why"]);
+    const why: RoundWhy = (ROUND_WHYS as readonly string[]).includes(given ?? "") ? (given as RoundWhy) : "error";
+    const key = callKey(avatar, owner, id);
+    if (this.client.dismissed[key] === replyTo) {
+      if (since !== undefined) this.client.dismissed[key] = since;
+      else delete this.client.dismissed[key];
+    }
+    this.client.failed = { ...(this.client.failed ?? {}), [key]: { last: replyTo, why } };
+    this.save();
+    return { ok: true, view: this.view(readMirror(this.o.home)) };
   }
 
   // --- 任务 (spec §7.4, once called 借电脑) ---
@@ -677,7 +790,8 @@ export class Gb {
    */
   async workTake(args: Record<string, unknown>): Promise<GbResult> {
     const session = str(args["session"]), avatar = str(args["avatar"]), id = str(args["work"]), root = str(args["root"]);
-    if (session === undefined || avatar === undefined || this.client.bodies[session] !== avatar) return this.fail("body.none");
+    // The session that plays the avatar takes its jobs; one no open session plays, any session the person pressed 现在干 in (B1).
+    if (session === undefined || avatar === undefined || (this.sessionAvatar(session) !== avatar && this.played().has(avatar))) return this.fail("body.none");
     const w = readMirror(this.o.home)?.work?.find((x) => x.id === id && x.avatar === avatar);
     if (w === undefined) return this.fail("work.missing");
     const repo = this.client.repos[avatar];
@@ -757,8 +871,33 @@ export class Gb {
 
   private body(args: Record<string, unknown>): string | Fail {
     const session = str(args["session"]);
-    const avatar = session === undefined ? undefined : this.client.bodies[session];
+    const avatar = session === undefined ? undefined : this.sessionAvatar(session);
     return avatar ?? this.fail("body.none");
+  }
+
+  /**
+   * The avatar a session plays (S21): the one it was given, else — a new session — the one the person last spoke as,
+   * kept for it from then on; undefined while the person has no avatar.
+   */
+  /** The avatars an open session of this machine plays: one that came for its rounds within LIVE_MS. */
+  private played(): Set<string> {
+    const out = new Set<string>(), now = Date.parse(this.o.now);
+    for (const [session, at] of Object.entries(this.client.seen ?? {})) {
+      const avatar = this.client.bodies[session];
+      if (avatar !== undefined && now - Date.parse(at) <= LIVE_MS) out.add(avatar);
+    }
+    return out;
+  }
+
+  private sessionAvatar(session: string): string | undefined {
+    const kept = this.client.bodies[session];
+    if (kept !== undefined) return kept;
+    const m = readMirror(this.o.home);
+    const recent = m === undefined ? undefined : recentAvatar(m);
+    if (recent === undefined) return undefined;
+    this.client.bodies[session] = recent;
+    this.save();
+    return recent;
   }
 
   /** The avatar's own token, asked for once with the person's (spec §2.4: what an agent says is `by: agent`). */
@@ -794,7 +933,11 @@ export class Gb {
       if (this.isFail(r)) return r;
       if (r.status !== 200) return this.refused(r);
       const lines = ((r.body as Record<string, unknown>[]) ?? []).map((x) => `${String(x["owner"])}/${String(x["id"])} · ${x["kind"] === "dm" ? say("panel.dm", this.lang) : ""}「${String(x["name"])}」`);
-      return { ok: true, text: [say("tool.venues", this.lang, { name }), ...lines].join("\n") };
+      // 底子 (S27, hard rule 10): what the person gave this avatar, to use only where the matter comes up.
+      const b = await this.call("GET", "/base", undefined, token);
+      const given = !this.isFail(b) && b.status === 200 && Array.isArray(obj(b.body)["base"]) ? (obj(b.body)["base"] as BaseItem[]) : [];
+      const base = given.length === 0 ? [] : ["", say("tool.base", this.lang), ...given.map((x) => `- ${x.label !== "" ? `${x.label}：` : ""}${x.text}`)];
+      return { ok: true, text: [say("tool.venues", this.lang, { name }), ...lines, ...base].join("\n") };
     }
     const r = await this.call("GET", `/venues/${v.owner}/${v.id}`, undefined, token);
     if (this.isFail(r)) return r;
@@ -814,7 +957,7 @@ export class Gb {
     const token = await this.avatarToken(avatar);
     if (this.isFail(token)) return token;
     const body: Record<string, unknown> = {};
-    for (const k of ["venue", "kind", "summary", "checked", "draft", "options", "expires", "placeholder", "from"]) if (args[k] !== undefined) body[k] = args[k];
+    for (const k of ["venue", "kind", "summary", "checked", "draft", "options", "expires", "from"]) if (args[k] !== undefined) body[k] = args[k];
     if (typeof args["replyTo"] === "string") body["message"] = args["replyTo"];
     const r = await this.call("POST", "/needs", body, token);
     if (this.isFail(r)) return r;
@@ -826,6 +969,21 @@ export class Gb {
     const group = v === undefined ? "" : m?.venues.find((x) => x.owner === v.owner && x.id === v.id)?.name ?? v.id;
     const name = m?.avatars.find((a) => a.id === avatar)?.name ?? avatar;
     return { ok: true, text: say("tool.asked", this.lang, { kind: say(`need.kind.${String(need["kind"])}`, this.lang), name, group }), sent: String(need["id"] ?? "") };
+  }
+
+  /** im_remember (S27): something about the person this session's avatar would keep in their 底子, waiting in 我 for their yes. */
+  async toolRemember(args: Record<string, unknown>): Promise<GbResult> {
+    const avatar = this.body(args);
+    if (this.isFail(avatar)) return avatar;
+    const token = await this.avatarToken(avatar);
+    if (this.isFail(token)) return token;
+    const body: Record<string, unknown> = { label: str(args["label"]) ?? "", text: args["text"] };
+    if (typeof args["who"] === "string") body["who"] = args["who"];
+    const r = await this.call("POST", "/base", body, token);
+    if (this.isFail(r)) return r;
+    if (r.status !== 201) return this.refused(r);
+    const label = str(args["label"]) ?? "";
+    return { ok: true, text: say("tool.remembered", this.lang, { what: `${label !== "" ? `${label}：` : ""}${String(args["text"])}` }) };
   }
 
   /** im_say: a line in a venue as this session's avatar, `by: agent`. */
@@ -849,13 +1007,13 @@ export class Gb {
 }
 
 /** The calls the bridge answers, by name. */
-export const GB_CALLS = ["status", "wait", "setup", "login-start", "login-verify", "logout", "first-avatar", "account", "method-start", "method-verify", "method-remove", "device-revoke", "devices-revoke-others", "open", "say", "group", "link", "rotate", "link-rules", "rename", "mark", "default-name", "lang", "bind", "note", "link-info", "join", "answer", "mute", "placeholder", "wake", "auto", "rounds", "round-done", "repo", "work-take", "work-done", "work-now", "tool-read", "tool-say", "tool-ask"] as const;
+export const GB_CALLS = ["status", "wait", "setup", "login-start", "login-verify", "logout", "first-avatar", "account", "method-start", "method-verify", "method-remove", "device-revoke", "devices-revoke-others", "open", "say", "group", "link", "rotate", "link-rules", "rename", "mark", "default-name", "lang", "bind", "note", "link-info", "join", "answer", "mute", "wake", "auto", "allows", "rounds", "round-done", "round-failed", "repo", "work-take", "work-done", "work-now", "tool-read", "tool-say", "tool-ask", "tool-remember", "base-add", "base-set", "leave"] as const;
 export type GbCall = (typeof GB_CALLS)[number];
 
 export async function runGb(call: string, args: Record<string, unknown>, o: GbOptions): Promise<GbResult> {
   const gb = new Gb(o);
   switch (call as GbCall) {
-    case "status": return gb.sync();
+    case "status": return gb.status(args);
     case "wait": return gb.wait(args);
     case "setup": return gb.setup(args);
     case "login-start": return gb.loginStart(args);
@@ -884,13 +1042,18 @@ export async function runGb(call: string, args: Record<string, unknown>, o: GbOp
     case "join": return gb.join(args);
     case "tool-read": return gb.toolRead(args);
     case "tool-say": return gb.toolSay(args);
+    case "tool-remember": return gb.toolRemember(args);
+    case "base-add": return gb.baseAdd(args);
+    case "base-set": return gb.baseSet(args);
+    case "leave": return gb.leave(args);
     case "answer": return gb.answer(args);
     case "mute": return gb.mute(args);
-    case "placeholder": return gb.placeholder(args);
     case "wake": return gb.wake(args);
     case "auto": return gb.auto(args);
+    case "allows": return gb.allows(args);
     case "rounds": return gb.rounds(args);
     case "round-done": return gb.roundDone(args);
+    case "round-failed": return gb.roundFailed(args);
     case "repo": return gb.repo(args);
     case "work-take": return gb.workTake(args);
     case "work-done": return gb.workDone(args);

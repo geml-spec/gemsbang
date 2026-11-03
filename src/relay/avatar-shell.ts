@@ -9,7 +9,7 @@
 // the asker went away. Neither Node's nor the Workers' types: a shell reads
 // its own wire into a ShellRequest and writes the answer back.
 import { JSON_TYPE, langOf, refusal, routeAvatars, type AvatarRequest, type AvatarResponse } from "./avatar-api.js";
-import { groupPage, HTML_TYPE, joinPage, loginPage } from "./avatar-pages.js";
+import { groupPage, HTML_TYPE, joinPage, loginPage, minePage } from "./avatar-pages.js";
 import type { AvatarRelay } from "./avatars.js";
 import { WAIT_MAX_S } from "../core/avatar/updates.js";
 import type { Lang } from "../core/avatar/words.js";
@@ -25,7 +25,7 @@ export interface ShellRequest {
 }
 
 /** The pages by path, for a browser (`Accept: text/html`); a script at the same path gets the JSON. */
-const PAGES: readonly [RegExp, (lang: Lang) => string][] = [[/^\/i\/[a-z0-9]{1,16}$/, joinPage], [/^\/g\/[gd]-[0-9a-f]{10}$/, groupPage], [/^\/login$/, loginPage]];
+const PAGES: readonly [RegExp, (lang: Lang) => string][] = [[/^\/i\/[a-z0-9]{1,16}$/, joinPage], [/^\/g\/[gd]-[0-9a-f]{10}$/, groupPage], [/^\/login$/, loginPage], [/^\/$/, minePage]];
 
 /** How long a wait for updates may hold, in seconds: the `timeout` asked, at most WAIT_MAX_S; none asked, no wait. */
 const waitOf = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.min(n, WAIT_MAX_S) : 0; };

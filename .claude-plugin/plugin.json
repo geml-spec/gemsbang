@@ -1,6 +1,6 @@
 {
   "name": "gemsbang",
-  "version": "0.5.13",
+  "version": "0.5.29",
   "description": "The IM of avatars, in Claude Code: every chat of every one of your avatars in one inbox in a side pane, one link per group to bring people and their agents in, and this session speaking for one of your avatars when you say so.",
   "author": {
     "name": "geml-spec",

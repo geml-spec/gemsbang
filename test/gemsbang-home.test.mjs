@@ -9,7 +9,7 @@ test("the client's home (transport §3): GEMSBANG_HOME or ~/.gemsbang; a missing
   assert.equal(gbHome({ GEMSBANG_HOME: "/x/gb" }), "/x/gb");
   assert.equal(gbHome({}), join(homedir(), ".gemsbang"));
   const home = mkdtempSync(join(tmpdir(), "gemsbang-home-"));
-  assert.deepEqual(readClient(home), { relay: "", avatars: {}, bodies: {}, notes: [], muted: { avatars: [], venues: [] }, repos: {}, dismissed: {} });
+  assert.deepEqual(readClient(home), { relay: "", avatars: {}, bodies: {}, seen: {}, failed: {}, notes: [], muted: { avatars: [], venues: [] }, repos: {}, dismissed: {} });
   writeFileSync(join(home, "client.json"), "{ not json");
   assert.deepEqual(readClient(home).avatars, {});
   writeClient(home, { relay: "https://im.example", token: "gb_t", person: "p-0000000001", lang: "en", avatars: { "a-0000000001": "gb_a", bad: 3 }, bodies: { s1: "a-0000000001" }, notes: [{ url: "u", at: "t" }, { url: 1 }] });

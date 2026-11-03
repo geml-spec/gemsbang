@@ -2,8 +2,9 @@
 // avatar-server.ts to a browser and filled from the relay's JSON. `/i/<code>`
 // is the way into a group for a person: who is in it, what happens once in,
 // the email and its code, which avatar goes in and what it is called;
-// `/g/<group>` is the group, open to every member (spec §7.2); `/login` the
-// email code alone (architecture §3.2). Each page carries its words in the request's language
+// `/g/<group>` is the group, open to every member (spec §7.2), with 退出群;
+// `/` is 我的群, where a person on the web comes back to (S8, P12b); `/login`
+// the email code alone (architecture §3.2), back to 我的群. Each page carries its words in the request's language
 // (spec §7.6) and the relay answers its refusals in it too. No build step, no
 // framework: every node is built with DOM calls, so nothing the relay
 // returns runs as markup. The person's token lives in the browser's storage.
@@ -16,7 +17,15 @@ const STYLE = `
 * { box-sizing: border-box; }
 body { margin: 0; font: 15px/1.6 -apple-system, "PingFang SC", "Hiragino Sans", "Microsoft YaHei", system-ui, sans-serif; color: var(--ink); background: var(--bg); }
 header { display: flex; gap: 12px; align-items: center; padding: 10px 16px; background: var(--card); border-bottom: 1px solid var(--line); }
-header .brand { font-weight: 700; color: var(--blue); }
+header .brand { font-weight: 700; color: var(--blue); text-decoration: none; }
+.chat { display: flex; gap: 10px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); cursor: pointer; color: inherit; text-decoration: none; }
+.chat:first-of-type { border-top: 0; }
+.chat .face { width: 36px; height: 36px; border-radius: 8px; font-size: 15px; flex: none; }
+.chat .tx { flex: 1; min-width: 0; }
+.chat .n { display: flex; gap: 8px; font-weight: 600; }
+.chat .tm { margin-left: auto; color: var(--dim); font-size: 12px; font-weight: 400; }
+.chat .p { color: var(--dim); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.danger { color: #c0392b; border-color: #e6b8b2; }
 header nav { margin-left: auto; display: flex; gap: 8px; font-size: 13px; }
 header nav a { color: var(--dim); text-decoration: none; }
 header nav a.on { color: var(--ink); font-weight: 600; }
@@ -33,7 +42,7 @@ button.chip { cursor: pointer; padding: 4px 12px; }
 button.chip.on { border-color: var(--blue); color: var(--blue); }
 .face { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 12px; background: #8a8a8a; }
 form, .row { display: flex; gap: 8px; margin: 8px 0; align-items: center; }
-input[type=text], input[type=tel] { flex: 1; font: inherit; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+input[type=text], input[type=tel], input[type=email] { flex: 1; font: inherit; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
 button { font: inherit; padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); cursor: pointer; color: var(--ink); }
 button.primary { background: var(--blue); color: #fff; border-color: var(--blue); }
 button.link { border: 0; background: none; color: var(--dim); padding: 4px 0; text-decoration: underline; }
@@ -68,7 +77,7 @@ const SHARED_JS = `
   }
   function face(name) { var f = el("span", "face", [Array.from(name || "?")[0]]); return f; }
   function chip(name) { return el("span", "chip", [face(name), name]); }
-  function browser() { var u = navigator.userAgent; return /Edg\//.test(u) ? "Edge" : /Firefox\//.test(u) ? "Firefox" : /Chrome\//.test(u) ? "Chrome" : /Safari\//.test(u) ? "Safari" : "?"; }
+  function browser() { var u = navigator.userAgent; return /Edg\\//.test(u) ? "Edge" : /Firefox\\//.test(u) ? "Firefox" : /Chrome\\//.test(u) ? "Chrome" : /Safari\\//.test(u) ? "Safari" : "?"; }
   function loginBox(into, done) {
     var note = el("div", "note");
     var email = el("input"); email.type = "email"; email.placeholder = say("page.email"); email.autocomplete = "email";
@@ -176,7 +185,7 @@ const GROUP_JS = `
       }).then(function (r2) { if (r2 && r2.status === 200) render(r2.data); });
     });
   }
-  function nameOf(venue, speaker) { var aid = String(speaker || "").replace(/^avatar:/, ""); var m = venue.members.filter(function (x) { return x.id === aid; })[0]; return m ? m.name : aid; }
+  function nameOf(venue, speaker) { var aid = String(speaker || "").replace(/^avatar:/, ""); var m = venue.members.concat(venue.former || []).filter(function (x) { return x.id === aid; })[0]; return m ? m.name : aid; }
   function render(data) {
     var key = data.blocks.length + ":" + (data.blocks.length ? data.blocks[data.blocks.length - 1].id : "") + ":" + needs.map(function (n) { return n.id; }).join(",");
     if (key === shown && document.getElementById("thread")) return;
@@ -193,6 +202,7 @@ const GROUP_JS = `
       var v = b.value;
       if (/^member-\\d+$/.test(b.id)) { thread.appendChild(el("div", "sys", [say("page.group.joined", { name: nameOf(data.venue, v.avatar) })])); return; }
       if (/^note-\\d+$/.test(b.id) && v.note === "hops") { thread.appendChild(el("div", "sys", [say("page.group.hops")])); return; }
+      if (/^leave-\\d+$/.test(b.id)) { thread.appendChild(el("div", "sys", [v.heir ? say("page.group.leftHeir", { name: nameOf(data.venue, v.avatar), heir: nameOf(data.venue, v.heir) }) : say("page.group.left", { name: nameOf(data.venue, v.avatar) })])); return; }
       if (typeof v.text !== "string" || !v.speaker) return;
       said++;
       var name = nameOf(data.venue, v.speaker);
@@ -210,10 +220,38 @@ const GROUP_JS = `
     form.onsubmit = function (e) { e.preventDefault(); if (!input.value.trim()) return; var text = input.value; input.value = ""; api("POST", "/venues/" + mine.owner + "/" + id + "/messages", { as: mine.as, text: text, id: "w-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) }).then(function (r) { if (r.status >= 300) { note.textContent = r.data.reason; input.value = text; } else load(); }); };
     var share = el("button", "", [say("page.group.share")]); share.type = "button";
     share.onclick = function () { api("GET", "/venues/" + mine.owner + "/" + id + "/link?as=" + mine.as).then(function (r) { if (r.status !== 200) { note.textContent = r.data.reason; return; } var url = location.origin + r.data.link.path; try { navigator.clipboard.writeText(url); } catch (e) {} note.textContent = say("page.group.copied", { url: url }); }); };
-    var notify = el("button", "", [say("page.group.notify")]); notify.type = "button";
-    notify.onclick = function () { note.textContent = say("page.group.notifyLater"); };
-    main.appendChild(el("section", "", [form, el("div", "row", [share, notify]), note]));
+    // 退出群 (S19): a member asked once; the 群主 picks who keeps it first; the last one told the group goes with them.
+    var leave = el("button", "danger", [say("panel.leave")]); leave.type = "button";
+    var asking = el("div");
+    leave.onclick = function () { clear(asking); asking.appendChild(leaveBox(data)); };
+    main.appendChild(el("section", "", [form, el("div", "row", [share, leave]), asking, note]));
     window.scrollTo(0, document.body.scrollHeight);
+  }
+  function leaveBox(data) {
+    var others = data.venue.members.filter(function (x) { return x.id !== mine.as; });
+    var keeper = (data.venue.keeper || data.venue.owner) === mine.as;
+    var note = el("div", "note");
+    var out = function (heir) { api("POST", "/venues/" + mine.owner + "/" + id + "/leave", heir ? { as: mine.as, heir: heir } : { as: mine.as }).then(function (r) { if (r.status >= 300) note.textContent = r.data.reason; else location.href = "/"; }); };
+    var no = el("button", "", [say("panel.leaveNo")]); no.type = "button"; no.onclick = function () { clear(box); };
+    var box = el("div");
+    if (keeper && others.length > 0) {
+      var heir = "";
+      var go = el("button", "danger", [say("panel.leaveGo")]); go.type = "button"; go.disabled = true;
+      box.appendChild(el("p", "", [say("panel.leaveHeir")]));
+      others.forEach(function (m) {
+        var radio = el("input"); radio.type = "radio"; radio.name = "heir"; radio.value = m.id;
+        radio.onchange = function () { heir = m.id; go.disabled = false; go.textContent = say("panel.leaveTo", { name: m.name }); };
+        box.appendChild(el("label", "pick", [radio, chip(m.name)]));
+      });
+      go.onclick = function () { if (heir) out(heir); };
+      box.appendChild(el("div", "row", [go, no]));
+    } else {
+      var yes = el("button", "danger", [say("panel.leaveGo")]); yes.type = "button"; yes.onclick = function () { out(); };
+      box.appendChild(el("p", "", [say(others.length === 0 ? "panel.leaveLast" : "panel.leaveAsk", { group: data.venue.name })]));
+      box.appendChild(el("div", "row", [yes, no]));
+    }
+    box.appendChild(note);
+    return box;
   }
   /** A 需要你 card of the person's own avatar here (spec §7.3): only they see it; the words it would send; an option sends its words, 自己写 sends theirs. */
   function needCard(n) {
@@ -238,18 +276,50 @@ const GROUP_JS = `
   setInterval(function () { if (mine) load(); }, 4000);
 `;
 
-/** The email code alone; back to where the person came from (`?next=`). */
+/** The email code alone; back to where the person came from (`?next=`), else 我的群. */
 const LOGIN_JS = `
   var main = document.getElementById("app");
   var s = el("section", "", [el("h1", "", [say("page.login.title")])]);
   main.appendChild(s);
-  loginBox(s, function () { var next = new URLSearchParams(location.search).get("next"); if (next && next.charAt(0) === "/" && next.charAt(1) !== "/") location.href = next; else { clear(s); s.appendChild(el("p", "", [say("page.login.done")])); } });
+  loginBox(s, function () { var next = new URLSearchParams(location.search).get("next"); location.href = next && next.charAt(0) === "/" && next.charAt(1) !== "/" ? next : "/"; });
+`;
+
+/** 我的群 (S8, P12b): where a person on the web comes back to — their groups, the newest line of each and when; one opens it. Signed out, the email code first. */
+const MINE_JS = `
+  var main = document.getElementById("app");
+  function when(at) {
+    var t = new Date(at), n = new Date();
+    if (isNaN(t)) return "";
+    var day = function (d) { return Math.floor((d.getTime() - d.getTimezoneOffset() * 60000) / 86400000); };
+    var ago = day(n) - day(t);
+    if (ago <= 0) return String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0");
+    if (ago === 1) return say("page.mine.yesterday");
+    return (t.getMonth() + 1) + "/" + t.getDate();
+  }
+  function load() {
+    clear(main);
+    if (!getToken()) { var s = el("section", "", [el("h1", "", [say("page.mine.title")])]); main.appendChild(s); loginBox(s, load); return; }
+    api("GET", "/venues").then(function (r) {
+      clear(main);
+      if (r.status !== 200) { var s = el("section", "", [el("h1", "", [say("page.mine.title")])]); main.appendChild(s); loginBox(s, load); return; }
+      var list = el("section", "", [el("h2", "", [say("page.mine.title")])]);
+      var groups = r.data.filter(function (v) { return v.kind === "group"; }).sort(function (a, b) { return (b.last ? b.last.at : "") < (a.last ? a.last.at : "") ? -1 : 1; });
+      if (groups.length === 0) list.appendChild(el("div", "dim", [say("page.mine.none")]));
+      groups.forEach(function (v) {
+        var a = el("a", "chat", [face(v.name), el("span", "tx", [el("span", "n", [v.name, el("span", "tm", [v.last ? when(v.last.at) : ""])]), el("span", "p", [v.last ? v.last.who + "：" + v.last.text : say("page.group.empty")])])]);
+        a.href = "/g/" + v.id;
+        list.appendChild(a);
+      });
+      main.appendChild(list);
+    });
+  }
+  load();
 `;
 
 /** The page's words in the language: every page.* code and the few others the script says. */
 function wordsFor(lang: Lang): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const code of CODES) if (code.startsWith("page.") || code.startsWith("need.") || code === "code.sentTo") out[code] = say(code, lang);
+  for (const code of CODES) if (code.startsWith("page.") || code.startsWith("need.") || code.startsWith("panel.leave") || code === "code.sentTo") out[code] = say(code, lang);
   return out;
 }
 
@@ -259,7 +329,7 @@ function page(title: string, script: string, lang: Lang): string {
 <html lang="${lang}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><style>${STYLE}</style></head>
 <body>
-<header><span class="brand">gemsbang</span><nav></nav></header>
+<header><a class="brand" href="/">gemsbang</a><nav></nav></header>
 <main id="app"></main>
 <script>
 var LANG = ${JSON.stringify(lang)};
@@ -275,3 +345,4 @@ ${script}
 export const joinPage = (lang: Lang): string => page("gemsbang", JOIN_JS, lang);
 export const groupPage = (lang: Lang): string => page("gemsbang", GROUP_JS, lang);
 export const loginPage = (lang: Lang): string => page(say("page.login.title", lang), LOGIN_JS, lang);
+export const minePage = (lang: Lang): string => page(say("page.mine.title", lang), MINE_JS, lang);

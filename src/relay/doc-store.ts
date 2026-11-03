@@ -6,11 +6,11 @@
 // stands, under its lock where there are several writers, and a block whose
 // id is already there is answered as it is (a client that sends again does
 // not duplicate). A secret is made once and kept: the phone hashes' salt.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderDataBlock, type DataBlock } from "../core/chain.js";
 import type { JsonValue } from "../core/json.js";
-import { appendBlock, BLOCK_ID, docHead, lastHash, listDocs, readDoc, RELAY_OWNER, sealed, type Appended, type Doc } from "./store.js";
+import { appendBlock, BLOCK_ID, docHead, docPath, lastHash, listDocs, readDoc, RELAY_OWNER, sealed, type Appended, type Doc } from "./store.js";
 
 /** The whole value of a block, built from the document as it stands, the last block's hash and the id. */
 export type Build = (d: Doc, prev: string | null, id: string) => Record<string, JsonValue>;
@@ -22,6 +22,8 @@ export interface DocStore {
   append(owner: string, doc: string, idOf: (d: Doc) => string, build: Build): Appended;
   /** The documents under `<owner>/<dir>/`, as doc paths, sorted. */
   list(owner: string, dir: string): string[];
+  /** A document gone, every block of it: a group whose last member left (S19). */
+  remove(owner: string, doc: string): void;
   /** A secret made once by `make` and kept. */
   secret(name: string, make: () => string): string;
 }
@@ -37,6 +39,7 @@ export function fileStore(root: string): DocStore & { root: string } {
     read: (owner, doc) => readDoc(root, owner, doc),
     append: (owner, doc, idOf, build) => appendBlock(root, owner, doc, idOf, build),
     list: (owner, dir) => listDocs(root, owner, dir),
+    remove: (owner, doc) => { rmSync(docPath(root, owner, doc), { force: true }); },
     secret: (name, make) => {
       const dir = join(root, RELAY_OWNER), path = join(dir, name);
       if (!existsSync(path)) {
@@ -75,6 +78,7 @@ export function memoryStore(): DocStore {
     read,
     append: (owner, doc, idOf, build) => appendTo(read(owner, doc), idOf, build, (id, value) => { docs.set(key(owner, doc), [...(docs.get(key(owner, doc)) ?? []), { id, value }]); }),
     list: (owner, dir) => [...docs.keys()].map((k) => k.split("\n")).filter(([o, d]) => o === owner && directlyUnder(d!, dir)).map(([, d]) => d!).sort(),
+    remove: (owner, doc) => { docs.delete(key(owner, doc)); },
     secret: (name, make) => {
       if (!secrets.has(name)) secrets.set(name, make());
       return secrets.get(name)!;
@@ -109,6 +113,7 @@ export function sqlStore(sql: SqlLike): DocStore {
       sql.exec("INSERT INTO blocks (owner, doc, seq, id, value) VALUES (?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM blocks WHERE owner = ? AND doc = ?), ?, ?)", owner, doc, owner, doc, id, JSON.stringify(value));
     }),
     list: (owner, dir) => sql.exec("SELECT DISTINCT doc FROM blocks WHERE owner = ? AND substr(doc, 1, ?) = ?", owner, dir.length + 1, `${dir}/`).toArray().map((r) => String(r["doc"])).filter((d) => directlyUnder(d, dir)).sort(),
+    remove: (owner, doc) => { sql.exec("DELETE FROM blocks WHERE owner = ? AND doc = ?", owner, doc); },
     secret: (name, make) => {
       const kept = sql.exec("SELECT value FROM secrets WHERE name = ?", name).toArray()[0];
       if (kept !== undefined) return String(kept["value"]);

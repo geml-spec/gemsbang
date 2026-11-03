@@ -5,18 +5,20 @@
 // who they are there, what was said, `分身` beside an agent's line. Built
 // from the mirror the client keeps of the relay (gemsbang/home.ts). Pure:
 // the time and the zone are given.
+import type { BaseItem } from "./base.js";
 import { factsOf, type Fact } from "./borrow.js";
 import type { Need } from "./needs.js";
 import { say, type Lang } from "./words.js";
 
 /** Six colours that stay readable on light and dark, one per avatar in the order the person's avatars grew. */
-export const BADGE_COLORS: readonly string[] = ["#2f6fb3", "#b5543c", "#3c8a5a", "#8a5ab5", "#a8761f", "#2f8a8a"];
+export const BADGE_COLORS: readonly string[] = ["#2563eb", "#c2410c", "#3c8a5a", "#8a5ab5", "#a8761f", "#2f8a8a"];
 
 export interface Card { id: string; name: string }
 export interface Badge extends Card { color: string; initial: string }
 export interface Block { id: string; value: Record<string, unknown> }
 /** One chat as the client mirrors it: the venue, which of the person's avatars is in it (`as`), its link rules (groups), its latest blocks. */
-export interface MirrorVenue { owner: string; id: string; kind: "group" | "dm"; name: string; members: Card[]; as: string; rules?: { forward: boolean; approve: boolean }; blocks: Block[] }
+/** `keeper`: its 群主 now, when not its maker (S19); `former`: who left, so their lines keep their names. */
+export interface MirrorVenue { owner: string; id: string; kind: "group" | "dm"; name: string; members: Card[]; as: string; rules?: { forward: boolean; approve: boolean }; blocks: Block[]; keeper?: string; former?: Card[] }
 /** What the client keeps of the relay for the person: themself, their avatars, every chat. */
 export interface Mirror {
   at: string; relay: string; person: string; lang: Lang; defaultName?: string; avatars: Card[]; venues: MirrorVenue[];
@@ -24,12 +26,12 @@ export interface Mirror {
   marks?: Record<string, boolean>;
   /** What waits on the person (需要你, spec §7.3), as the relay listed it: each card with its avatar's name and its chat's. */
   needs?: (Need & { avatarName: string; group?: string })[];
-  /** Per avatar, the person's own waiting line, where they set one. */
-  placeholders?: Record<string, string>;
   /** The person's jobs for their computer (spec §7.4), as the relay listed them. */
   work?: MirrorWork[];
   /** Per avatar, the chats it answers on its own (自动回, architecture §6.3), as `<owner>/<id>`. */
   autos?: Record<string, string[]>;
+  /** The person's 底子 (S27), the entries waiting for their yes with it. */
+  base?: BaseItem[];
 }
 
 /** A job for the person's computer: whose, from which chat, who asked and their words, where it stands. */
@@ -39,6 +41,23 @@ export interface MirrorWork {
 }
 
 export const venueKey = (owner: string, id: string): string => `${owner}/${id}`;
+
+/**
+ * The avatar the person last spoke as (Q1, S21): the newest line the person said themself in any chat, else the
+ * newest line any of their avatars said, else their first avatar; undefined with none. A new group and a new
+ * session take it unasked.
+ */
+export function recentAvatar(m: Mirror): string | undefined {
+  const mine = new Set(m.avatars.map((a) => a.id));
+  let person: { at: string; avatar: string } | undefined, any: { at: string; avatar: string } | undefined;
+  for (const v of m.venues) for (const b of v.blocks) {
+    const speaker = typeof b.value["speaker"] === "string" ? b.value["speaker"].replace(/^avatar:/, "") : undefined, at = typeof b.value["at"] === "string" ? b.value["at"] : "";
+    if (speaker === undefined || !mine.has(speaker) || typeof b.value["text"] !== "string") continue;
+    if (any === undefined || at > any.at) any = { at, avatar: speaker };
+    if (b.value["by"] === "person" && (person === undefined || at > person.at)) person = { at, avatar: speaker };
+  }
+  return person?.avatar ?? any?.avatar ?? m.avatars[0]?.id;
+}
 
 /** The first character of a name, a letter upper-cased. */
 export const initialOf = (name: string): string => ([...name.trim()][0] ?? "?").toUpperCase();
@@ -53,15 +72,18 @@ const isMessage = (b: Block): boolean => typeof b.value["text"] === "string" && 
 export type ChatItem =
   | { kind: "message"; id: string; avatar: string; who: string; text: string; at: string; mark: boolean; mine: boolean; replyTo?: string; facts?: Fact[] }
   | { kind: "joined"; id: string; avatar: string; who: string; at: string }
+  /** Someone left (S19); `heir`, who took the group over when its 群主 left. */
+  | { kind: "left"; id: string; avatar: string; who: string; at: string; heir?: string }
   | { kind: "note"; id: string; note: "hops"; at: string };
 
 /** What the chat holds, oldest first; a name the members do not list is its id. */
 export function itemsOf(v: MirrorVenue): ChatItem[] {
-  const name = (avatar: string): string => v.members.find((m) => m.id === avatar)?.name ?? avatar;
+  const name = (avatar: string): string => v.members.find((m) => m.id === avatar)?.name ?? v.former?.find((m) => m.id === avatar)?.name ?? avatar;
   const out: ChatItem[] = [];
   for (const b of v.blocks) {
     const at = typeof b.value["at"] === "string" ? b.value["at"] : "";
     if (/^member-\d+$/.test(b.id)) { const a = avatarOf(b.value["avatar"]); out.push({ kind: "joined", id: b.id, avatar: a, who: name(a), at }); continue; }
+    if (/^leave-\d+$/.test(b.id)) { const a = avatarOf(b.value["avatar"]), h = typeof b.value["heir"] === "string" ? avatarOf(b.value["heir"]) : undefined; out.push({ kind: "left", id: b.id, avatar: a, who: name(a), at, ...(h !== undefined ? { heir: name(h) } : {}) }); continue; }
     if (/^note-\d+$/.test(b.id) && b.value["note"] === "hops") { out.push({ kind: "note", id: b.id, note: "hops", at }); continue; }
     if (!isMessage(b)) continue;
     const a = avatarOf(b.value["speaker"]);

@@ -15,7 +15,7 @@ test("a round (transport §6): the prompt says who and where, the five things to
   assert.deepEqual(readRound("", "reply"), {});
   assert.deepEqual(readRound("随便说说", "read"), {}, "a read round says nothing");
   const both = readRound(JSON.stringify({ reply: "我问一下", ask: { kind: "promise", summary: "周五当志愿者", draft: "周五我可以去", options: [{ label: "能去", text: "周五我可以去" }] } }), "reply");
-  assert.deepEqual(both, { reply: "我问一下", ask: { kind: "promise", summary: "周五当志愿者", draft: "周五我可以去", options: [{ label: "能去", text: "周五我可以去" }] } });
+  assert.deepEqual(both, { ask: { kind: "promise", summary: "周五当志愿者", draft: "周五我可以去", options: [{ label: "能去", text: "周五我可以去" }] } }, "an ask says nothing in the chat first: its reply is dropped");
   assert.deepEqual(readRound(JSON.stringify({ reply: "x", ask: { kind: "promise", summary: "要他出面" } }), "read"), { ask: { kind: "promise", summary: "要他出面" } }, "a read round may still ask");
   assert.deepEqual(readRound(JSON.stringify({ ask: { kind: "gossip", summary: "x" } }), "reply"), {}, "not one of the five: nothing");
   assert.deepEqual(readRound("{not json", "reply"), { reply: "{not json" });

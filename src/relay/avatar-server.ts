@@ -44,7 +44,7 @@ export const SWEEP_MS = 30_000;
 export function startAvatarRelay(o: AvatarRelayOptions & { root: string; port?: number; host?: string; publicUrl?: string; version?: string }): Promise<AvatarServer> {
   // The file channel unless the operator gave others (spec §7.3: the outlet first, real channels later).
   const push: PushAdapter[] = o.push ?? [fileAdapter(o.root)];
-  const relay = new AvatarRelay({ ...o, push });
+  const relay = new AvatarRelay({ ...o, push, ...(o.publicUrl !== undefined && o.origin === undefined ? { origin: o.publicUrl } : {}) });
   const sweep = setInterval(() => { try { relay.sweep(); void relay.collectPush().catch(() => undefined); } catch { /* the next round */ } }, SWEEP_MS);
   sweep.unref();
   const host = o.host ?? "127.0.0.1";
@@ -103,6 +103,7 @@ export function startAvatarRelay(o: AvatarRelayOptions & { root: string; port?: 
     server.once("error", failed);
     server.listen(o.port ?? 0, host, () => {
       const port = (server.address() as AddressInfo).port;
+      relay.useOrigin(`http://${host}:${port}`);
       done({
         port, url: `http://${host}:${port}`, relay,
         close: () => new Promise((closed) => {

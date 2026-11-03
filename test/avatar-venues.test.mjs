@@ -37,8 +37,8 @@ test("groups (spec §6, §7.2): made by an avatar, its owner; the owner pulls av
   const lily = ok(r.growAvatar(john.by, { name: "Lily 爸爸" })).avatar;
   const liA = ok(r.growAvatar(li.by, { name: "李四" })).avatar;
   const wangA = ok(r.growAvatar(wang.by, { name: "王五" })).avatar;
-  bad(r.createGroup(john.by, { name: "x" }), 400, "要说明以哪个分身");
-  bad(r.createGroup(john.by, { as: liA.id, name: "x" }), 403, "这不是你的分身");
+  bad(r.createGroup(john.by, { name: "x" }), 400, "要说明以哪个身份");
+  bad(r.createGroup(john.by, { as: liA.id, name: "x" }), 403, "这不是你的身份");
   bad(r.createGroup(john.by, { as: johnWork.id, name: " " }), 400, "群要有个名字");
   const g = ok(r.createGroup(john.by, { as: johnWork.id, name: "设置页改版" })).venue;
   assert.match(g.id, /^g-[0-9a-f]{10}$/);
@@ -82,7 +82,7 @@ test("marking (spec §5 rule 1, §8.1): every message records `by`; when the ava
   ok(r.say(john.by, g.owner, g.id, { as: lily.id, text: "周五我可以去", id: "m-p" }));
   const seen = (by) => Object.fromEntries(ok(r.read(by, g.owner, `venues/${g.id}.geml`)).blocks.filter((b) => b.id.startsWith("m-")).map((b) => [b.id, b.value.by]));
   assert.deepEqual(seen(wang.by), { "m-a": "agent", "m-p": "person" });
-  bad(r.setRules(wang.by, lily.id, { mark: false }), 403, "这不是你的分身");
+  bad(r.setRules(wang.by, lily.id, { mark: false }), 403, "这不是你的身份");
   bad(r.setRules(john.by, lily.id, { mark: "no" }), 400, "mark 要是 true 或 false");
   assert.deepEqual(ok(r.setRules(john.by, lily.id, { mark: false })).rules, { mark: false, borrow: ["read", "edit", "test"] });
   assert.deepEqual(seen(wang.by), { "m-a": undefined, "m-p": undefined });

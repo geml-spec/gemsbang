@@ -30,6 +30,9 @@ export interface Need {
   answer?: { choice: number | "own"; text?: string; at: string };
 }
 
+/** A standing 以后不用问 on an avatar's tasks (S23): for the one who asked, by `person:<avatar>` (with the chat it was asked in), or for a chat, by `venue:<owner>/<id>`. */
+export interface Allow { key: string; person?: string; venue?: { owner: string; id: string } }
+
 export const isKind = (v: unknown): v is NeedKind => typeof v === "string" && (NEED_KINDS as readonly string[]).includes(v);
 
 /** The options a kind has when the asker gives none: a borrow's three, an error's two, money's two. */

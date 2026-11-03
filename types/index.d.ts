@@ -37,6 +37,27 @@ declare module 'claude-code' {
       /** 需要你 unfolded; the muted cards shown; a borrow card's two switches, per card. */
       needsOpen: boolean
       mutedOpen: boolean
+      /** The card whose 自己写 field is open, by its row's key; null when none is. */
+      writing: string | null
+      /** The inbox's ＋ open; 建群's list of avatars open; 用链接进群 once the link was read (what it says, where the person is in it). */
+      plusOpen: boolean
+      asOpen: boolean
+      joining: GemsbangJson
+      /** The card of 我 whose 改 is open, by its row's key; null when none is (one at a time). */
+      editing: string | null
+      /** 叫人's 换一个链接 asked, not yet answered (P4c); the page 叫人 was opened from, where its ‹ goes back to. */
+      rotating: boolean
+      inviteBack: string
+      /** 我's languages open; a card's 任务 field open; 账号与登录's 加一种登录方式 open; 退出这台设备的登录 asked (P10c). */
+      langOpen: boolean
+      repoOpen: boolean
+      addOpen: boolean
+      loggingOut: boolean
+      /** Each avatar's standing 以后不用问 (S23), read when 我 opens. */
+      allows: GemsbangJson
+      /** 退出群 asked (P7); the one the 群主 picked to keep the group. */
+      leaving: boolean
+      heir: string | null
       allow: GemsbangJson
       /** The agents this session started for jobs on this computer (spec §7.4), by agent id: whose job, its worktree, its commands, the facts seen. */
       borrowing: GemsbangJson

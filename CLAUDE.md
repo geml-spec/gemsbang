@@ -1,6 +1,6 @@
 # Gemsbang — notes for Claude
 
-Gemsbang is the IM of avatars: a Claude Code plugin (a side pane, a line above the prompt, four `im_*` tools), the
+Gemsbang is the IM of avatars: a Claude Code plugin (a side pane, a line above the prompt, five `im_*` tools), the
 service behind it as a Node server and a Cloudflare Worker, and a small CLI (`gemsbang`). It depends on the
 published `@geml/geml` parser and nothing else at runtime. The design is in `docs/design/` (the architecture spec
 wins where the specs disagree).

@@ -7,7 +7,7 @@ import { appendSealed, fileStore, memoryStore, nodeSql, sqlStore } from "../dist
 import { AvatarRelay } from "../dist/relay/avatars.js";
 import { nextId, sealed } from "../dist/relay/store.js";
 
-/** What every store does the same (architecture §2.3): documents of sealed blocks in order, an id already there answered as it is, the documents under a folder, a secret made once. */
+/** What every store does the same (architecture §2.3): documents of sealed blocks in order, an id already there answered as it is, the documents under a folder, one removed whole, a secret made once. */
 function contract(s) {
   assert.deepEqual(s.read("a-0000000001", "venues/g-000000000a.geml"), { blocks: [], diagnostics: [], text: "", exists: false });
   const one = s.append("a-0000000001", "venues/g-000000000a.geml", nextId("msg"), (_d, prev, id) => sealed({ id, text: "你好", at: "2026-11-02T09:00:00Z" }, prev));
@@ -22,6 +22,9 @@ function contract(s) {
   appendSealed(s, "a-0000000009", "venues/g-000000000c.geml", "member-1", { avatar: "a-0000000009" });
   assert.deepEqual(s.list("a-0000000001", "venues"), ["venues/d-000000000b.geml", "venues/g-000000000a.geml"], "directly under the folder, this owner's");
   assert.deepEqual(s.list("a-0000000001", "needs"), []);
+  s.remove("a-0000000001", "venues/d-000000000b.geml");
+  assert.deepEqual([s.read("a-0000000001", "venues/d-000000000b.geml").exists, s.list("a-0000000001", "venues")], [false, ["venues/g-000000000a.geml"]], "removed whole (S19: the last one left)");
+  s.remove("a-0000000001", "venues/never.geml");
   let made = 0;
   const make = () => { made++; return `salt-${made}`; };
   assert.deepEqual([s.secret("avatar-salt.txt", make), s.secret("avatar-salt.txt", make), made], ["salt-1", "salt-1", 1], "made once");

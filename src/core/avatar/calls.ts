@@ -47,7 +47,7 @@ export function callOf(v: MirrorVenue, o: { name: string; since?: string; auto: 
   const mine = lines.filter((l) => avatarOf(l.speaker) === v.as);
   let from = 0;
   for (let i = 0; i < lines.length; i++) if (avatarOf(lines[i]!.speaker) === v.as || lines[i]!.id === o.since) from = i + 1;
-  const seat = { avatar: v.as, name: o.name, kind: v.kind, owner: v.owner, said: new Set(mine.map((l) => l.id)) };
+  const seat = { avatar: v.as, name: o.name, kind: v.kind, owner: v.keeper ?? v.owner, said: new Set(mine.map((l) => l.id)) };
   const name = (a: string): string => v.members.find((m) => m.id === a)?.name ?? a;
   const called: CallLine[] = [];
   for (const l of lines.slice(from)) {
@@ -72,13 +72,13 @@ export function callsOf(m: Mirror, o: { dismissed: Readonly<Record<string, strin
 }
 
 /** The round that answers a call: the chat's last lines with the avatar's own marked, why it woke, replying to the last line that called it. */
-export function roundFor(v: MirrorVenue, call: Call, o: { name: string; why: "asked" | "auto"; mark: boolean }): Round {
+export function roundFor(v: MirrorVenue, call: Call, o: { name: string; why: "asked" | "auto"; mark: boolean; base?: readonly { label: string; text: string }[] }): Round {
   const lines = linesOf(v);
   const name = (a: string): string => v.members.find((m) => m.id === a)?.name ?? a;
   const answered = lines.find((l) => l.id === call.last);
   const reason = call.lines[call.lines.length - 1]!.reason;
   return {
     avatar: call.avatar, owner: call.owner, id: call.id, group: call.group, replyTo: call.last, hops: hopsAfter(answered),
-    input: { avatar: o.name, group: call.group, kind: "reply", reason, why: o.why, mark: o.mark, lines: lines.slice(-ROUND_LINES).map((l) => ({ who: name(avatarOf(l.speaker)), text: l.text, mine: avatarOf(l.speaker) === v.as })) },
+    input: { avatar: o.name, group: call.group, kind: "reply", reason, why: o.why, mark: o.mark, lines: lines.slice(-ROUND_LINES).map((l) => ({ who: name(avatarOf(l.speaker)), text: l.text, mine: avatarOf(l.speaker) === v.as })), ...(o.base !== undefined && o.base.length > 0 ? { base: o.base } : {}) },
   };
 }

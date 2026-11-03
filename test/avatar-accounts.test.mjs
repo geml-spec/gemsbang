@@ -54,7 +54,7 @@ test("avatars (spec §6.4, §6.5): one grows with the name given, else a random 
   ok(r.rename(john.by, first.id, { name: "陈太太" }));
   assert.deepEqual(r.avatarsOf(john.person).map((a) => a.name), ["陈太太", "John", "Lily 爸爸", "Cloud 10"]);
   const zhang = login(r, "13900139000");
-  bad(r.rename(zhang.by, first.id, { name: "x" }), 403, "这不是你的分身");
+  bad(r.rename(zhang.by, first.id, { name: "x" }), 403, "这不是你的身份");
   const lilyToken = r.verify(ok(r.issueAvatar(john.by, lily.id)).token);
   bad(r.growAvatar(lilyToken, {}), 403, "只有本人能这么做");
   bad(r.rename(lilyToken, lily.id, { name: "x" }), 403);
@@ -67,7 +67,7 @@ test("tokens: an avatar's token is issued by its person and speaks as the avatar
   const a = ok(r.growAvatar(john.by, { name: "John" })).avatar;
   const issued = ok(r.issueAvatar(john.by, a.id));
   assert.deepEqual([issued.record.speaker, issued.record.scope], [`avatar:${a.id}`, "avatar"]);
-  bad(r.issueAvatar(zhang.by, a.id), 403, "这不是你的分身");
+  bad(r.issueAvatar(zhang.by, a.id), 403, "这不是你的身份");
   const device = ok(r.issueDevice(john.by));
   assert.deepEqual([device.record.speaker, device.record.scope], [`person:${john.person}`, "device"]);
   bad(r.issueDevice(device.record), 403);

@@ -34,12 +34,12 @@ test("avatars' badges (spec §7.1): a colour each in the order they grew, and th
   assert.deepEqual(b.map((x) => x.color), [...BADGE_COLORS, BADGE_COLORS[0]], "six colours, then round again");
 });
 
-test("a chat's lines (spec §7.2): what was said and who came in, oldest first; the person's own lines; `分身` where an agent said it; who said the last line as the inbox names it", () => {
+test("a chat's lines (spec §7.2): what was said and who came in, oldest first; the person's own lines; `身份` where an agent said it; who said the last line as the inbox names it", () => {
   const items = itemsOf(MIRROR.venues[0]);
   assert.deepEqual(items.map((i) => [i.kind, i.who]), [["joined", "John"], ["joined", "李四"], ["message", "李四"], ["message", "John"], ["message", "李四"]]);
   assert.deepEqual(items.slice(2).map((i) => [i.mark, i.mine]), [[true, false], [false, true], [false, false]]);
   const lily = itemsOf(MIRROR.venues[1]);
-  assert.equal(whoSaid(lily[1], "zh"), "你的分身");
+  assert.equal(whoSaid(lily[1], "zh"), "你的身份");
   assert.equal(whoSaid(items[3], "en"), "You");
   assert.equal(whoSaid(items[4], "zh"), "李四");
   assert.equal(unreadOf(items, undefined), 2, "nothing seen: every line of the others");
@@ -62,7 +62,7 @@ test("times in the list (spec §7.1): today's as HH:MM in the person's zone, yes
 test("the total inbox (spec §7.1): every chat of every avatar newest first, each with its avatar's badge, its last line and who said it, its time and its unread; only one avatar's when asked; the unread of all either way", () => {
   const box = inboxOf(MIRROR, { [`${JOHN}/g-000000000a`]: "m-2" }, "2026-11-01T12:00:00Z", { zoneMinutes: 480 });
   assert.deepEqual(box.rows.map((r) => [r.name, r.as.name, r.as.initial, r.last?.who, r.last?.text, r.time, r.unread]), [
-    ["三年二班家长", "Lily 爸爸", "L", "你的分身", "我看一下，晚点回。", "19:31", 1],
+    ["三年二班家长", "Lily 爸爸", "L", "你的身份", "我看一下，晚点回。", "19:31", 1],
     ["设置页改版", "John", "J", "李四", "@John Safari 里导出按钮没反应", "14:05", 1],
     ["李四", "John", "J", "李四", "周五前能给稿子反馈吗？", "昨天", 1],
   ]);
@@ -73,4 +73,15 @@ test("the total inbox (spec §7.1): every chat of every avatar newest first, eac
   assert.equal(lily.unread, 4, "the count is all of them, whatever the filter");
   const chat = chatOf(MIRROR.venues[0], MIRROR, 2);
   assert.deepEqual([chat.name, chat.count, chat.as.name, chat.items.map((i) => i.id), chat.earlier], ["设置页改版", 2, "John", ["m-2", "m-3"], 3]);
+});
+
+test("the avatar the person last spoke as (Q1, S21): their own newest line, else any of their avatars' newest, else their first; none without avatars", async () => {
+  const { recentAvatar } = await import("../dist/core/avatar/inbox.js");
+  const line = (id, speaker, by, at) => ({ id, value: { speaker: `avatar:${speaker}`, by, text: "x", at } });
+  const m = (venues, avatars = [{ id: "a-1", name: "John" }, { id: "a-2", name: "Lily 爸爸" }]) => ({ at: "", relay: "", person: "p", lang: "zh", avatars, venues });
+  const v = (blocks) => ({ owner: "o", id: "g", kind: "group", name: "g", members: [], as: "a-1", blocks });
+  assert.equal(recentAvatar(m([v([line("m-1", "a-1", "person", "2026-11-01T01:00:00Z")]), v([line("m-2", "a-2", "person", "2026-11-01T02:00:00Z"), line("m-3", "a-1", "agent", "2026-11-01T03:00:00Z")])])), "a-2", "the person's own line counts before an agent's");
+  assert.equal(recentAvatar(m([v([line("m-3", "a-2", "agent", "2026-11-01T03:00:00Z"), line("m-4", "b-9", "person", "2026-11-01T04:00:00Z")])])), "a-2", "no line of their own: any of theirs; someone else's never");
+  assert.equal(recentAvatar(m([])), "a-1", "nothing said: the first");
+  assert.equal(recentAvatar(m([], [])), undefined);
 });

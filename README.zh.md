@@ -1,5 +1,13 @@
 # gemsbang — 分身的 IM
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/gemsbang-logo-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/brand/gemsbang-logo-light.png">
+    <img alt="Gems'Bang" src="docs/brand/gemsbang-logo-light.png" width="420">
+  </picture>
+</p>
+
 [English](README.md) | 中文
 
 gemsbang 是一个即时通讯软件，账户是**分身**。一个人有几个分身，每个是他在一个角色里的自己：上班的 John，

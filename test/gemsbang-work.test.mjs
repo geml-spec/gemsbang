@@ -53,7 +53,9 @@ test("任务 in the client (spec §7.4, §7.5; once called 借电脑): each avat
     };
     const first = await borrow("设置页的缓存写错了", 0);
     assert.deepEqual([first.state, first.words, first.fromName, first.group, first.repo, first.badge.initial], ["waiting", "设置页的缓存写错了", "李四", "设置页改版", app, "J"]);
-    assert.equal((await gb("work-take", { session: "s-2", avatar: g.as.id, work: first.id, root: app })).code, "body.none", "only the session that speaks for it");
+    ok(await gb("rounds", { session: "s-1" }));
+    ok(await gb("bind", { session: "s-2", avatar: "a-ffffffffff" }));
+    assert.equal((await gb("work-take", { session: "s-2", avatar: g.as.id, work: first.id, root: app })).code, "body.none", "an open session plays it: only that one takes it");
     const wrong = await gb("work-take", { session: "s-1", avatar: g.as.id, work: first.id, root: join(other, "src") });
     assert.equal(wrong.reason, `这个会话在 ${other}，「John」指定的仓库是 ${app}，对不上，这件活没动：改：设置页的缓存写错了`);
     const after = ok(await gb("status")).view;
@@ -72,6 +74,41 @@ test("任务 in the client (spec §7.4, §7.5; once called 借电脑): each avat
     assert.equal(third.state, "queued");
     assert.equal(ok(await gb("work-now", { avatar: g.as.id, work: third.id })).view.work.at(-1).state, "waiting");
     assert.equal(ok(await gb("repo", { avatar: g.as.id, path: "" })).view.avatars[0].repo, undefined);
+  } finally {
+    await s.close();
+  }
+});
+
+test("不用问 in the client (S23): a task allowed for the one who asked is listed with their name and the chat's; 撤 takes it back, and the next task from them asks the person again", async () => {
+  const texts = [];
+  const s = await startAvatarRelay({ root: mkdtempSync(join(tmpdir(), "gemsbang-allows-relay-")), name: "relay.test", texter: (t) => { texts.push(t); } });
+  try {
+    const home = mkdtempSync(join(tmpdir(), "gemsbang-allows-home-"));
+    const gb = (call, args = {}) => runGb(call, args, { home, now: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"), zoneMinutes: 0 });
+    ok(await gb("setup", { relay: s.url }));
+    ok(await gb("login-start", { phone: "13800138000" }));
+    ok(await gb("login-verify", { phone: "13800138000", code: /(\d{6})/.exec(texts.at(-1).text)[1] }));
+    const g = ok(await gb("group", { name: "设置页改版", avatarName: "John" })).chat;
+    const venue = `${g.owner}/${g.id}`, me = g.as.id;
+    ok(await gb("bind", { session: "s-1", avatar: me }));
+    const r = s.relay;
+    ok(r.startLogin({ phone: "13900139000" }));
+    const li = r.verify(ok(r.finishLogin({ phone: "13900139000", code: /(\d{6})/.exec(texts.at(-1).text)[1] })).token);
+    const liA = ok(r.growAvatar(li, { name: "李四" })).avatar;
+    ok(r.addMember(r.verify(JSON.parse(readFileSync(join(home, "client.json"), "utf8")).token), g.owner, g.id, { as: me, avatar: liA.id }));
+    const ask = async (text) => {
+      const line = ok(r.say(li, g.owner, g.id, { as: liA.id, text })).message;
+      ok(await gb("tool-ask", { session: "s-1", venue, kind: "borrow", summary: `改：${text}`, replyTo: line.id, from: liA.id }));
+      return ok(await gb("status")).view.needs.filter((n) => n.kind === "borrow" && n.state === "open");
+    };
+    assert.deepEqual(ok(await gb("allows", { avatar: me })).allows, [], "none yet");
+    const card = (await ask("设置页的缓存写错了"))[0];
+    ok(await gb("answer", { avatar: me, need: card.id, choice: 0, allowPerson: true }));
+    assert.deepEqual(ok(await gb("allows", { avatar: me })).allows, [{ key: `person:${liA.id}`, person: liA.id, venue: { owner: g.owner, id: g.id }, who: "李四", group: "设置页改版" }]);
+    assert.deepEqual(await ask("登录页也坏了"), [], "allowed: no card");
+    assert.deepEqual(ok(await gb("allows", { avatar: me, allow: `person:${liA.id}` })).allows, [], "撤");
+    assert.equal((await ask("首页也看看")).length, 1, "taken back: the person is asked again");
+    assert.equal((await gb("allows", { avatar: "a-ffffffffff" })).ok, false, "not the person's avatar");
   } finally {
     await s.close();
   }

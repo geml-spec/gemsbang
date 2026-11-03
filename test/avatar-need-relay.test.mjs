@@ -44,11 +44,11 @@ function world(o = {}) {
 const ASK = (g, extra = {}) => ({ venue: `${g.owner}/${g.id}`, kind: "promise", summary: "王老师问周五能不能来当志愿者", checked: "你周五下午是空的", draft: "周五我可以去，几点在哪集合？", options: [{ label: "能去，问集合时间", text: "周五我可以去，几点在哪集合？" }, { label: "去不了", text: "这周五去不了，抱歉。" }], message: "m-1", ...extra });
 const lines = (r, g, viewer) => ok(r.read(viewer, g.owner, `venues/${g.id}.geml`)).blocks.filter((b) => typeof b.value.text === "string").map((b) => [b.value.speaker, b.value.by, b.value.text, b.value.replyTo]);
 
-test("an avatar asks its person (spec §7.3): its agent makes a card in the avatar's own list — the kind, the chat, what it checked, the words it would send; with `placeholder` it says the waiting line in the chat meanwhile; the person sees every avatar's cards with the avatar's and the chat's names; others see nothing", () => {
+test("an avatar asks its person (spec §7.3): its agent makes a card in the avatar's own list — the kind, the chat, what it checked, the words it would send; nothing is said in the chat until the person answers, even when the asker asks for a waiting line; the person sees every avatar's cards with the avatar's and the chat's names; others see nothing", () => {
   const { r, john, wang, lily, teacher, g, agent } = world();
   const made = ok(r.ask(agent, ASK(g, { placeholder: true }))).need;
   assert.deepEqual([made.id, made.kind, made.state, made.expires, made.venue], ["need-1", "promise", "open", undefined, { owner: g.owner, id: g.id }], "no deadline of its own: it waits until the person answers");
-  assert.deepEqual(lines(r, g, wang.by).at(-1), [`avatar:${lily.id}`, "agent", "我看一下，晚点回。", "m-1"], "the waiting line, said by its agent");
+  assert.deepEqual(lines(r, g, wang.by).filter((x) => x[0] === `avatar:${lily.id}`), [], "no waiting line: the chat shows nothing until the person answers");
   const listed = r.needsOf(john.person);
   assert.deepEqual(listed.map((n) => [n.avatarName, n.group, n.summary, n.draft]), [["Lily 爸爸", "三年二班家长", "王老师问周五能不能来当志愿者", "周五我可以去，几点在哪集合？"]]);
   assert.deepEqual(r.needsOf(wang.person), []);
@@ -63,7 +63,7 @@ test("an avatar asks its person (spec §7.3): its agent makes a card in the avat
 test("the person answers (spec §7.3): an option's words go into the chat as the avatar, `by: person`, replying to the line the card came from; their own words likewise; once only; nobody else answers; the card leaves the list", () => {
   const { r, john, wang, lily, g, agent } = world();
   const first = ok(r.ask(agent, ASK(g))).need;
-  bad(r.answerNeed(wang.by, lily.id, first.id, { choice: 0 }), 403, "这不是你的分身");
+  bad(r.answerNeed(wang.by, lily.id, first.id, { choice: 0 }), 403, "这不是你的身份");
   bad(r.answerNeed(john.by, lily.id, first.id, { choice: 7 }), 400, "选一个选项，或自己写一句");
   bad(r.answerNeed(john.by, lily.id, first.id, { choice: "own", text: " " }), 400);
   const done = ok(r.answerNeed(john.by, lily.id, first.id, { choice: 0 }));
@@ -124,6 +124,19 @@ test("a task card (spec §7.4's card, once called 借电脑): its three options 
   const next = ok(r.ask(agent, { venue: `${g.owner}/${g.id}`, kind: "borrow", summary: "再看一下", from: "a-ffffffffff" })).need;
   ok(r.answerNeed(john.by, lily.id, next.id, { choice: 0, allowVenue: true }));
   assert.equal(r.borrowAllowed(lily.id, "a-ffffffffff", { owner: g.owner, id: g.id }), true, "this chat, whoever asks");
+  // 不用问 listed and taken back (S23): the next one asks again; given again, it stands again.
+  const venue = { owner: g.owner, id: g.id };
+  assert.deepEqual(ok(r.allowsFor(john.by, lily.id)).allows, [{ key: `person:${teacher.id}`, person: teacher.id, venue }, { key: `venue:${g.owner}/${g.id}`, venue }]);
+  assert.equal(r.allowsFor(wang.by, lily.id).code, "avatar.notYours", "the person's alone");
+  assert.deepEqual(ok(r.revokeAllow(john.by, lily.id, { allow: `person:${teacher.id}` })).allows.map((x) => x.key), [`venue:${g.owner}/${g.id}`]);
+  assert.equal(r.borrowAllowed(lily.id, teacher.id, undefined), false, "taken back: asked again");
+  assert.equal(r.revokeAllow(john.by, lily.id, { allow: `person:${teacher.id}` }).code, "allow.missing");
+  assert.deepEqual(ok(r.revokeAllow(john.by, lily.id, { allow: `venue:${g.owner}/${g.id}` })).allows, []);
+  assert.equal(r.borrowAllowed(lily.id, "a-ffffffffff", venue), false, "the chat's taken back too");
+  const again = ok(r.ask(agent, { venue: `${g.owner}/${g.id}`, kind: "borrow", summary: "再来一次", from: teacher.id })).need;
+  ok(r.answerNeed(john.by, lily.id, again.id, { choice: 0, allowPerson: true }));
+  assert.equal(r.borrowAllowed(lily.id, teacher.id, undefined), true, "given again, it stands again");
+  assert.equal(r.needsOfAvatar(lily.id).length, 3, "a 撤 is no card");
 });
 
 test("a newcomer at the owner's door (spec §6.1): with the approval on, a request is the owner's 答应事情 card in their language; 同意 lets them in, and answering the request itself closes the card", () => {
@@ -156,8 +169,6 @@ test("the push outlet (spec §7.3): a card goes out on every channel its person 
   answerByFile(root, { person: wang.person, avatar: lily.id, need: "need-1", choice: 0 });
   assert.equal(await r.collectPush(), 1, "only the person's own answer counts");
   assert.equal(lines(r, g, wang.by).at(-1)[2], "车费我转了");
-  ok(r.setPlaceholder(john.by, lily.id, { text: "收到，稍后回复您" }));
   ok(r.ask(agent, ASK(g, { placeholder: true })));
-  assert.equal(lines(r, g, wang.by).at(-1)[2], "收到，稍后回复您");
-  bad(r.setPlaceholder(wang.by, lily.id, { text: "x" }), 403);
+  assert.equal(lines(r, g, wang.by).at(-1)[2], "车费我转了", "a card asked for later says nothing in the chat either");
 });

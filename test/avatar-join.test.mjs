@@ -58,7 +58,7 @@ test("joining from a link with a person's token (spec §6.2, §6.4, §6.5): a fi
   assert.notEqual(named.name, random, "a name given makes a new avatar even where one is known");
   assert.equal(r.avatarsOf(zhou.person).length, 2);
   const wu = login(r, "13600136000");
-  bad(r.joinByLink(wu.by, code2, { as: named.id }), 403, "这不是你的分身");
+  bad(r.joinByLink(wu.by, code2, { as: named.id }), 403, "这不是你的身份");
   bad(r.joinByLink(wu.by, code2, { name: "  " }), 400, "名字不能是空的");
   const third = ok(r.createGroup(john.by, { as: johnA.id, name: "周末爬山" })).venue;
   const code3 = ok(r.linkFor(john.by, third.owner, third.id, { as: johnA.id })).link.code;

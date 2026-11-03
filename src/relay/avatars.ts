@@ -19,7 +19,8 @@ import { createHash, randomBytes, randomInt } from "node:crypto";
 import { normalizeText, type DataBlock } from "../core/chain.js";
 import type { JsonValue } from "../core/json.js";
 import { factsOf } from "../core/avatar/borrow.js";
-import { defaultOptions, isKind, needFault, wordsOf, type Need, type NeedKind, type NeedOption } from "../core/avatar/needs.js";
+import { BASE_MAX, BASE_PENDING_MAX, baseFault, baseFor, baseOf, type BaseItem } from "../core/avatar/base.js";
+import { defaultOptions, isKind, needFault, wordsOf, type Allow, type Need, type NeedKind, type NeedOption } from "../core/avatar/needs.js";
 import { DEFAULT_LINK_RULES, expiresAt, linkPath, linkStatus, LINK_CODE, makeCode, mayHandOut, withLinkRules, type LinkRules } from "../core/avatar/links.js";
 import { nameFault, randomName } from "../core/avatar/names.js";
 import { suggestions, type Suggestion } from "../core/avatar/naming.js";
@@ -38,7 +39,7 @@ import { fileTexter, type Texter } from "./text.js";
 import { hashToken, issueToken, liveTokens, revokeToken, verifyToken, type TokenRecord } from "./tokens.js";
 
 /** Where its documents live: a folder (`root`, files as the Node shell keeps them) or a store (doc-store.ts: memory, SQLite). */
-export interface AvatarRelayOptions { root?: string; store?: DocStore; name: string; now?: () => string; texter?: Texter; /** Where an email's code goes, and the address it says it comes from (the relay's name unless given). */ mailer?: Mailer; mailFrom?: string; rand?: () => number; /** The push channels the relay offers (spec §7.3); none unless given. */ push?: PushAdapter[] }
+export interface AvatarRelayOptions { root?: string; store?: DocStore; name: string; /** Where the pages are, for the links in reminders; `https://<name>` unless given. */ origin?: string; now?: () => string; texter?: Texter; /** Where an email's code goes, and the address it says it comes from (the relay's name unless given). */ mailer?: Mailer; mailFrom?: string; rand?: () => number; /** The push channels the relay offers (spec §7.3); none unless given. */ push?: PushAdapter[] }
 /** A refusal: the status, the code and its parameters, and the code's words in Chinese. */
 export type Fail = { ok: false; status: number; code: string; params?: Record<string, string | number>; reason: string };
 export type Result<T> = ({ ok: true } & T) | Fail;
@@ -46,9 +47,11 @@ export type Issued = { token: string; record: TokenRecord };
 /** An avatar as anyone sees it: its id and name. */
 export interface AvatarCard { id: string; name: string }
 export type VenueKind = "group" | "dm";
-export interface VenueView { owner: string; id: string; kind: VenueKind; name: string; members: AvatarCard[] }
+/** `owner` is where the group is kept, and who made it; `keeper` is its 群主 now (the maker, until they hand it on, S19); `former`, who left, so their lines keep their names. */
+export interface VenueView { owner: string; id: string; kind: VenueKind; name: string; members: AvatarCard[]; keeper: string; former: AvatarCard[] }
 /** A venue as one of the person's avatars is in it. */
-export interface MyVenue extends VenueView { as: string }
+/** `last`: its newest line, for the web's 我的群 (S8, P12b). */
+export interface MyVenue extends VenueView { as: string; last?: { who: string; text: string; at: string } }
 export interface Visible { id: string; value: Record<string, JsonValue> }
 export interface Pushed { owner: string; doc: string; block: DataBlock }
 /** A group's link as a member hands it out (spec §6.1). */
@@ -82,7 +85,12 @@ const lastPts = (d: { blocks: readonly DataBlock[] }): number => num(d.blocks[d.
 const venueDoc = (venue: string): string => `venues/${venue}.geml`;
 const VENUE_DOC = /^venues\/([gd]-[0-9a-f]{10})\.geml$/;
 /** Ids the relay writes in a venue; a client's message may not take one. */
-const RESERVED = /^(venue|member|msg|sys|link|request|answer)(-|$)/;
+const RESERVED = /^(venue|member|msg|sys|link|request|answer|leave|owner)(-|$)/;
+/** A web person is mailed about a chat at most once in this long (Q8: 同一个群几个小时最多一封). */
+const REMIND_GAP_MS = 3 * 3_600_000;
+const remindsDoc = (person: string): string => `reminds/${person}.geml`;
+/** Where a person's email is kept for reminders: the service's alone, never in a box. */
+const reachDoc = (person: string): string => `reaches/${person}.geml`;
 export const TEXT_MAX = 4000;
 const WORK_DOC = "work.geml";
 /** Where a job of the person's computer stands (spec §7.4). */
@@ -105,6 +113,8 @@ export class AvatarRelay {
   private readonly texter: Texter;
   private readonly mailer: Mailer;
   private readonly mailFrom: string;
+  private origin: string;
+  private readonly originGiven: boolean;
   private readonly rand: () => number;
   private readonly listeners = new Set<(p: Pushed) => void>();
   private readonly push: PushAdapter[];
@@ -118,6 +128,7 @@ export class AvatarRelay {
       read: (owner, doc) => base.read(owner, doc),
       list: (owner, dir) => base.list(owner, dir),
       secret: (name, make) => base.secret(name, make),
+      remove: (owner, doc) => base.remove(owner, doc),
       append: (owner, doc, idOf, build) => { const a = base.append(owner, doc, idOf, build); if (!a.existed) this.route(owner, doc, a.block); return a; },
     };
     this.name = o.name;
@@ -125,6 +136,8 @@ export class AvatarRelay {
     this.texter = o.texter ?? (o.root !== undefined ? fileTexter(o.root) : () => undefined);
     this.mailer = o.mailer ?? (o.root !== undefined ? fileMailer(o.root) : () => undefined);
     this.mailFrom = o.mailFrom ?? o.name;
+    this.origin = (o.origin ?? `https://${o.name}`).replace(/\/+$/, "");
+    this.originGiven = o.origin !== undefined;
     this.rand = o.rand ?? Math.random;
     this.clock = o.now ?? (() => new Date().toISOString().replace(/\.\d{3}Z$/, "Z"));
     this.push = o.push ?? [];
@@ -229,11 +242,76 @@ export class AvatarRelay {
     const s = this.spendCode(o);
     if (isFail(s)) return s;
     const known = this.personByKey(s.key);
-    if (known !== undefined) return { person: known, new: false };
+    if (known !== undefined) { this.keepReach(known, s.a, s.key); return { person: known, new: false }; }
     const person = `p-${hex(5)}`, asked = o["lang"];
     appendSealed(this.store, RELAY_OWNER, peopleDoc(person), "person", { lang: isLang(asked) ? asked : DEFAULT_LANG, at: this.now() });
     this.bind(person, s.a, s.key);
+    this.keepReach(person, s.a, s.key);
     return { person, new: true };
+  }
+
+  /** Where the pages are once a shell knows it (the Node shell's own address), unless the operator named it. */
+  useOrigin(url: string): void { if (!this.originGiven) this.origin = url.replace(/\/+$/, ""); }
+
+  /**
+   * The address a person signed in with by email, kept for them by the service alone (`reaches/<id>.geml`, never sent
+   * to a box): where a reminder goes (Q8). A number stays a hash; nothing is texted.
+   */
+  private keepReach(person: string, a: Address, key: string): void {
+    if (a.kind !== "email" || this.reachesOf(person).get(key) === a.value) return;
+    this.store.append(RELAY_OWNER, reachDoc(person), nextId("reach"), (_d, prev, id) => sealed({ id, key, mail: a.value, at: this.now() }, prev));
+  }
+
+  private reachesOf(person: string): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const b of this.store.read(RELAY_OWNER, reachDoc(person)).blocks) if (/^reach-\d+$/.test(b.id) && typeof b.value["key"] === "string" && typeof b.value["mail"] === "string") out.set(b.value["key"], b.value["mail"]);
+    return out;
+  }
+
+  /** The email a reminder goes to: the newest of the person's ways in that is still theirs; none, nothing is sent. */
+  private reachOf(person: string): string | undefined {
+    const reaches = this.reachesOf(person);
+    return this.methodsOf(person).filter((m) => reaches.has(m.id)).sort((x, y) => (x.at < y.at ? 1 : x.at > y.at ? -1 : 0)).map((m) => reaches.get(m.id)!).at(0);
+  }
+
+  /** Whether the person is signed in on a computer with the plugin (its device named `… · Claude Code`): the pane tells them, so no mail does. */
+  private onComputer(person: string): boolean {
+    const live = new Set(liveTokens(this.store).filter((t) => t.by === "login" && t.speaker === `person:${person}`).map((t) => t.id));
+    return this.store.read(RELAY_OWNER, peopleDoc(person)).blocks.some((b) => /^device-\d+$/.test(b.id) && live.has(str(b.value["token"]) ?? "") && /Claude Code$/.test(str(b.value["name"]) ?? ""));
+  }
+
+  /**
+   * A line that calls someone on the web (S8, Q8): an @ of their avatar's name, or a reply to their line, in a group
+   * of theirs; they have no pane, so a mail — at most one a chat in REMIND_GAP_MS — with the line and the group's page.
+   */
+  private remind(owner: string, venue: string, line: Record<string, JsonValue>): void {
+    const s = this.venueState(owner, venue);
+    if (s === undefined || s.kind !== "group") return;
+    const text = str(line["text"]) ?? "", speaker = parseWho(str(line["speaker"]) ?? "");
+    const from = speaker?.kind === "avatar" ? speaker.id : undefined;
+    const replyTo = str(line["replyTo"]);
+    const answered = replyTo === undefined ? undefined : parseWho(str(this.store.read(owner, venueDoc(venue)).blocks.find((b) => b.id === replyTo)?.value["speaker"]) ?? "");
+    const who = from !== undefined ? this.card(from)?.name ?? "" : "";
+    for (const m of s.members) {
+      if (m === from) continue;
+      const name = this.card(m)?.name;
+      const mention = name !== undefined && text.includes(`@${name}`), reply = answered?.kind === "avatar" && answered.id === m;
+      if (!mention && !reply) continue;
+      const person = this.ownerOf(m);
+      if (person === undefined || this.ownerOf(from ?? "") === person || this.onComputer(person)) continue;
+      const to = this.reachOf(person);
+      if (to === undefined) continue;
+      const key = `${owner}/${venue}`, now = this.now();
+      const last = this.store.read(RELAY_OWNER, remindsDoc(person)).blocks.filter((b) => b.value["venue"] === key).at(-1);
+      if (last !== undefined && Date.parse(now) - Date.parse(str(last.value["at"]) ?? "") < REMIND_GAP_MS) continue;
+      this.store.append(RELAY_OWNER, remindsDoc(person), nextId("remind"), (_d, prev, id) => sealed({ id, venue: key, at: now }, prev));
+      const lang = this.languageOf(person);
+      const subject = say(mention ? "remind.mention" : "remind.reply", lang, { group: s.name, who });
+      try {
+        const sending = this.mailer({ to, subject, text: say("remind.text", lang, { line: text, url: `${this.origin}/g/${venue}` }) });
+        void Promise.resolve(sending).catch(() => { /* the operator's route failed; the pages still show it */ });
+      } catch { /* the same */ }
+    }
   }
 
   /** The name a device gave itself at sign-in, kept with its token's id; control characters dropped, at most sixty characters, none when empty. */
@@ -281,6 +359,7 @@ export class AvatarRelay {
     const owner = this.personByKey(s.key);
     if (owner !== undefined && owner !== person) return fail(409, "login.taken");
     if (owner === undefined) this.bind(person, s.a, s.key);
+    this.keepReach(person, s.a, s.key);
     return { ok: true, methods: this.methodsOf(person) };
   }
 
@@ -473,6 +552,80 @@ export class AvatarRelay {
     return name === null ? { ok: true } : { ok: true, name };
   }
 
+  // --- 底子 (S27, design §8.2) ---
+  // Kept with the person, beside their language and default name: the person
+  // and the service read it, nobody else. An avatar's agent reads only the kept
+  // entries given to that avatar, and may leave one waiting for the person's yes.
+
+  /** The person's 底子 as it stands, the waiting entries with it. */
+  baseOfPerson(person: string): BaseItem[] { return baseOf(this.store.read(RELAY_OWNER, peopleDoc(person)).blocks); }
+
+  /** What the token may read: the person, everything; an avatar's agent, the kept entries given to that avatar. */
+  baseFor(by: TokenRecord): Result<{ base: BaseItem[] }> {
+    if (by.scope === "person") { const person = this.onlyPerson(by); return typeof person === "string" ? { ok: true, base: this.baseOfPerson(person) } : person; }
+    const a = this.acting(by, undefined);
+    if (isFail(a)) return a;
+    const person = this.ownerOf(a.avatar);
+    return { ok: true, base: person === undefined ? [] : baseFor(this.baseOfPerson(person), a.avatar) };
+  }
+
+  /**
+   * An entry made: by the person, kept, given to the avatars they name (their own only); by an avatar's agent, waiting
+   * for the person's yes, given to that avatar alone, with who said it.
+   */
+  addBase(by: TokenRecord, body: unknown): Result<{ item: BaseItem }> {
+    const o = obj(body) ?? {};
+    const f = baseFault(o["label"], o["text"]);
+    if (f !== undefined) return fail(400, f.code, f.params);
+    let person: string, given: string[], state: "kept" | "pending", maker: string, who: string | undefined;
+    if (by.scope === "person") {
+      const p = this.onlyPerson(by);
+      if (typeof p !== "string") return p;
+      const mine = new Set(this.avatarsOf(p).map((x) => x.id));
+      given = Array.isArray(o["for"]) ? [...new Set((o["for"] as unknown[]).filter((x): x is string => typeof x === "string"))] : [];
+      if (given.length === 0 || !given.every((x) => mine.has(x))) return fail(400, "base.for");
+      person = p; state = "kept"; maker = "person";
+    } else {
+      const a = this.acting(by, undefined);
+      if (isFail(a)) return a;
+      const p = this.ownerOf(a.avatar);
+      if (p === undefined) return fail(403, "avatar.notYours");
+      if (this.baseOfPerson(p).filter((x) => x.state === "pending").length >= BASE_PENDING_MAX) return fail(429, "base.waiting", { max: BASE_PENDING_MAX });
+      person = p; given = [a.avatar]; state = "pending"; maker = a.avatar; who = str(o["who"])?.trim().slice(0, 40);
+    }
+    if (this.baseOfPerson(person).length >= BASE_MAX) return fail(409, "base.full", { max: BASE_MAX });
+    const label = (str(o["label"]) ?? "").trim(), text = (o["text"] as string).trim();
+    const made = this.store.append(RELAY_OWNER, peopleDoc(person), nextId("base"), (_d, prev, id) => sealed({ id, label, text, for: given, state, by: maker, ...(who !== undefined && who !== "" ? { who } : {}), at: this.now() }, prev));
+    return { ok: true, item: baseOf([made.block]).at(0)! };
+  }
+
+  /** The person changes an entry: new words, other avatars of theirs, 删 (`drop`); a waiting one 记下 (`keep: true`) or 不记 (`keep: false`). */
+  setBase(by: TokenRecord, item: string, body: unknown): Result<{ base: BaseItem[] }> {
+    const person = this.onlyPerson(by);
+    if (typeof person !== "string") return person;
+    const it = this.baseOfPerson(person).find((x) => x.id === item);
+    if (it === undefined) return fail(404, "base.missing");
+    const o = obj(body) ?? {};
+    const change: Record<string, JsonValue> = {};
+    if (o["text"] !== undefined || o["label"] !== undefined) {
+      const f = baseFault(o["label"] ?? it.label, o["text"] ?? it.text);
+      if (f !== undefined) return fail(400, f.code, f.params);
+      if (typeof o["text"] === "string") change["text"] = o["text"].trim();
+      if (typeof o["label"] === "string") change["label"] = o["label"].trim();
+    }
+    if (o["for"] !== undefined) {
+      const mine = new Set(this.avatarsOf(person).map((x) => x.id));
+      const given = Array.isArray(o["for"]) ? [...new Set((o["for"] as unknown[]).filter((x): x is string => typeof x === "string"))] : [];
+      if (given.length === 0 || !given.every((x) => mine.has(x))) return fail(400, "base.for");
+      change["for"] = given;
+    }
+    if (o["drop"] === true) change["drop"] = true;
+    if (typeof o["keep"] === "boolean") { if (it.state !== "pending") return fail(409, "base.kept"); change["keep"] = o["keep"]; }
+    if (Object.keys(change).length === 0) return fail(400, "base.change");
+    this.store.append(RELAY_OWNER, peopleDoc(person), nextId("baseset"), (_d, prev, id) => sealed({ id, item, ...change, at: this.now() }, prev));
+    return { ok: true, base: this.baseOfPerson(person) };
+  }
+
   // --- avatars ---
 
   /** The avatar's public card: its id and its latest name. */
@@ -609,19 +762,24 @@ export class AvatarRelay {
 
   // --- venues ---
 
-  private venueState(owner: string, venue: string): { kind: VenueKind; name: string; members: string[] } | undefined {
+  /** A venue as its blocks say, in order: who is in (in by `member-N`, out by `leave-N`) and its 群主 (the maker, then each `owner-N`). */
+  private venueState(owner: string, venue: string): { kind: VenueKind; name: string; members: string[]; keeper: string; former: string[] } | undefined {
     if (!AVATAR_ID.test(owner) || !VENUE_ID.test(venue)) return undefined;
     const d = this.store.read(owner, venueDoc(venue));
     const meta = d.blocks.find((b) => b.id === "venue")?.value;
     const kind = str(meta?.["kind"]);
     if (meta === undefined || (kind !== "group" && kind !== "dm")) return undefined;
     const members: string[] = [];
+    let keeper = owner;
     for (const b of d.blocks) {
-      if (!/^member-\d+$/.test(b.id)) continue;
       const w = parseWho(str(b.value["avatar"]) ?? "");
-      if (w?.kind === "avatar" && !members.includes(w.id)) members.push(w.id);
+      if (w?.kind !== "avatar") continue;
+      if (/^member-\d+$/.test(b.id) && !members.includes(w.id)) members.push(w.id);
+      else if (/^leave-\d+$/.test(b.id)) { const i = members.indexOf(w.id); if (i >= 0) members.splice(i, 1); }
+      else if (/^owner-\d+$/.test(b.id)) keeper = w.id;
     }
-    return { kind, name: str(meta["name"]) ?? "", members };
+    const former = d.blocks.filter((b) => /^leave-\d+$/.test(b.id)).map((b) => parseWho(str(b.value["avatar"]) ?? "")).filter((w) => w?.kind === "avatar").map((w) => w!.id).filter((x, i, all) => !members.includes(x) && all.indexOf(x) === i);
+    return { kind, name: str(meta["name"]) ?? "", members, keeper, former };
   }
 
   /** The venue with its members' cards; a two-person talk is named after the other side, as the viewer's avatar sees it. */
@@ -630,7 +788,8 @@ export class AvatarRelay {
     if (s === undefined) return undefined;
     const members = s.members.map((m) => this.card(m)).filter((c): c is AvatarCard => c !== undefined);
     const name = s.kind === "dm" ? (members.find((m) => m.id !== as)?.name ?? s.name) : s.name;
-    return { owner, id: venue, kind: s.kind, name, members };
+    const former = s.former.map((m) => this.card(m)).filter((c): c is AvatarCard => c !== undefined);
+    return { owner, id: venue, kind: s.kind, name, members, keeper: s.keeper, former };
   }
 
   /** The avatar into the venue: a member block in the venue, a join block in the avatar's own list of venues. */
@@ -682,7 +841,7 @@ export class AvatarRelay {
     if (s.kind !== "group") return fail(400, "dm.noAdd");
     const a = this.acting(by, obj(body)?.["as"]);
     if (isFail(a)) return a;
-    if (a.avatar !== owner) return fail(403, "group.ownerOnly");
+    if (a.avatar !== s.keeper) return fail(403, "group.ownerOnly");
     const who = str(obj(body)?.["avatar"]);
     if (who === undefined || this.card(who) === undefined) return fail(404, "avatar.missing");
     if (!s.members.includes(who)) this.join(owner, venue, who, avatarSpeaker(a.avatar));
@@ -730,7 +889,7 @@ export class AvatarRelay {
     if (hops !== undefined && (a.by !== "agent" || typeof hops !== "number" || !Number.isInteger(hops) || hops < 0 || hops > 9)) return fail(400, "message.hops");
     const now = this.now();
     const made = this.store.append(owner, doc, own !== undefined ? () => own : nextId("msg"), (_d, prev, id) => sealed({ id, speaker: avatarSpeaker(a.avatar), by: a.by, text: normalizeText(text), at: now, ...(replyTo !== undefined ? { replyTo } : {}), ...(typeof hops === "number" ? { hops } : {}) }, prev));
-    if (!made.existed) this.emit(owner, doc, made.block);
+    if (!made.existed) { this.emit(owner, doc, made.block); this.remind(owner, venue, made.block.value); }
     return { ok: true, message: made.block.value, existed: made.existed };
   }
 
@@ -740,7 +899,11 @@ export class AvatarRelay {
     for (const a of this.avatarsOf(person)) {
       for (const v of this.joinedOf(a.id)) {
         const view = this.venueView(v.owner, v.venue, a.id);
-        if (view !== undefined) out.push({ ...view, as: a.id });
+        if (view === undefined) continue;
+        const line = this.store.read(v.owner, venueDoc(v.venue)).blocks.filter((b) => typeof b.value["text"] === "string" && typeof b.value["speaker"] === "string").at(-1);
+        const said = line === undefined ? undefined : parseWho(str(line.value["speaker"]) ?? "");
+        const who = said?.kind === "avatar" ? ([...view.members, ...view.former].find((m) => m.id === said.id)?.name ?? said.id) : "";
+        out.push({ ...view, as: a.id, ...(line !== undefined ? { last: { who, text: str(line.value["text"]) ?? "", at: str(line.value["at"]) ?? "" } } : {}) });
       }
     }
     return out;
@@ -819,7 +982,38 @@ export class AvatarRelay {
     const a = this.acting(by, as);
     if (isFail(a)) return a;
     if (!s.members.includes(a.avatar)) return fail(403, "venue.notMember");
-    return { avatar: a.avatar, isOwner: a.avatar === owner };
+    return { avatar: a.avatar, isOwner: a.avatar === s.keeper };
+  }
+
+  /**
+   * Out of a group (S19): a member leaves, and the group says so; its 群主 first names who keeps it, and the group says
+   * that too; the last one in, and the group is gone with its chat — its links name nothing any more. The avatar's own
+   * list loses it, and its 自动回 there goes with it.
+   */
+  leaveVenue(by: TokenRecord, owner: string, venue: string, body: unknown): Result<{ left: true; gone?: true }> {
+    const s = this.venueState(owner, venue);
+    if (s === undefined) return fail(404, "group.missing");
+    if (s.kind !== "group") return fail(400, "dm.noLeave");
+    const o = obj(body) ?? {};
+    const a = this.acting(by, o["as"]);
+    if (isFail(a)) return a;
+    if (!s.members.includes(a.avatar)) return fail(403, "venue.notMember");
+    const others = s.members.filter((m) => m !== a.avatar), key = `${owner}/${venue}`, now = this.now();
+    const heir = a.avatar === s.keeper && others.length > 0 ? str(o["heir"]) : undefined;
+    if (a.avatar === s.keeper && others.length > 0 && (heir === undefined || !others.includes(heir))) return fail(400, "leave.heir");
+    if (others.length === 0) this.store.remove(owner, venueDoc(venue));
+    else {
+      if (heir !== undefined) {
+        const k = this.store.append(owner, venueDoc(venue), nextId("owner"), (_d, prev, id) => sealed({ id, avatar: avatarSpeaker(heir), by: avatarSpeaker(a.avatar), at: now }, prev));
+        this.emit(owner, venueDoc(venue), k.block);
+      }
+      const l = this.store.append(owner, venueDoc(venue), nextId("leave"), (_d, prev, id) => sealed({ id, avatar: avatarSpeaker(a.avatar), ...(heir !== undefined ? { heir: avatarSpeaker(heir) } : {}), at: now }, prev));
+      this.emit(owner, venueDoc(venue), l.block);
+    }
+    if (this.autoOf(a.avatar).includes(key)) this.store.append(a.avatar, "auto.geml", nextId("auto"), (_d, prev, id) => sealed({ id, venue: key, on: false, at: now }, prev));
+    const j = this.store.append(a.avatar, "joined.geml", nextId("left"), (_d, prev, id) => sealed({ id, owner, venue, left: true, at: now }, prev));
+    this.emit(a.avatar, "joined.geml", j.block);
+    return others.length === 0 ? { ok: true, left: true, gone: true } : { ok: true, left: true };
   }
 
   private linkView(code: string, expires: string, rules: LinkRules, by: string): LinkView {
@@ -931,13 +1125,15 @@ export class AvatarRelay {
     const done = (x: Partial<Joined>): Result<Joined> => ({ ok: true, venue: this.venueView(link.owner, link.venue, avatar)!, avatar: card, already: false, ...x, ...(token !== undefined ? { token } : {}) });
     if (pick.kind === "in") return done({ already: true });
     if (this.linkRulesOf(link.owner, link.venue).approve) {
-      const asked = this.requestsOf(link.owner).find((r) => r.venue === link.venue && r.avatar.id === avatar);
+      // To the group's 群主 now, who may not be its maker (S19); the request names where the group is kept.
+      const keeper = this.venueState(link.owner, link.venue)?.keeper ?? link.owner;
+      const asked = this.requestsOf(keeper).find((r) => r.venue === link.venue && r.avatar.id === avatar);
       if (asked !== undefined) return done({ pending: asked.id });
-      const made = this.store.append(link.owner, "requests.geml", nextId("request"), (_d, prev, id) => sealed({ id, venue: link.venue, avatar: avatarSpeaker(avatar), link: code, at: this.now() }, prev));
-      this.emit(link.owner, "requests.geml", made.block);
+      const made = this.store.append(keeper, "requests.geml", nextId("request"), (_d, prev, id) => sealed({ id, owner: link.owner, venue: link.venue, avatar: avatarSpeaker(avatar), link: code, at: this.now() }, prev));
+      this.emit(keeper, "requests.geml", made.block);
       // The owner's 答应事情 (spec §6.1, §7.3): the newcomer at the door, in the owner's person's language.
-      const lang = this.languageOf(this.ownerOf(link.owner) ?? "");
-      this.askFor(link.owner, { kind: "promise", summary: say("need.join.summary", lang, { name: card.name, group: this.venueState(link.owner, link.venue)?.name ?? "" }), options: [{ label: say("need.join.yes", lang) }, { label: say("need.join.no", lang) }], venue: { owner: link.owner, id: link.venue }, request: made.block.id });
+      const lang = this.languageOf(this.ownerOf(keeper) ?? "");
+      this.askFor(keeper, { kind: "promise", summary: say("need.join.summary", lang, { name: card.name, group: this.venueState(link.owner, link.venue)?.name ?? "" }), options: [{ label: say("need.join.yes", lang) }, { label: say("need.join.no", lang) }], venue: { owner: link.owner, id: link.venue }, request: made.block.id });
       return done({ pending: made.block.id });
     }
     this.join(link.owner, link.venue, avatar, avatarSpeaker(avatar));
@@ -991,8 +1187,8 @@ export class AvatarRelay {
     if (d.blocks.some((b) => /^answer-\d+$/.test(b.id) && b.value["request"] === request)) return fail(409, "request.answered");
     const made = this.store.append(owner, "requests.geml", nextId("answer"), (_d, prev, id) => sealed({ id, request, yes, by: avatarSpeaker(owner), at: this.now() }, prev));
     this.emit(owner, "requests.geml", made.block);
-    const w = parseWho(str(asked.value["avatar"]) ?? ""), venue = str(asked.value["venue"]);
-    if (yes && w?.kind === "avatar" && venue !== undefined && this.venueState(owner, venue)?.members.includes(w.id) === false) this.join(owner, venue, w.id, avatarSpeaker(owner));
+    const w = parseWho(str(asked.value["avatar"]) ?? ""), venue = str(asked.value["venue"]), kept = str(asked.value["owner"]) ?? owner;
+    if (yes && w?.kind === "avatar" && venue !== undefined && this.venueState(kept, venue)?.members.includes(w.id) === false) this.join(kept, venue, w.id, avatarSpeaker(owner));
     return { ok: true, joined: yes };
   }
 
@@ -1050,8 +1246,8 @@ export class AvatarRelay {
     return out;
   }
 
-  /** A card made: in the avatar's own `needs.geml`, in the relay's list of those with a deadline, out to the person's push channels; with `placeholder`, the avatar's waiting line in the chat. */
-  private askFor(avatar: string, n: { kind: NeedKind; summary: string; options: NeedOption[]; venue?: { owner: string; id: string }; message?: string; checked?: string; draft?: string; expires?: string; request?: string; from?: string; placeholder?: boolean }): Need {
+  /** A card made: in the avatar's own `needs.geml`, in the relay's list of those with a deadline, out to the person's push channels. Nothing is said in the chat until the person answers (the waiting line is gone). */
+  private askFor(avatar: string, n: { kind: NeedKind; summary: string; options: NeedOption[]; venue?: { owner: string; id: string }; message?: string; checked?: string; draft?: string; expires?: string; request?: string; from?: string }): Need {
     const now = this.now();
     const expires = n.expires;
     const made = this.store.append(avatar, "needs.geml", nextId("need"), (_d, prev, id) => sealed({
@@ -1079,21 +1275,21 @@ export class AvatarRelay {
         try { void Promise.resolve(p.deliver(card)).catch(() => { /* the channel's own trouble: the pane still shows the card */ }); } catch { /* the same */ }
       }
     }
-    if (n.placeholder === true && n.venue !== undefined) this.sayAs(avatar, n.venue, this.placeholderOf(avatar), "agent", n.message);
     return need;
   }
 
-  /** A line in a chat as the avatar, stamped `by`: the relay's own say, for answers, placeholders and the expired line. */
+  /** A line in a chat as the avatar, stamped `by`: the relay's own say, for answers and the expired line. */
   private sayAs(avatar: string, venue: { owner: string; id: string }, text: string, by: By, replyTo?: string, extra: Record<string, JsonValue> = {}): string | undefined {
     if (this.venueState(venue.owner, venue.id)?.members.includes(avatar) !== true) return undefined;
     const doc = venueDoc(venue.id);
     const reply = replyTo !== undefined && this.store.read(venue.owner, doc).blocks.some((b) => b.id === replyTo) ? replyTo : undefined;
     const made = this.store.append(venue.owner, doc, nextId("msg"), (_d, prev, id) => sealed({ id, speaker: avatarSpeaker(avatar), by, text: normalizeText(text), at: this.now(), ...(reply !== undefined ? { replyTo: reply } : {}), ...extra }, prev));
     this.emit(venue.owner, doc, made.block);
+    this.remind(venue.owner, venue.id, made.block.value);
     return made.block.id;
   }
 
-  /** An avatar's agent, or its person, asks the person (spec §7.3): one of the five kinds, about a chat it is in, with the words it would send and the options; `placeholder` says the waiting line in the chat meanwhile. */
+  /** An avatar's agent, or its person, asks the person (spec §7.3): one of the five kinds, about a chat it is in, with the words it would send and the options. */
   ask(by: TokenRecord, body: unknown): Result<{ need: Need }> {
     const o = obj(body) ?? {};
     const a = this.acting(by, o["as"]);
@@ -1112,7 +1308,6 @@ export class AvatarRelay {
       kind, summary: o["summary"] as string, options,
       ...(venue !== undefined ? { venue } : {}), ...(str(o["message"]) !== undefined ? { message: str(o["message"])! } : {}), ...(str(o["checked"]) !== undefined ? { checked: str(o["checked"])! } : {}),
       ...(str(o["draft"]) !== undefined ? { draft: str(o["draft"])! } : {}), ...(str(o["expires"]) !== undefined ? { expires: str(o["expires"])! } : {}), ...(from !== undefined && AVATAR_ID.test(from) ? { from } : {}),
-      ...(o["placeholder"] === true ? { placeholder: true } : {}),
     }) };
   }
 
@@ -1158,18 +1353,47 @@ export class AvatarRelay {
     this.store.append(RELAY_OWNER, "needs-open.geml", nextId("closed"), (_d, prev, id) => sealed({ id, avatar, need }, prev));
   }
 
-  /** Whether a borrow may go ahead without asking (spec §7.4): the person said so for the avatar that asked, or for that chat. */
-  borrowAllowed(avatar: string, from: string | undefined, venue: { owner: string; id: string } | undefined): boolean {
+  /**
+   * The standing 以后不用问 of an avatar's tasks (spec §7.4, S23): for the one who asked (`person`, with the chat it was
+   * asked in), or for a chat (`venue`). In order: a later yes gives it, a later 撤 (a `revoke-N` block beside the
+   * cards, never sent to the person's box: nothing there changes) takes it back.
+   */
+  allowsOf(avatar: string): Allow[] {
     const d = this.store.read(avatar, "needs.geml");
     const needs = new Map(d.blocks.filter((b) => /^need-\d+$/.test(b.id)).map((b) => [b.id, b.value] as const));
-    return d.blocks.some((b) => {
-      if (!/^answer-\d+$/.test(b.id)) return false;
+    const on = new Map<string, Allow>();
+    for (const b of d.blocks) {
+      if (/^revoke-\d+$/.test(b.id)) { on.delete(str(b.value["allow"]) ?? ""); continue; }
+      if (!/^answer-\d+$/.test(b.id)) continue;
       const n = needs.get(str(b.value["need"]) ?? "");
-      if (n === undefined || n["kind"] !== "borrow") return false;
-      const nv = obj(n["venue"]);
-      if (b.value["allowPerson"] === true && from !== undefined && n["from"] === from) return true;
-      return b.value["allowVenue"] === true && venue !== undefined && nv?.["owner"] === venue.owner && nv?.["id"] === venue.id;
-    });
+      if (n === undefined || n["kind"] !== "borrow") continue;
+      const nv = obj(n["venue"]), owner = str(nv?.["owner"]), id = str(nv?.["id"]), from = str(n["from"]);
+      const venue = owner !== undefined && id !== undefined ? { owner, id } : undefined;
+      if (b.value["allowPerson"] === true && from !== undefined) on.set(`person:${from}`, { key: `person:${from}`, person: from, ...(venue !== undefined ? { venue } : {}) });
+      if (b.value["allowVenue"] === true && venue !== undefined) on.set(`venue:${venue.owner}/${venue.id}`, { key: `venue:${venue.owner}/${venue.id}`, venue });
+    }
+    return [...on.values()];
+  }
+
+  /** 撤 on one of them (S23): the next task it covered asks the person again. */
+  revokeAllow(by: TokenRecord, avatar: string, body: unknown): Result<{ allows: Allow[] }> {
+    const refused = this.onlyOwner(by, avatar);
+    if (refused !== undefined) return refused;
+    const key = str(obj(body)?.["allow"]);
+    if (key === undefined || !this.allowsOf(avatar).some((x) => x.key === key)) return fail(404, "allow.missing");
+    this.store.append(avatar, "needs.geml", nextId("revoke"), (_d, prev, id) => sealed({ id, allow: key, by: "person", at: this.now() }, prev));
+    return { ok: true, allows: this.allowsOf(avatar) };
+  }
+
+  /** The standing 以后不用问 of an avatar, for its person alone. */
+  allowsFor(by: TokenRecord, avatar: string): Result<{ allows: Allow[] }> {
+    const refused = this.onlyOwner(by, avatar);
+    return refused ?? { ok: true, allows: this.allowsOf(avatar) };
+  }
+
+  /** Whether a borrow may go ahead without asking (spec §7.4): the person said so, and did not take it back, for the avatar that asked, or for that chat. */
+  borrowAllowed(avatar: string, from: string | undefined, venue: { owner: string; id: string } | undefined): boolean {
+    return this.allowsOf(avatar).some((x) => (x.key.startsWith("person:") ? from !== undefined && x.person === from : venue !== undefined && x.venue?.owner === venue.owner && x.venue.id === venue.id));
   }
 
   /** The earliest deadline among the cards still waiting with one: when a shell with alarms (architecture §2.3: a Durable Object's) should sweep next; none, no alarm. */
@@ -1240,22 +1464,6 @@ export class AvatarRelay {
     if (!this.push.some((p) => p.id === channel)) return fail(404, "push.unknown", { channel });
     this.store.append(RELAY_OWNER, peopleDoc(person), nextId("push"), (_d, prev, id) => sealed({ id, channel, on: o["on"] !== false, at: this.now() }, prev));
     return { ok: true, channels: this.pushOf(person), offered: this.push.map((p) => p.id) };
-  }
-
-  /** What the avatar says while its person decides (spec §7.3): the person's own template, else the words of their language. */
-  placeholderOf(avatar: string): string {
-    let text: string | undefined;
-    for (const b of this.store.read(avatar, "templates.geml").blocks) if (/^placeholder-\d+$/.test(b.id)) text = str(b.value["text"]);
-    return text ?? say("need.placeholder", this.languageOf(this.ownerOf(avatar) ?? ""));
-  }
-
-  setPlaceholder(by: TokenRecord, avatar: string, body: unknown): Result<{ text: string }> {
-    const refused = this.onlyOwner(by, avatar);
-    if (refused !== undefined) return refused;
-    const v = obj(body)?.["text"];
-    if (v !== null && (typeof v !== "string" || v.trim() === "" || [...v].length > 200)) return fail(400, "message.empty");
-    this.store.append(avatar, "templates.geml", nextId("placeholder"), (_d, prev, id) => sealed({ id, text: v === null ? null : (v as string).trim(), at: this.now() }, prev));
-    return { ok: true, text: this.placeholderOf(avatar) };
   }
 
   // --- 自动回 (architecture §6.3) ---

@@ -1,6 +1,6 @@
 // Copy this checkout into a folder Claude Code loads the plugin from while it is being developed (one named in
 // CLAUDE_CODE_PLUGIN_DIRS, watched with CLAUDE_CODE_PLUGIN_DIR_WATCH=1: every session reloads it on the next call).
-// Everything but what is not the plugin: dependencies, git, the project's own .geml/, coverage and packs. What the
+// Everything but what is not the plugin: dependencies, git, the project's own .geml/, coverage, packs and the preview. What the
 // checkout no longer has is removed from the copy, so a file deleted here does not live on there; the engine's
 // .claude-plugin/types/ and the copy's own dependencies stay. Only a folder that is new, empty or already a copy of
 // this plugin is synced: anything else might be someone's files. Build and pass the gates first.
@@ -9,7 +9,7 @@ import { cpSync, existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const LEFT = new Set(["node_modules", ".git", ".geml", "coverage", ".nyc_output", ".pack"]);
+const LEFT = new Set(["node_modules", ".git", ".geml", "coverage", ".nyc_output", ".pack", "preview"]);
 const ENGINE_TYPES = ".claude-plugin/types";
 
 /** Whether a path, relative to the checkout and `/`-separated, belongs in the copy. */

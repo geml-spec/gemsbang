@@ -126,14 +126,14 @@ test("the model's tools (spec §4.1, transport §2.4): a session speaks for the 
     assert.match(ok(await li.gb("tool-read", { session: "s-1" })).text, new RegExp(`^「李四」在的场合：\\n${work.owner}/${work.id} · 「设置页改版」$`));
     const sent = ok(await li.gb("tool-say", { session: "s-1", venue: `${work.owner}/${work.id}`, text: "我先看看" }));
     assert.equal(sent.text, "已发到「设置页改版」，以「李四」");
-    assert.match(ok(await li.gb("tool-read", { session: "s-1", venue: `${work.owner}/${work.id}`, limit: 5 })).text, /「设置页改版」最近 1 条：\n#m-[0-9a-f]{10} 李四（分身）（你）：我先看看/);
+    assert.match(ok(await li.gb("tool-read", { session: "s-1", venue: `${work.owner}/${work.id}`, limit: 5 })).text, /「设置页改版」最近 1 条：\n#m-[0-9a-f]{10} 李四（身份）（你）：我先看看/);
     const seen = ok(await john.gb("open", { owner: work.owner, id: work.id })).chat.items.at(-1);
     assert.deepEqual([seen.who, seen.mark], ["李四", true], "John sees the agent's line marked");
     bad(await li.gb("tool-say", { session: "s-1", venue: `${family.owner}/${family.id}`, text: "hi" }), "body.notHere");
     bad(await li.gb("tool-read", { session: "s-1", venue: `${family.owner}/${family.id}` }), "body.notHere");
     assert.equal(Object.keys(readClient(li.home).avatars).length, 1, "the avatar's token was asked for once and kept");
     ok(await li.gb("bind", { session: "s-1" }));
-    bad(await li.gb("tool-say", { session: "s-1", venue: `${work.owner}/${work.id}`, text: "x" }), "body.none");
+    assert.equal(ok(await li.gb("tool-say", { session: "s-1", venue: `${work.owner}/${work.id}`, text: "x" })).text, "已发到「设置页改版」，以「李四」", "a session given none plays the avatar last spoken as (S21)");
   } finally {
     await s.close();
   }

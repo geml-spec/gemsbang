@@ -95,10 +95,13 @@ export function routeAvatars(r: AvatarRequest, relay: AvatarRelay): AvatarRespon
   if (a === "me" && parts.length === 1) {
     return only("GET", () => {
       const w = parseWho(by.speaker);
-      if (person !== undefined) return json(200, { scope: by.scope, person, lang: relay.languageOf(person), avatars: relay.avatarsOf(person), push: relay.pushOf(person), ...(relay.defaultNameOf(person) !== undefined ? { defaultName: relay.defaultNameOf(person) } : {}) });
+      if (person !== undefined) return json(200, { scope: by.scope, person, lang: relay.languageOf(person), avatars: relay.avatarsOf(person), push: relay.pushOf(person), ...(relay.defaultNameOf(person) !== undefined ? { defaultName: relay.defaultNameOf(person) } : {}), base: relay.baseOfPerson(person) });
       return json(200, { scope: by.scope, ...(w?.kind === "avatar" ? { avatar: relay.card(w.id) } : {}) });
     });
   }
+  // 底子 (S27): the person's, or what an avatar's agent may read; made (by the person, or waiting from an agent); changed by the person.
+  if (a === "base" && parts.length === 1) return m === "GET" ? answer(relay.baseFor(by)) : only("POST", () => answer(relay.addBase(by, r.body), 201));
+  if (a === "base" && parts.length === 2 && b !== undefined) return only("POST", () => answer(relay.setBase(by, b, r.body)));
   if (a === "me" && parts.length === 2 && b === "lang") return only("POST", () => answer(relay.setLanguage(by, r.body)));
   if (a === "me" && parts.length === 2 && b === "default-name") return only("POST", () => answer(relay.setDefaultName(by, r.body)));
   if (a === "me" && parts.length === 2 && b === "push") return only("POST", () => answer(relay.setPush(by, r.body)));
@@ -136,8 +139,9 @@ export function routeAvatars(r: AvatarRequest, relay: AvatarRelay): AvatarRespon
     if (c === "name") return only("POST", () => answer(relay.rename(by, b, r.body)));
     if (c === "rules") return only("POST", () => answer(relay.setRules(by, b, r.body)));
     if (c === "token") return only("POST", () => answer(relay.issueAvatar(by, b), 201));
-    if (c === "placeholder") return only("POST", () => answer(relay.setPlaceholder(by, b, r.body)));
     if (c === "auto") return only("POST", () => answer(relay.setAuto(by, b, r.body)));
+    // 不用问 (S23): the standing ones listed, one taken back.
+    if (c === "allows") return m === "GET" ? answer(relay.allowsFor(by, b)) : only("POST", () => answer(relay.revokeAllow(by, b, r.body)));
     return no(404, "path.missing");
   }
   if (a === "venues" && parts.length === 1) {
@@ -161,6 +165,8 @@ export function routeAvatars(r: AvatarRequest, relay: AvatarRelay): AvatarRespon
     }
     if (parts.length === 4 && d === "messages") return only("POST", () => { const x = relay.say(by, b, c, r.body); return answer(x, x.ok && x.existed ? 200 : 201); });
     if (parts.length === 4 && d === "members") return only("POST", () => answer(relay.addMember(by, b, c, r.body)));
+    // 退出群 (S19): a member out; the 群主 names who keeps it; the last one, the group gone.
+    if (parts.length === 4 && d === "leave") return only("POST", () => answer(relay.leaveVenue(by, b, c, r.body)));
     if (parts.length === 4 && d === "link") {
       if (m === "GET") return answer(relay.linkFor(by, b, c, { as: r.query["as"] }));
       return only("POST", () => answer(relay.rotateLink(by, b, c, r.body)));

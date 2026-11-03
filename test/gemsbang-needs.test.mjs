@@ -25,7 +25,7 @@ test("需要你 in the client (spec §7.3): the session's avatar asks with im_as
     ok(await gb("tool-ask", { session: "s-1", venue, kind: "error", summary: "身体连不上" }));
     const view = ok(await gb("status")).view;
     assert.deepEqual(view.needs.map((n) => [n.kind, n.avatarName, n.group, n.badge.initial, n.muted]), [["error", "Lily 爸爸", "三年二班家长", "L", false], ["promise", "Lily 爸爸", "三年二班家长", "L", false]]);
-    assert.equal(ok(await gb("open", { owner: g.owner, id: g.id })).chat.items.at(-1).text, "我看一下，晚点回。", "the waiting line in the chat");
+    assert.equal(ok(await gb("open", { owner: g.owner, id: g.id })).chat.items.some((i) => i.kind === "message"), false, "nothing in the chat until the person answers");
     const promise = view.needs[1];
     const done = ok(await gb("answer", { avatar: promise.avatar, need: promise.id, choice: 0 }));
     assert.deepEqual(done.view.needs.map((n) => n.kind), ["error"]);
@@ -33,9 +33,8 @@ test("需要你 in the client (spec §7.3): the session's avatar asks with im_as
     assert.equal(ok(await gb("mute", { avatar: g.as.id })).view.needs[0].muted, true);
     assert.deepEqual(ok(await gb("mute", { avatar: g.as.id, on: false })).view.muted, { avatars: [], venues: [] });
     assert.equal(ok(await gb("mute", { venue })).view.needs[0].muted, true);
-    assert.equal(ok(await gb("placeholder", { avatar: g.as.id, text: "收到，稍后回" })).view.avatars[0].placeholder, "收到，稍后回");
     assert.equal((await gb("answer", { avatar: promise.avatar, need: promise.id, choice: 0 })).code, "need.answered");
-    assert.equal((await gb("tool-ask", { session: "s-2", venue, kind: "pay", summary: "x" })).code, "body.none");
+    assert.match(ok(await gb("tool-ask", { session: "s-2", venue, kind: "pay", summary: "x" })).text, /以「Lily 爸爸」发到「三年二班家长」/, "a new session plays the avatar last spoken as (S21)");
   } finally {
     await s.close();
   }

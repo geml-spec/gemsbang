@@ -31,6 +31,12 @@ export interface Client {
   repos: Record<string, string>;
   /** Avatar and chat (calls.ts's `callKey`) → the last line that called it the person let go or answered (architecture §6.3); this machine's alone. */
   dismissed: Record<string, string>;
+  /** Session id → when it last came for its rounds: a session seen within LIVE_MS is open (B1: an avatar no open session plays asks the person). */
+  seen?: Record<string, string>;
+  /** The first session that came here after the install (Q14): the line above the prompt says nobody is signed in there alone. */
+  firstSession?: string;
+  /** Avatar and chat (calls.ts's `callKey`) → the line the last round handed it answered, and why that round failed (B3): the call is the person's again. */
+  failed?: Record<string, { last: string; why: string }>;
 }
 
 export const CLIENT = "client.json", CACHE = "cache", SEEN = "seen.json";
@@ -69,16 +75,19 @@ export function readClient(home: string): Client {
   const str = (k: string): string | undefined => (typeof c[k] === "string" && c[k] !== "" ? (c[k] as string) : undefined);
   const lang = c["lang"];
   const notes = Array.isArray(c["notes"]) ? (c["notes"] as unknown[]).map(obj).filter((n) => typeof n["url"] === "string" && typeof n["at"] === "string").map((n) => ({ url: n["url"] as string, at: n["at"] as string })) : [];
-  const token = str("token"), person = str("person");
+  const token = str("token"), person = str("person"), firstSession = str("firstSession");
   const muted = obj(c["muted"]);
   const list = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
   return {
     relay: str("relay") ?? "",
     ...(token !== undefined ? { token } : {}),
     ...(person !== undefined ? { person } : {}),
+    ...(firstSession !== undefined ? { firstSession } : {}),
     ...(isLang(lang) ? { lang } : {}),
     avatars: strings(c["avatars"]),
     bodies: strings(c["bodies"]),
+    seen: strings(c["seen"]),
+    failed: Object.fromEntries(Object.entries(obj(c["failed"])).map(([k, v]) => [k, obj(v)] as const).filter((e) => typeof e[1]["last"] === "string" && typeof e[1]["why"] === "string").map(([k, v]) => [k, { last: v["last"] as string, why: v["why"] as string }])),
     notes,
     muted: { avatars: list(muted["avatars"]), venues: list(muted["venues"]) },
     repos: strings(c["repos"]),

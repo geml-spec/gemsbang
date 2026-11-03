@@ -8,7 +8,7 @@ import { routeAvatars } from "../dist/relay/avatar-api.js";
 import { groupPage } from "../dist/relay/avatar-pages.js";
 import { cardsByFile, fileAdapter } from "../dist/relay/push.js";
 
-test("需要你 over HTTP (spec §7.3): an avatar's token asks; the person lists every card and answers one, the words landing in the chat; the avatar's token lists its own open cards; the push channels on /me; a template for the waiting line; the group's page carries the cards' words", () => {
+test("需要你 over HTTP (spec §7.3): an avatar's token asks; the person lists every card and answers one, the words landing in the chat; the avatar's token lists its own open cards; the push channels on /me; no waiting line to set; the group's page carries the cards' words", () => {
   const root = mkdtempSync(join(tmpdir(), "gemsbang-needs-api-"));
   const texts = [];
   const relay = new AvatarRelay({ root, name: "relay.test", texter: (t) => { texts.push(t); }, push: [fileAdapter(root)] });
@@ -36,7 +36,7 @@ test("需要你 over HTTP (spec §7.3): an avatar's token asks; the person lists
   assert.deepEqual([answered.status, answered.body.need.state, typeof answered.body.sent], [200, "answered", "string"]);
   assert.equal(call("POST", `/needs/${lily}/${mine[0].id}`, { token: john, body: { choice: 0 } }).body.reason, "这件事已经答过了");
   assert.deepEqual(call("GET", "/needs", { token: john }).body, []);
-  assert.equal(call("POST", `/avatars/${lily}/placeholder`, { token: john, body: { text: "我看一下" } }).body.text, "我看一下");
+  assert.equal(call("POST", `/avatars/${lily}/placeholder`, { token: john, body: { text: "我看一下" } }).status, 404, "no waiting line to set");
   assert.equal(call("POST", "/needs", { token: john, body: { kind: "pay", summary: "x" } }).body.error, "as.required");
   const page = groupPage("en");
   assert.match(page, /"need.onlyYou":"Only you see this"/);
