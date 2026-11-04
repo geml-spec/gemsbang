@@ -48,6 +48,8 @@ function world(on: On) {
     copied: [] as string[],
     toasts: [] as string[],
     opened: [] as string[],
+    /** Why `ui.open` leaves the pane undrawn, when it does. */
+    unplaced: undefined as string | undefined,
   }
   const answer = (req: Req): Record<string, unknown> => {
     w.sent.push(req)
@@ -68,7 +70,7 @@ function world(on: On) {
   on('fs.read', ($, e) => (e.path.split('\\').join('/').endsWith('/.claude-plugin/plugin.json') ? { value: JSON.stringify({ version: '0.5.3' }) } : { deny: 'ENOENT' }))
   on('tool.register', ($, e) => { w.registered.push(e.name); return { value: { tool: `mcp__gemsbang__${e.name}` } } })
   on('command.register', ($, e) => { w.commands.push(e.name); return { value: { command: e.name } } })
-  on('ui.open', ($, e) => { w.opened.push(e.id); return { value: { isPlaced: true } } })
+  on('ui.open', ($, e) => { w.opened.push(e.id); return { value: w.unplaced !== undefined ? { isPlaced: false as const, reason: w.unplaced } : { isPlaced: true as const } } })
   on('ui.close', () => ({ value: undefined }))
   on('ui.toast', ($, e) => { w.toasts.push(e.text); return { value: undefined } })
   on('ui.copy', ($, e) => { w.copied.push(e.text); return { value: { isCopied: true } } })
@@ -227,6 +229,14 @@ test('账号与登录 (architecture §3.1, P10): from 我 (/gemsbang settings go
   await pane.press({ key: 'logout-go' })
   await pane.unmount()
   expect(calls(w, 'logout').length).toBe(1)
+})
+
+test('/gemsbang with nowhere to draw the pane (a remote connection): said as the person reads it — where it shows and how to see it — never the engine\'s words', async ($, on) => {
+  const w = world(on)
+  w.unplaced = 'no-surface: no surface is attached ($.session.surfaces() is empty)'
+  await start($, on)
+  const r = await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  expect(r.text).toBe('侧栏只在电脑上的 Claude Code 里显示，现在这个连接没有地方画它。回到电脑上打 /gemsbang 就能看到。')
 })
 
 test('the box (architecture §5.2, §6.2): no poll — the module waits on the box through the client, 25 seconds a wait, one after another; what a wait brings shows at once; nobody signed in, the waits stop until someone signs in', async ($, on) => {

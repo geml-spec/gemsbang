@@ -315,6 +315,7 @@ const WORDS: Readonly<Record<string, Readonly<Record<Lang, string>>>> = {
   "panel.offline": { zh: "断了：{detail} · 显示的是上次同步的", en: "Offline: {detail} · showing the last sync", ja: "オフライン：{detail} · 前回の同期を表示中" },
   "panel.loginBand": { zh: "gemsbang 还没登录", en: "gemsbang: not logged in", ja: "gemsbang：未ログイン" },
   "panel.open": { zh: "打开", en: "Open", ja: "開く" },
+  "panel.noSurface": { zh: "侧栏只在电脑上的 Claude Code 里显示，现在这个连接没有地方画它。回到电脑上打 /gemsbang 就能看到。", en: "The pane shows only in Claude Code on your computer; this connection has nowhere to draw it. Back at your computer, type /gemsbang to see it.", ja: "サイドバーはパソコンの Claude Code にだけ表示されます。この接続には表示する場所がありません。パソコンに戻って /gemsbang と入力すると見られます。" },
   "panel.unreadBand": { zh: "{count} 条未读", en: "{count} unread", ja: "未読 {count} 件" },
   "ask.no": { zh: "不要", en: "No", ja: "やめる" },
   "ask.yes": { zh: "好", en: "Yes", ja: "はい" },

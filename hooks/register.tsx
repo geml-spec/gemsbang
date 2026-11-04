@@ -1699,6 +1699,8 @@ export const register: Register = (on) => {
     // 我 is the person's settings (S22): /gemsbang settings goes there too.
     const page: GbPage = ['avatars', '我', '我的分身', 'settings', '设置'].includes(arg) ? 'avatars' : 'inbox'
     const opened = await openPane($, page)
+    // Nowhere to draw it (a remote connection, a run with no page): said as the person reads it, never the engine's words.
+    if (!opened.isPlaced && opened.reason?.startsWith('no-surface') === true) return { text: say('panel.noSurface', await langNow($)) }
     return { text: opened.isPlaced ? 'Gemsbang' : `gemsbang：${opened.reason ?? ''}` }
   }).catch(() => ({ text: 'gemsbang：命令没有完成，原因见输入框上方的状态带' }))
 }
