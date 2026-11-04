@@ -1,6 +1,8 @@
 // gemsbang's beta on Cloudflare (architecture §2.3): the Worker on
 // gemsbang.com and its one Durable Object, built from the relay
-// (`npm run build` first). Deploying is the maintainer's call: see
+// (`npm run build` first). Codes are mailed through Resend with the
+// RESEND_API_KEY secret, from mustapi.com, the domain the maintainer's
+// Resend already sends for (2026-11-04). Deploying is the maintainer's call: see
 // cloudflare/README.md.
 {
   "name": "gemsbang",
@@ -10,7 +12,6 @@
   "routes": [{ "pattern": "gemsbang.com", "custom_domain": true }],
   "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "RelayObject" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayObject"] }],
-  "send_email": [{ "name": "EMAIL" }],
-  "vars": { "NAME": "gemsbang.com", "MAIL_FROM": "noreply@gemsbang.com" },
+  "vars": { "NAME": "gemsbang.com", "MAIL_FROM": "no-reply@mustapi.com" },
   "observability": { "enabled": true }
 }

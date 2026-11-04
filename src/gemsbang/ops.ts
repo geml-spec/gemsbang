@@ -9,7 +9,7 @@
 // last mirror readable. Every refusal is a code, its parameters and its
 // words in the person's language.
 import { spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { borrowEnvelope, factsOf, repoCommands } from "../core/avatar/borrow.js";
@@ -53,7 +53,13 @@ export interface GbView {
   played?: string[];
   /** This machine's zone, in minutes east of UTC: the pane writes a card's time in it, as the client writes a chat's. */
   zoneMinutes?: number;
+  /** Nobody signed in (S28): each account the service set up, and the link that signs in with it from this machine. */
+  signIn?: SignInLink[];
 }
+/** One other account to sign in or add a way in with (S28, S32): which, and where the browser goes for it. */
+export interface SignInLink { kind: string; url: string }
+/** Where a sign-in through another account stands (S28): the relay's state, the account opened, why it ended without one. */
+export interface GbSso { state: string; kind?: string; fail?: string; reason?: string }
 /** One chat for the pane; `zoneMinutes`, the machine's zone, for the times of its lines. */
 /** `members`, who is in it by name (群信息, P6); `keeper`, its 群主 (S19). */
 export interface GbChat { owner: string; id: string; kind: "group" | "dm"; name: string; count: number; as: Badge | undefined; members?: Card[]; keeper?: string; items: ChatItem[]; earlier: number; isOwner: boolean; rules?: { forward: boolean; approve: boolean }; zoneMinutes?: number }
@@ -72,7 +78,7 @@ export const ROUND_WHYS = ["noAgent", "aborted", "refused", "error", "notSent"] 
 export type RoundWhy = typeof ROUND_WHYS[number];
 /** The account as the pane shows it (architecture §3.1): the ways in, and the devices signed in with the avatars their agents play. */
 export interface GbAccount { methods: { id: string; kind: string; shown: string; at: string }[]; devices: { id: string; name: string; at: string; current: boolean; avatars: { id: string; name: string }[] }[] }
-export type GbResult = ({ ok: true; view?: GbView; chat?: GbChat; link?: GbLink; info?: Record<string, unknown>; joined?: Record<string, unknown>; text?: string; sent?: string; work?: GbTaken; round?: GbRound; rounds?: GbRound[]; account?: GbAccount; allows?: GbAllow[] }) | Fail;
+export type GbResult = ({ ok: true; view?: GbView; chat?: GbChat; link?: GbLink; info?: Record<string, unknown>; joined?: Record<string, unknown>; text?: string; sent?: string; work?: GbTaken; round?: GbRound; rounds?: GbRound[]; account?: GbAccount; allows?: GbAllow[]; sso?: GbSso; links?: SignInLink[] }) | Fail;
 
 const obj = (v: unknown): Record<string, unknown> => (typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 const str = (v: unknown): string | undefined => (typeof v === "string" && v !== "" ? v : undefined);
@@ -174,7 +180,7 @@ export class Gb {
    * behind: everything read again. Out of reach: the cache as it was.
    */
   async sync(wait = 0): Promise<GbResult> {
-    if (this.client.token === undefined) return { ok: true, view: this.view(undefined) };
+    if (this.client.token === undefined) return { ok: true, view: { ...this.view(undefined), signIn: await this.signInLinks("sso") } };
     const cache = readCache(this.o.home);
     if (cache?.pts === undefined) return this.full(cache?.mirror);
     const m = cache.mirror, dirty = new Set<string>(), stale = new Set<string>();
@@ -351,7 +357,10 @@ export class Gb {
   async loginStart(args: Record<string, unknown>): Promise<GbResult> {
     const r = await this.call("POST", "/login", { ...addressBody(args), lang: this.lang }, undefined);
     if (this.isFail(r)) return r;
-    return r.status === 200 ? { ok: true, text: this.sentText(args, obj(r.body)), info: obj(r.body) } : this.refused(r);
+    if (r.status !== 200) return this.refused(r);
+    // An address the service gives the code back for (its beta, before mail): signed in with it at once.
+    const shown = str(obj(r.body)["code"]);
+    return shown !== undefined ? this.loginVerify({ ...args, code: shown }) : { ok: true, text: this.sentText(args, obj(r.body)), info: obj(r.body) };
   }
 
   private sentText(args: Record<string, unknown>, b: Record<string, unknown>): string {
@@ -370,6 +379,69 @@ export class Gb {
     this.client.avatars = {};
     this.save();
     return this.sync();
+  }
+
+  // --- through another account (S28, S32) ---
+
+  /** The accounts the service set up, each with the link that signs in (or adds a way in) with the secret this machine keeps; none when the service does not answer. */
+  private async signInLinks(which: "sso" | "ssoAdd"): Promise<SignInLink[]> {
+    const r = await this.call("GET", "/login/providers", undefined, undefined);
+    if (this.isFail(r) || r.status !== 200) return [];
+    const kinds = (Array.isArray(obj(r.body)["providers"]) ? obj(r.body)["providers"] as unknown[] : []).filter((k): k is string => typeof k === "string");
+    if (kinds.length === 0) return [];
+    if (this.client[which] === undefined) { this.client[which] = randomBytes(32).toString("hex"); this.save(); }
+    const h = createHash("sha256").update(this.client[which]!, "utf8").digest("hex");
+    return kinds.map((kind) => ({ kind, url: `${this.origin}/login/sso/${kind}?h=${h}&lang=${this.lang}` }));
+  }
+
+  /**
+   * A wait on the sign-in (S28) or the way in being added (S32): back when it moves from where the pane last saw it.
+   * Done, the token is this machine's and the view comes with it; added, the account; ended without one, why, and a
+   * new secret for the next try.
+   */
+  async ssoWait(args: Record<string, unknown>): Promise<GbResult> {
+    const which = args["add"] === true ? "ssoAdd" : "sso";
+    const secret = this.client[which];
+    if (secret === undefined) return { ok: true, sso: { state: "none" } };
+    const timeout = typeof args["timeout"] === "number" ? args["timeout"] : 0;
+    const r = await this.call("POST", "/login/sso/check", { secret, seen: str(args["seen"]) ?? "none", timeout, device: this.o.device ?? deviceName() }, which === "ssoAdd" ? this.client.token : undefined);
+    if (this.isFail(r)) return r;
+    if (r.status !== 200) return this.refused(r);
+    const b = obj(r.body), state = str(b["state"]) ?? "none", kind = str(b["kind"]);
+    const sso: GbSso = { state, ...(kind !== undefined ? { kind } : {}) };
+    if (state === "done") {
+      delete this.client.sso;
+      clearCache(this.o.home);
+      this.client.token = str(b["token"]);
+      this.client.person = str(b["person"]);
+      this.client.avatars = {};
+      this.save();
+      const synced = await this.sync();
+      return synced.ok ? { ...synced, sso } : synced;
+    }
+    // Not opened yet is "none" too: the secret stays until the sign-in ends.
+    if (state === "failed" || state === "added") { delete this.client[which]; this.save(); }
+    if (state === "failed") { const fail = str(b["fail"]) ?? "sso.failed"; return { ok: true, sso: { ...sso, fail, reason: say(fail, this.lang) } }; }
+    if (state === "added") { const a = await this.account(); return a.ok ? { ...a, sso } : a; }
+    return { ok: true, sso };
+  }
+
+  /** 取消 (S28): the sign-in let go; the next links carry a new secret. */
+  async ssoCancel(args: Record<string, unknown>): Promise<GbResult> {
+    delete this.client[args["add"] === true ? "ssoAdd" : "sso"];
+    this.save();
+    return args["add"] === true ? { ok: true } : this.sync();
+  }
+
+  /** 加一种登录方式 through another account (S32): a new secret, its hash told to the service as this person's, and the links that open each account with it. */
+  async ssoAdd(): Promise<GbResult> {
+    const secret = randomBytes(32).toString("hex");
+    const r = await this.call("POST", "/me/methods/sso", { h: createHash("sha256").update(secret, "utf8").digest("hex") });
+    if (this.isFail(r)) return r;
+    if (r.status !== 200) return this.refused(r);
+    this.client.ssoAdd = secret;
+    this.save();
+    return { ok: true, links: await this.signInLinks("ssoAdd") };
   }
 
   private logoutLocal(): void {
@@ -421,7 +493,9 @@ export class Gb {
   async methodStart(args: Record<string, unknown>): Promise<GbResult> {
     const r = await this.call("POST", "/me/methods", addressBody(args));
     if (this.isFail(r)) return r;
-    return r.status === 200 ? { ok: true, text: this.sentText(args, obj(r.body)), info: obj(r.body) } : this.refused(r);
+    if (r.status !== 200) return this.refused(r);
+    const shown = str(obj(r.body)["code"]);
+    return shown !== undefined ? this.methodVerify({ ...args, code: shown }) : { ok: true, text: this.sentText(args, obj(r.body)), info: obj(r.body) };
   }
 
   methodVerify(args: Record<string, unknown>): Promise<GbResult> { return this.call("POST", "/me/methods/verify", { ...addressBody(args), code: args["code"] }).then((r) => this.thenAccount(r)); }
@@ -1007,7 +1081,7 @@ export class Gb {
 }
 
 /** The calls the bridge answers, by name. */
-export const GB_CALLS = ["status", "wait", "setup", "login-start", "login-verify", "logout", "first-avatar", "account", "method-start", "method-verify", "method-remove", "device-revoke", "devices-revoke-others", "open", "say", "group", "link", "rotate", "link-rules", "rename", "mark", "default-name", "lang", "bind", "note", "link-info", "join", "answer", "mute", "wake", "auto", "allows", "rounds", "round-done", "round-failed", "repo", "work-take", "work-done", "work-now", "tool-read", "tool-say", "tool-ask", "tool-remember", "base-add", "base-set", "leave"] as const;
+export const GB_CALLS = ["status", "wait", "sso-wait", "sso-cancel", "sso-add", "setup", "login-start", "login-verify", "logout", "first-avatar", "account", "method-start", "method-verify", "method-remove", "device-revoke", "devices-revoke-others", "open", "say", "group", "link", "rotate", "link-rules", "rename", "mark", "default-name", "lang", "bind", "note", "link-info", "join", "answer", "mute", "wake", "auto", "allows", "rounds", "round-done", "round-failed", "repo", "work-take", "work-done", "work-now", "tool-read", "tool-say", "tool-ask", "tool-remember", "base-add", "base-set", "leave"] as const;
 export type GbCall = (typeof GB_CALLS)[number];
 
 export async function runGb(call: string, args: Record<string, unknown>, o: GbOptions): Promise<GbResult> {
@@ -1015,6 +1089,9 @@ export async function runGb(call: string, args: Record<string, unknown>, o: GbOp
   switch (call as GbCall) {
     case "status": return gb.status(args);
     case "wait": return gb.wait(args);
+    case "sso-wait": return gb.ssoWait(args);
+    case "sso-cancel": return gb.ssoCancel(args);
+    case "sso-add": return gb.ssoAdd();
     case "setup": return gb.setup(args);
     case "login-start": return gb.loginStart(args);
     case "login-verify": return gb.loginVerify(args);

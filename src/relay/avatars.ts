@@ -26,7 +26,7 @@ import { nameFault, randomName } from "../core/avatar/names.js";
 import { suggestions, type Suggestion } from "../core/avatar/naming.js";
 import { pickAvatar, type Pick } from "../core/avatar/pick.js";
 import { DIFFERENCE_LIMIT, differenceOf, type Difference, type Update } from "../core/avatar/updates.js";
-import { addressFault, addressOf, codeMail, hashAddress, keyOf, maskAddress, type Address, type AddressKind } from "../core/avatar/address.js";
+import { addressFault, addressOf, codeMail, hashAddress, isSsoKind, keyOf, maskAddress, normalizeEmail, SSO_KINDS, type Address, type AddressKind, type SsoKind } from "../core/avatar/address.js";
 import { CODE_MISSES, CODE_RE, CODE_TTL_MS, CODES_PER_IP_HOUR, CODES_PER_PHONE, codeText, tailOf } from "../core/avatar/phone.js";
 import { DEFAULT_RULES, withRules, type Rules } from "../core/avatar/rules.js";
 import { AVATAR_ID, avatarSpeaker, parseWho, VENUE_ID, type By } from "../core/avatar/who.js";
@@ -36,10 +36,11 @@ import { appendSealed, fileStore, type DocStore } from "./doc-store.js";
 import type { PushAdapter } from "./push.js";
 import { fileMailer, type Mailer } from "./mail.js";
 import { fileTexter, type Texter } from "./text.js";
+import type { Fetcher, Identity, SsoApp, SsoApps } from "./sso.js";
 import { hashToken, issueToken, liveTokens, revokeToken, verifyToken, type TokenRecord } from "./tokens.js";
 
 /** Where its documents live: a folder (`root`, files as the Node shell keeps them) or a store (doc-store.ts: memory, SQLite). */
-export interface AvatarRelayOptions { root?: string; store?: DocStore; name: string; /** Where the pages are, for the links in reminders; `https://<name>` unless given. */ origin?: string; now?: () => string; texter?: Texter; /** Where an email's code goes, and the address it says it comes from (the relay's name unless given). */ mailer?: Mailer; mailFrom?: string; rand?: () => number; /** The push channels the relay offers (spec §7.3); none unless given. */ push?: PushAdapter[] }
+export interface AvatarRelayOptions { root?: string; store?: DocStore; name: string; /** Where the pages are, for the links in reminders; `https://<name>` unless given. */ origin?: string; now?: () => string; texter?: Texter; /** Where an email's code goes, and the address it says it comes from (the relay's name unless given). */ mailer?: Mailer; mailFrom?: string; /** The emails whose code comes back in the answer and is not mailed: test accounts such as Smith's (Q21, 2026-11-04); none unless given. */ showCodeTo?: readonly string[]; /** The calling codes (`+63`) a number may be texted at; unless given, any (a relay on files writes the texts down). */ textTo?: readonly string[]; /** The other accounts a person may sign in with (S28): the operator's app for each; none unless given. */ sso?: SsoApps; /** How the shell asks those accounts; `fetch` unless given. */ fetch?: Fetcher; rand?: () => number; /** The push channels the relay offers (spec §7.3); none unless given. */ push?: PushAdapter[] }
 /** A refusal: the status, the code and its parameters, and the code's words in Chinese. */
 export type Fail = { ok: false; status: number; code: string; params?: Record<string, string | number>; reason: string };
 export type Result<T> = ({ ok: true } & T) | Fail;
@@ -73,6 +74,15 @@ const obj = (v: unknown): Record<string, unknown> | undefined => (typeof v === "
 const hex = (bytes: number): string => randomBytes(bytes).toString("hex");
 const ONE_HOUR_MS = 3_600_000;
 /** The relay's own records, under `_relay`: the login index (each address's binds and unbinds), the phone→person map from before it, the codes, the avatar→person map, the salt. */
+/** A sign-in through another account (S28): how long its browser has, from the link opened to the account's yes. */
+export const SSO_TTL_MS = 10 * 60_000;
+/** The hash of the secret a client keeps for one sign-in through another account: what the browser's link carries. */
+export const SSO_HASH = /^[0-9a-f]{64}$/;
+/** Where a sign-in through another account stands for the client waiting on it. */
+export type SsoState = "none" | "waiting" | "opened" | "done" | "added" | "failed";
+const SSO = "avatar-sso.geml";
+/** The hash the browser's link carries for a client's secret. */
+export const ssoHash = (secret: string): string => createHash("sha256").update(secret, "utf8").digest("hex");
 const LOGINS = "avatar-logins.geml", PHONES = "avatar-phones.geml", CODES = "avatar-codes.geml", OWNERS = "avatar-owners.geml", SALT = "avatar-salt.txt";
 /** The name a device gives itself, at most this long. */
 const DEVICE_NAME_MAX = 60;
@@ -113,6 +123,12 @@ export class AvatarRelay {
   private readonly texter: Texter;
   private readonly mailer: Mailer;
   private readonly mailFrom: string;
+  private readonly showCodeTo: ReadonlySet<string>;
+  private readonly textTo: readonly string[] | undefined;
+  private readonly ssoApps: SsoApps;
+  private readonly ssoWaiters = new Map<string, Set<() => void>>();
+  /** How the shell asks the other accounts a person signs in with. */
+  readonly fetch: Fetcher;
   private origin: string;
   private readonly originGiven: boolean;
   private readonly rand: () => number;
@@ -136,6 +152,10 @@ export class AvatarRelay {
     this.texter = o.texter ?? (o.root !== undefined ? fileTexter(o.root) : () => undefined);
     this.mailer = o.mailer ?? (o.root !== undefined ? fileMailer(o.root) : () => undefined);
     this.mailFrom = o.mailFrom ?? o.name;
+    this.showCodeTo = new Set((o.showCodeTo ?? []).map(normalizeEmail).filter((e): e is string => e !== undefined));
+    this.textTo = o.textTo;
+    this.ssoApps = o.sso ?? {};
+    this.fetch = o.fetch ?? ((url, init) => fetch(url, init));
     this.origin = (o.origin ?? `https://${o.name}`).replace(/\/+$/, "");
     this.originGiven = o.origin !== undefined;
     this.rand = o.rand ?? Math.random;
@@ -154,19 +174,21 @@ export class AvatarRelay {
 
   // --- login (spec §6.2; architecture §3) ---
 
-  /** A code sent to the address — mailed to an email, texted to a number — in the language asked in: three to an address in ten minutes, ten to a network in an hour; whether the address is someone's way in, where the code went (masked) and who it comes from. */
-  startLogin(body: unknown, ip?: string): Result<{ sent: true; known: boolean; to: string; from: string; tail?: string }> {
+  /** A code sent to the address — mailed to an email, texted to a number — in the language asked in: three to an address in ten minutes, ten to a network in an hour; whether the address is someone's way in, where the code went (masked) and who it comes from; an email the operator listed, its code itself, and no mail. */
+  startLogin(body: unknown, ip?: string): Result<{ sent: true; known: boolean; to: string; from: string; tail?: string; code?: string }> {
     const sent = this.sendCode(obj(body) ?? {}, ip);
     if (isFail(sent)) return sent;
-    return { ok: true, sent: true, known: this.personByKey(sent.key) !== undefined, to: maskAddress(sent.a), from: this.mailFrom, ...(sent.a.kind === "phone" ? { tail: tailOf(sent.a.value) } : {}) };
+    return { ok: true, sent: true, known: this.personByKey(sent.key) !== undefined, to: maskAddress(sent.a), from: this.mailFrom, ...(sent.a.kind === "phone" ? { tail: tailOf(sent.a.value) } : {}), ...(sent.shown !== undefined ? { code: sent.shown } : {}) };
   }
 
-  /** A code made and sent to the body's address, unless `before` refuses its key or the address or the network asked too often. */
-  private sendCode(o: Record<string, unknown>, ip?: string, before?: (key: string) => Fail | undefined): { a: Address; key: string } | Fail {
+  /** A code made and sent to the body's address, unless `before` refuses its key or the address or the network asked too often; to an email the operator listed, given back instead (`shown`). */
+  private sendCode(o: Record<string, unknown>, ip?: string, before?: (key: string) => Fail | undefined): { a: Address; key: string; shown?: string } | Fail {
     const a = addressOf(o);
     if (a === undefined) return refuse(400, addressFault(o)!);
     const asked = o["lang"];
     const lang: Lang = isLang(asked) ? asked : DEFAULT_LANG;
+    // A number is texted only in the countries the operator opened (S29).
+    if (a.kind === "phone" && this.textTo !== undefined && !this.textTo.some((p) => a.value.startsWith(p))) return fail(400, "phone.country");
     const h = hashAddress(a, this.salt()), key = keyOf(a.kind, h);
     const refused = before?.(key);
     if (refused !== undefined) return refused;
@@ -177,6 +199,7 @@ export class AvatarRelay {
     if (ip !== undefined && recent.filter((b) => b.value["ip"] === ip).length >= CODES_PER_IP_HOUR) return fail(429, "code.tooMany");
     const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
     this.store.append(RELAY_OWNER, CODES, nextId("code"), (_d, prev, id) => sealed({ id, addr: h, code: hashToken(`${h}:${code}`), at: now, ...(ip !== undefined ? { ip } : {}) }, prev));
+    if (a.kind === "email" && this.showCodeTo.has(a.value)) return { a, key, shown: code };
     try {
       const sending = a.kind === "email" ? this.mailer({ to: a.value, ...codeMail(code, lang) }) : this.texter({ to: a.value, text: codeText(code, lang) });
       void Promise.resolve(sending).catch(() => { /* the operator's route failed; the next code tries again */ });
@@ -220,11 +243,18 @@ export class AvatarRelay {
     return old === undefined ? undefined : str(old.value["person"]);
   }
 
-  /** The address made one of the person's ways in: in the login index, and on the person, masked. */
-  private bind(person: string, a: Address, key: string): void {
+  /** The address made one of the person's ways in: in the login index, and on the person, masked (another account, as it shows itself). */
+  private bind(person: string, a: Address, key: string, shown = maskAddress(a)): void {
     const now = this.now();
     this.store.append(RELAY_OWNER, LOGINS, nextId("bind"), (_d, prev, id) => sealed({ id, key, person, at: now }, prev));
-    this.store.append(RELAY_OWNER, peopleDoc(person), nextId("bind"), (_d, prev, id) => sealed({ id, key, kind: a.kind, shown: maskAddress(a), at: now }, prev));
+    this.store.append(RELAY_OWNER, peopleDoc(person), nextId("bind"), (_d, prev, id) => sealed({ id, key, kind: a.kind, shown, at: now }, prev));
+  }
+
+  /** Someone new, in the language they signed in with, with no avatar yet. */
+  private newPerson(lang: unknown): string {
+    const person = `p-${hex(5)}`;
+    appendSealed(this.store, RELAY_OWNER, peopleDoc(person), "person", { lang: isLang(lang) ? lang : DEFAULT_LANG, at: this.now() });
+    return person;
   }
 
   /** The code checked: a person's token, named for the device that asked; an address seen for the first time becomes a person in the language they signed in with, with no avatar yet (one grows with the first venue, §6.2, or the name they give first). */
@@ -243,8 +273,7 @@ export class AvatarRelay {
     if (isFail(s)) return s;
     const known = this.personByKey(s.key);
     if (known !== undefined) { this.keepReach(known, s.a, s.key); return { person: known, new: false }; }
-    const person = `p-${hex(5)}`, asked = o["lang"];
-    appendSealed(this.store, RELAY_OWNER, peopleDoc(person), "person", { lang: isLang(asked) ? asked : DEFAULT_LANG, at: this.now() });
+    const person = this.newPerson(o["lang"]);
     this.bind(person, s.a, s.key);
     this.keepReach(person, s.a, s.key);
     return { person, new: true };
@@ -320,6 +349,135 @@ export class AvatarRelay {
     if (name !== "") this.store.append(RELAY_OWNER, peopleDoc(person), nextId("device"), (_d, prev, id) => sealed({ id, token, name, at: this.now() }, prev));
   }
 
+  // --- signing in through another account (S28–S32) ---
+  //
+  // The client keeps a secret and gives the browser only its hash: the link opens the account (`ssoOpen`), the
+  // account's yes says who the person is (`ssoDone`), and only the one holding the secret takes the sign-in that
+  // came of it (`ssoCheck`). Someone who sees the link cannot sign in with it; the hash is good for one sign-in.
+
+  /** The accounts the operator set up, in the order the sign-in page lists them. */
+  providers(): SsoKind[] { return SSO_KINDS.filter((k) => this.ssoApps[k] !== undefined); }
+  /** The operator's app for an account; none when it is not set up. */
+  ssoApp(kind: string): SsoApp | undefined { return isSsoKind(kind) ? this.ssoApps[kind] : undefined; }
+
+  /** Hear when the sign-in a hash names moves on; the function given back stops it. */
+  onSso(h: string, fn: () => void): () => void {
+    const set = this.ssoWaiters.get(h) ?? new Set<() => void>();
+    set.add(fn);
+    this.ssoWaiters.set(h, set);
+    return () => { set.delete(fn); if (set.size === 0) this.ssoWaiters.delete(h); };
+  }
+  private ssoMoved(h: string): void { for (const fn of [...(this.ssoWaiters.get(h) ?? [])]) fn(); }
+
+  /** The sign-in a hash names, within its ten minutes: who it adds a way in for, the account opened, how it ended, whether that was taken. */
+  private ssoOf(h: string): { person?: string; kind?: SsoKind; done?: { person?: string; new?: boolean; added?: boolean; fail?: string }; taken: boolean } | undefined {
+    const t = Date.parse(this.now());
+    let out: { person?: string; kind?: SsoKind; done?: { person?: string; new?: boolean; added?: boolean; fail?: string }; taken: boolean } | undefined;
+    for (const b of this.store.read(RELAY_OWNER, SSO).blocks) {
+      if (b.value["h"] !== h) continue;
+      if (/^sso-\d+$/.test(b.id)) {
+        out = t - Date.parse(str(b.value["at"]) ?? "") < SSO_TTL_MS ? { ...(str(b.value["person"]) !== undefined ? { person: str(b.value["person"])! } : {}), taken: false } : undefined;
+      } else if (out !== undefined && /^ssoopen-\d+$/.test(b.id) && isSsoKind(b.value["kind"])) out.kind = b.value["kind"];
+      else if (out !== undefined && /^ssodone-\d+$/.test(b.id)) out.done = { ...(str(b.value["person"]) !== undefined ? { person: str(b.value["person"])! } : {}), ...(b.value["new"] === true ? { new: true } : {}), ...(b.value["added"] === true ? { added: true } : {}), ...(str(b.value["fail"]) !== undefined ? { fail: str(b.value["fail"])! } : {}) };
+      else if (out !== undefined && /^ssotaken-\d+$/.test(b.id)) out.taken = true;
+    }
+    return out;
+  }
+
+  /** Where a sign-in stands, for a wait on it: the shell holds a check while this stays what the client last saw. */
+  ssoStateOf(h: string): SsoState {
+    const r = this.ssoOf(h);
+    if (r === undefined || r.taken) return "none";
+    if (r.done !== undefined) return r.done.fail !== undefined ? "failed" : r.done.added === true ? "added" : "done";
+    return r.kind !== undefined ? "opened" : "waiting";
+  }
+
+  /** 加一种登录方式 (S32): a hash the person's own client holds, so the account its link opens becomes one more of their ways in. */
+  ssoAdd(by: TokenRecord, body: unknown): Result<{ waiting: true }> {
+    const person = this.onlyPerson(by);
+    if (typeof person !== "string") return person;
+    const h = str(obj(body)?.["h"]);
+    if (h === undefined || !SSO_HASH.test(h)) return fail(400, "sso.bad");
+    if (this.ssoOf(h) !== undefined) return fail(409, "sso.gone");
+    this.store.append(RELAY_OWNER, SSO, nextId("sso"), (_d, prev, id) => sealed({ id, h, person, at: this.now() }, prev));
+    return { ok: true, waiting: true };
+  }
+
+  /** The browser opened the link: the account it asks, written down for the waiting client; a hash already used is refused. */
+  ssoOpen(kind: string, h: string): Result<{ kind: SsoKind }> {
+    if (!isSsoKind(kind) || this.ssoApps[kind] === undefined) return fail(404, "sso.unknown");
+    if (!SSO_HASH.test(h)) return fail(400, "sso.bad");
+    const was = this.ssoOf(h);
+    if (was?.done !== undefined || was?.taken === true) return fail(410, "sso.gone");
+    const now = this.now();
+    if (was === undefined) this.store.append(RELAY_OWNER, SSO, nextId("sso"), (_d, prev, id) => sealed({ id, h, at: now }, prev));
+    this.store.append(RELAY_OWNER, SSO, nextId("ssoopen"), (_d, prev, id) => sealed({ id, h, kind, at: now }, prev));
+    this.ssoMoved(h);
+    return { ok: true, kind };
+  }
+
+  /**
+   * The account said yes, and who the person is there. A way in already bound is that person; else, for 加一种, the
+   * person who asked (unless the account is someone else's); else an address the account checked that is already
+   * someone's way in is that person (Q19 (a), 2026-11-04), the account bound to them; else someone new.
+   */
+  ssoDone(h: string, who: Identity): Result<{ person: string; new: boolean; added: boolean }> {
+    const r = this.ssoOf(h);
+    if (r === undefined || r.done !== undefined || r.taken || r.kind !== who.kind) return fail(410, "sso.gone");
+    const a: Address = { kind: who.kind, value: who.sub };
+    const key = keyOf(a.kind, hashAddress(a, this.salt()));
+    const known = this.personByKey(key);
+    const end = (x: { person?: string; new?: boolean; added?: boolean; fail?: string }): void => {
+      const now = this.now();
+      this.store.append(RELAY_OWNER, SSO, nextId("ssodone"), (_d, prev, id) => sealed({ id, h, ...x, at: now } as Record<string, JsonValue>, prev));
+      this.ssoMoved(h);
+    };
+    if (r.person !== undefined) {
+      if (known !== undefined && known !== r.person) { end({ fail: "login.taken" }); return fail(409, "login.taken"); }
+      if (known === undefined) this.bind(r.person, a, key, who.shown);
+      end({ person: r.person, added: true });
+      return { ok: true, person: r.person, new: false, added: true };
+    }
+    let person = known, fresh = false;
+    if (person === undefined && who.emailVerified && who.email !== undefined) {
+      const e: Address = { kind: "email", value: who.email };
+      person = this.personByKey(keyOf("email", hashAddress(e, this.salt())));
+    }
+    if (person === undefined) { person = this.newPerson(undefined); fresh = true; }
+    if (known === undefined) this.bind(person, a, key, who.shown);
+    end({ person, ...(fresh ? { new: true } : {}) });
+    return { ok: true, person, new: fresh, added: false };
+  }
+
+  /** The account refused, or asking it failed: the waiting client is told why. */
+  ssoFail(h: string, code: string): void {
+    const r = this.ssoOf(h);
+    if (r === undefined || r.done !== undefined) return;
+    const now = this.now();
+    this.store.append(RELAY_OWNER, SSO, nextId("ssodone"), (_d, prev, id) => sealed({ id, h, fail: code, at: now }, prev));
+    this.ssoMoved(h);
+  }
+
+  /** The client with the secret asks where its sign-in stands; once it ended, it takes it — a person's token, named for the device — once. */
+  ssoCheck(body: unknown): Result<{ state: SsoState; kind?: SsoKind; token?: string; person?: string; new?: boolean; fail?: string }> {
+    const o = obj(body) ?? {};
+    const secret = str(o["secret"]);
+    if (secret === undefined || secret.length < 32) return fail(400, "sso.bad");
+    const h = ssoHash(secret);
+    const r = this.ssoOf(h);
+    if (r === undefined || r.taken) return { ok: true, state: "none" };
+    if (r.done === undefined) return { ok: true, state: r.kind !== undefined ? "opened" : "waiting", ...(r.kind !== undefined ? { kind: r.kind } : {}) };
+    const now = this.now();
+    this.store.append(RELAY_OWNER, SSO, nextId("ssotaken"), (_d, prev, id) => sealed({ id, h, at: now }, prev));
+    const kind = r.kind !== undefined ? { kind: r.kind } : {};
+    if (r.done.fail !== undefined) return { ok: true, state: "failed", fail: r.done.fail, ...kind };
+    if (r.done.added === true) return { ok: true, state: "added", ...kind };
+    const person = r.done.person!;
+    const { token, record } = issueToken(this.store, { speaker: `person:${person}`, scope: "person", by: "login", at: now });
+    this.nameDevice(person, record.id, o["device"]);
+    return { ok: true, state: "done", token, person, new: r.done.new === true, ...kind };
+  }
+
   // --- the account (architecture §3.1) ---
 
   /** The person's ways in, oldest first; a number from before the login index, if it is still theirs. */
@@ -330,7 +488,7 @@ export class AvatarRelay {
       if (b.id === "person" && typeof b.value["phone"] === "string") {
         const old = keyOf("phone", b.value["phone"]);
         if (this.personByKey(old) === person) out.set(old, { id: old, kind: "phone", shown: "••••", at: str(b.value["at"]) ?? "" });
-      } else if (/^bind-\d+$/.test(b.id) && key !== undefined && (kind === "email" || kind === "phone")) out.set(key, { id: key, kind, shown: str(b.value["shown"]) ?? "", at: str(b.value["at"]) ?? "" });
+      } else if (/^bind-\d+$/.test(b.id) && key !== undefined && (kind === "email" || kind === "phone" || isSsoKind(kind))) out.set(key, { id: key, kind, shown: str(b.value["shown"]) ?? "", at: str(b.value["at"]) ?? "" });
       else if (/^unbind-\d+$/.test(b.id) && key !== undefined) out.delete(key);
     }
     return [...out.values()];
@@ -342,12 +500,12 @@ export class AvatarRelay {
   }
 
   /** A code sent to an address the person adds as one more way in; an address that is already someone else's is refused before any code. */
-  startMethod(by: TokenRecord, body: unknown, ip?: string): Result<{ sent: true; to: string; from: string }> {
+  startMethod(by: TokenRecord, body: unknown, ip?: string): Result<{ sent: true; to: string; from: string; code?: string }> {
     const person = this.onlyPerson(by);
     if (typeof person !== "string") return person;
     const sent = this.sendCode({ lang: this.languageOf(person), ...(obj(body) ?? {}) }, ip, (key) => { const owner = this.personByKey(key); return owner !== undefined && owner !== person ? fail(409, "login.taken") : undefined; });
     if (isFail(sent)) return sent;
-    return { ok: true, sent: true, to: maskAddress(sent.a), from: this.mailFrom };
+    return { ok: true, sent: true, to: maskAddress(sent.a), from: this.mailFrom, ...(sent.shown !== undefined ? { code: sent.shown } : {}) };
   }
 
   /** The code checked: the address is one more of the person's ways in; already theirs, it stays as it was; someone else's, refused. */

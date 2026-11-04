@@ -59,6 +59,6 @@ export function decodeResponse(stdout: string): BridgeResponse | undefined {
 export function unreadableText(exitCode: number, stderr: string, pluginRoot: string): string {
   const lines = stderr.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
   const said = lines.find((l) => /^[A-Za-z]*Error\b[^:]*:/.test(l)) ?? lines[0] ?? "";
-  if (/Cannot find (?:module|package)/.test(said)) return `gemsbang：没有构建 — 在 ${pluginRoot} 运行 npm run build（${said}）`;
-  return `gemsbang：应答无法解析（退出码 ${exitCode}${said ? `：${said}` : ""}）`;
+  if (/Cannot find (?:module|package)/.test(said)) return `GemsBang：没有构建 — 在 ${pluginRoot} 运行 npm run build（${said}）`;
+  return `GemsBang：应答无法解析（退出码 ${exitCode}${said ? `：${said}` : ""}）`;
 }

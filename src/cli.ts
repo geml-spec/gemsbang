@@ -15,7 +15,7 @@ import { commandTexter } from "./relay/text.js";
 const USAGE = [
   "usage: gemsbang <hook|relay serve> ...",
   "  hook                                    the Claude Code bridge: one JSON request on stdin, one answer on stdout",
-  "  relay serve [--root dir] [--port N] [--name host] [--host addr] [--public-url url] [--mail-command cmd] [--mail-from addr] [--text-command cmd]   the service on this machine: avatars, groups, links, the pages /i/<code>, /g/<group>, /login (root: ~/.gemsbang/relay; an email's code goes to <root>/_relay/mail/, a phone's to <root>/_relay/texts/, unless a command takes it: MAIL_TO and MAIL_SUBJECT, or TEXT_TO, in its environment, the text on stdin; --mail-from is who the mail says it comes from, the name unless given)",
+  "  relay serve [--root dir] [--port N] [--name host] [--host addr] [--public-url url] [--mail-command cmd] [--mail-from addr] [--text-command cmd] [--show-code-to emails]   the service on this machine: avatars, groups, links, the pages /i/<code>, /g/<group>, /login (root: ~/.gemsbang/relay; an email's code goes to <root>/_relay/mail/, a phone's to <root>/_relay/texts/, unless a command takes it: MAIL_TO and MAIL_SUBJECT, or TEXT_TO, in its environment, the text on stdin; --mail-from is who the mail says it comes from, the name unless given; --show-code-to names, by commas, the test accounts whose code comes back in the answer instead)",
 ].join("\n");
 
 function fail(msg: string, code: 1 | 2): never {
@@ -60,7 +60,7 @@ async function runHook(): Promise<number> {
 
 /** `gemsbang relay serve`: the service on this machine until it is stopped. */
 async function serve(rest: string[]): Promise<number> {
-  if (positionals("relay serve", rest, ["--root", "--port", "--name", "--host", "--public-url", "--mail-command", "--mail-from", "--text-command"]).length > 0) fail(USAGE, 2);
+  if (positionals("relay serve", rest, ["--root", "--port", "--name", "--host", "--public-url", "--mail-command", "--mail-from", "--text-command", "--show-code-to"]).length > 0) fail(USAGE, 2);
   const root = resolve(flag(rest, "--root") ?? join(homedir(), ".gemsbang", "relay"));
   const port = Number(flag(rest, "--port") ?? "7710");
   if (!Number.isInteger(port) || port < 0 || port > 65535) fail("gemsbang relay serve: --port needs a number from 0 to 65535", 2);
@@ -69,7 +69,9 @@ async function serve(rest: string[]): Promise<number> {
   const host = flag(rest, "--host") ?? "127.0.0.1";
   const name = flag(rest, "--name") ?? "localhost";
   const text = flag(rest, "--text-command"), mail = flag(rest, "--mail-command"), mailFrom = flag(rest, "--mail-from");
-  const s = await startAvatarRelay({ root, name, port, host, version: packageVersion(), ...(publicUrl !== undefined ? { publicUrl } : {}), ...(text !== undefined ? { texter: commandTexter(text) } : {}), ...(mail !== undefined ? { mailer: commandMailer(mail) } : {}), ...(mailFrom !== undefined ? { mailFrom } : {}) });
+  // Test accounts such as Smith (Q21): typing the address signs in; whoever knows it can.
+  const showCodeTo = (flag(rest, "--show-code-to") ?? "").split(",").map((e) => e.trim()).filter((e) => e !== "");
+  const s = await startAvatarRelay({ root, name, port, host, version: packageVersion(), ...(publicUrl !== undefined ? { publicUrl } : {}), ...(text !== undefined ? { texter: commandTexter(text) } : {}), ...(mail !== undefined ? { mailer: commandMailer(mail) } : {}), ...(mailFrom !== undefined ? { mailFrom } : {}), ...(showCodeTo.length > 0 ? { showCodeTo } : {}) });
   console.log(`gemsbang relay ${name} listening on ${s.url} · documents under ${root}`);
   await new Promise<void>((done) => {
     const stop = (): void => { void s.close().then(done); };

@@ -11,7 +11,7 @@
   "pages": [
     {
       "id": "main",
-      "name": "Gemsbang"
+      "name": "GemsBang"
     },
     {
       "id": "old",
@@ -199,7 +199,7 @@
       "y": 0,
       "w": 1930,
       "h": 900,
-      "title": "第一次打开：侧栏里填邮箱和验证码，新人起个名；进来是空的收件箱，建群或用链接进群"
+      "title": "第一次打开：开通了的几家各一个键，或者填邮箱、手机号收验证码；新人起个名；进来是空的收件箱"
     },
     "GbAccount.dc.html": {
       "x": 6160,
@@ -214,10 +214,18 @@
       "w": 960,
       "h": 900,
       "title": "群信息：叫人、静音、自动回、进群要我同意，成员，退出群；群主退出先选一个人接手"
+    },
+    "GbSso.dc.html": {
+      "x": 2010,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "别家账号和手机号：键是链接，浏览器打开 gemsbang.com 转到那一家，侧栏等着，同意了自己进去；手机号收短信验证码"
     }
   },
   "order": [
     "GbSignIn.dc.html",
+    "GbSso.dc.html",
     "JoinShare.dc.html",
     "JoinPhone.dc.html",
     "JoinAgent.dc.html",
@@ -304,7 +312,7 @@
       "x": 0,
       "y": -260,
       "text": "第一次打开：在侧栏里用邮箱登录",
-      "maxW": 1930
+      "maxW": 3450
     }
   },
   "designSystems": []

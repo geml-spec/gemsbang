@@ -3,13 +3,20 @@
 // person, and the relay keeps each only as a salted hash. The beta signs in
 // by email; a phone number stays a way in. What the person is shown of an
 // address is masked: the first letter and the domain of an email, the last
-// four digits of a number. Pure: the rules (the words are words.ts's); the
-// relay keeps the codes and sends them.
+// four digits of a number. Another account — Google, GitHub, Facebook,
+// WeChat (S28, S30) — is a way in too, by the id that account gives, kept
+// hashed the same way; what is shown of it is what that account shows of
+// itself. Pure: the rules (the words are words.ts's); the relay keeps the
+// codes and sends them.
 import { createHash } from "node:crypto";
 import { hashPhone, normalizePhone, tailOf } from "./phone.js";
 import { DEFAULT_LANG, say, type Fault, type Lang } from "./words.js";
 
-export type AddressKind = "email" | "phone";
+/** The other accounts a person may sign in with (S28, S30): each gives the relay a stable id for the person. */
+export type SsoKind = "google" | "github" | "facebook" | "wechat";
+export const SSO_KINDS: readonly SsoKind[] = ["google", "github", "facebook", "wechat"];
+export const isSsoKind = (v: unknown): v is SsoKind => typeof v === "string" && (SSO_KINDS as readonly string[]).includes(v);
+export type AddressKind = "email" | "phone" | SsoKind;
 export interface Address { kind: AddressKind; value: string }
 export const EMAIL_MAX = 254;
 
@@ -35,9 +42,9 @@ export function addressFault(body: Readonly<Record<string, unknown>>): Fault | u
   return { code: "address.required" };
 }
 
-/** The address as the relay keeps it: a hash with the relay's salt; a number's hash is the one phone.ts has always made. */
+/** The address as the relay keeps it: a hash with the relay's salt and its kind; a number's hash is the one phone.ts has always made. */
 export const hashAddress = (a: Address, salt: string): string =>
-  a.kind === "phone" ? hashPhone(a.value, salt) : "sha256:" + createHash("sha256").update(`${salt}:email:${a.value}`, "utf8").digest("hex");
+  a.kind === "phone" ? hashPhone(a.value, salt) : "sha256:" + createHash("sha256").update(`${salt}:${a.kind}:${a.value}`, "utf8").digest("hex");
 
 /** The login index's key for an address's hash: its kind and 24 hex digits. */
 export const keyOf = (kind: AddressKind, hash: string): string => `${kind}-${hash.slice(7, 31)}`;
@@ -45,6 +52,7 @@ export const keyOf = (kind: AddressKind, hash: string): string => `${kind}-${has
 /** What the person is shown of an address: `j***@example.com`, or `•••• 0000`. */
 export function maskAddress(a: Address): string {
   if (a.kind === "phone") return `•••• ${tailOf(a.value)}`;
+  if (a.kind !== "email") return "";
   const at = a.value.lastIndexOf("@");
   return `${a.value.slice(0, 1)}***${a.value.slice(at)}`;
 }

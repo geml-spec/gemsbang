@@ -51,12 +51,12 @@ test("the band (transport §4, S12): the first card not muted and still waiting,
   assert.deepEqual([band.text, band.tone, band.actions.map((a) => a.label), band.more], ["出错 · 身体连不上", "error", ["看原因", "重试"], 1]);
   assert.deepEqual(band.actions[1].action, { op: "answer", avatar: LILY.id, need: "need-1", choice: 1 });
   assert.deepEqual(gbBand(VIEW([need("need-1", "borrow")]), null, NOW).actions, []);
-  assert.equal(gbBand(VIEW([need("need-1", "promise", { expires: "2026-11-01T08:59:00Z" })]), null, NOW).text, "Gemsbang", "past its time: no longer on the line");
-  assert.deepEqual(gbBand(VIEW([]), null, NOW), { text: "Gemsbang", tone: "dim", open: "打开", actions: [], more: 0 });
+  assert.equal(gbBand(VIEW([need("need-1", "promise", { expires: "2026-11-01T08:59:00Z" })]), null, NOW).text, "GemsBang", "past its time: no longer on the line");
+  assert.deepEqual(gbBand(VIEW([]), null, NOW), { text: "GemsBang", tone: "dim", open: "打开", actions: [], more: 0 });
   const two = [...ROWS, { ...ROWS[0], id: "g-00000000yy", name: "读书会", unread: 4 }];
-  assert.deepEqual([gbBand(VIEW([], { rows: two }), null, NOW).text, gbBand(VIEW([], { rows: ROWS }), null, NOW).text], ["Gemsbang · 2 个聊天有新消息", "Gemsbang · 1 个聊天有新消息"]);
-  assert.equal(gbBand(VIEW([], { rows: ROWS, lang: "en" }), null, NOW).text, "Gemsbang · new messages in 1 chat");
-  assert.equal(gbBand(VIEW([], { rows: ROWS, muted: { avatars: [], venues: ["a-00000000c1/g-000000000b"] } }), null, NOW).text, "Gemsbang", "a muted chat's unread is a grey dot: not counted");
+  assert.deepEqual([gbBand(VIEW([], { rows: two }), null, NOW).text, gbBand(VIEW([], { rows: ROWS }), null, NOW).text], ["GemsBang · 2 个聊天有新消息", "GemsBang · 1 个聊天有新消息"]);
+  assert.equal(gbBand(VIEW([], { rows: ROWS, lang: "en" }), null, NOW).text, "GemsBang · new messages in 1 chat");
+  assert.equal(gbBand(VIEW([], { rows: ROWS, muted: { avatars: [], venues: ["a-00000000c1/g-000000000b"] } }), null, NOW).text, "GemsBang", "a muted chat's unread is a grey dot: not counted");
   assert.equal(gbBand(null, null, NOW), undefined, "nothing read yet: no line");
   const s = { chat: null, phone: null, groupAs: "new" };
   assert.deepEqual(fieldAction("need-own", "我三点到", s, `${LILY.id}/need-1`), { call: "answer", args: { avatar: LILY.id, need: "need-1", choice: "own", text: "我三点到" } });
@@ -65,7 +65,7 @@ test("the band (transport §4, S12): the first card not muted and still waiting,
 
 test("nobody signed in (Q14): the line above the prompt says so in the first session after the install alone; later sessions have no line, the pane says it when opened; a view from an older bridge, which kept no first session, still says it", () => {
   const out = VIEW([], { loggedIn: false, firstSession: "s-1" });
-  assert.deepEqual([gbBand(out, null, NOW, "s-1").text, gbBand(out, null, NOW, "s-2")], ["gemsbang 还没登录", undefined]);
-  assert.equal(gbBand(VIEW([], { loggedIn: false }), null, NOW, "s-2").text, "gemsbang 还没登录");
-  assert.equal(gbBand(out, "gemsbang：暂时没应答", NOW, "s-2").tone, "error", "a problem is said everywhere");
+  assert.deepEqual([gbBand(out, null, NOW, "s-1").text, gbBand(out, null, NOW, "s-2")], ["GemsBang 还没登录", undefined]);
+  assert.equal(gbBand(VIEW([], { loggedIn: false }), null, NOW, "s-2").text, "GemsBang 还没登录");
+  assert.equal(gbBand(out, "GemsBang：暂时没应答", NOW, "s-2").tone, "error", "a problem is said everywhere");
 });

@@ -59,7 +59,7 @@ test("a person over HTTP (spec §6, §7): login, an avatar, a group, its link; t
   assert.deepEqual([info.status, info.body.group.name, info.body.suggestions[0].text, info.body.you], [200, "前端周会", "小李", undefined]);
   const md = call("GET", `/i/${link.code}.md`, { languages: "en" });
   assert.equal(md.type, "text/markdown; charset=utf-8");
-  assert.match(md.body, /^# Join the gemsbang group “前端周会”/);
+  assert.match(md.body, /^# Join the GemsBang group “前端周会”/);
   assert.equal(md.body.includes(`POST https://im.example/i/${link.code}/join`), true);
   assert.match(md.body, /owner is “John”; this link works for 7 more days/);
   assert.equal(call("GET", "/i/abcdefgh.md").status, 404);

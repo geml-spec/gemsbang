@@ -27,11 +27,11 @@ test("answers: the last line that parses as this protocol's version", () => {
 test("an answer that did not parse: stderr's error line, and the build to run when a module is missing", () => {
   const missing = "node:internal/modules/cjs/loader:1479\n  throw err;\n  ^\n\nError: Cannot find module '/plugin/dist/gemsbang.mjs'\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1476:15)\n";
   assert.equal(unreadableText(1, missing, "/plugin"),
-    "gemsbang：没有构建 — 在 /plugin 运行 npm run build（Error: Cannot find module '/plugin/dist/gemsbang.mjs'）");
+    "GemsBang：没有构建 — 在 /plugin 运行 npm run build（Error: Cannot find module '/plugin/dist/gemsbang.mjs'）");
   assert.equal(unreadableText(1, "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@geml/geml' imported from /plugin/dist/gemsbang.mjs\n", "/plugin"),
-    "gemsbang：没有构建 — 在 /plugin 运行 npm run build（Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@geml/geml' imported from /plugin/dist/gemsbang.mjs）");
+    "GemsBang：没有构建 — 在 /plugin 运行 npm run build（Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@geml/geml' imported from /plugin/dist/gemsbang.mjs）");
   assert.equal(unreadableText(1, "file:///plugin/dist/gemsbang.mjs:3\n    at x\nTypeError: x is not a function\n", "/plugin"),
-    "gemsbang：应答无法解析（退出码 1：TypeError: x is not a function）");
-  assert.equal(unreadableText(134, "Aborted\n", "/plugin"), "gemsbang：应答无法解析（退出码 134：Aborted）", "no error line: the first line");
-  assert.equal(unreadableText(0, "", "/plugin"), "gemsbang：应答无法解析（退出码 0）");
+    "GemsBang：应答无法解析（退出码 1：TypeError: x is not a function）");
+  assert.equal(unreadableText(134, "Aborted\n", "/plugin"), "GemsBang：应答无法解析（退出码 134：Aborted）", "no error line: the first line");
+  assert.equal(unreadableText(0, "", "/plugin"), "GemsBang：应答无法解析（退出码 0）");
 });

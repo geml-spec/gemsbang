@@ -14,7 +14,7 @@ test("words (spec §7.6): every code speaks Chinese, English and Japanese with t
   assert.equal(say("name.tooLong", "zh", { max: 24 }), "名字最多 24 个字");
   assert.equal(say("name.tooLong", "en", { max: 24 }), "A name has at most 24 characters");
   assert.equal(say("name.tooLong", "ja", { max: 24 }), "名前は24文字までです");
-  assert.equal(say("code.text", "en", { code: "123456" }), "Gemsbang code 123456, valid for 10 minutes. If you did not ask for it, ignore this.");
+  assert.equal(say("code.text", "en", { code: "123456" }), "GemsBang code 123456, valid for 10 minutes. If you did not ask for it, ignore this.");
   assert.equal(say("name.tooLong"), "名字最多 {max} 个字", "a blank with nothing to fill stays");
   assert.equal(say("no.such.code", "en"), "no.such.code");
   assert.equal(sayFault({ code: "rules.unknown", params: { key: "alone" } }, "en"), "There is no rule called alone");

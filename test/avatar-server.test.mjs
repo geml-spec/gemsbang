@@ -45,7 +45,7 @@ test("a person joins from a WeChat link (spec §6.2): the browser gets the join 
     assert.equal(page.body.includes("三年二班家长"), false, "the page carries no data of the relay's: its script asks for it");
     assert.match((await call("GET", "/g/" + g.id, { accept: "text/html", languages: "ja" })).body, /<html lang="ja">/);
     const signIn = (await call("GET", "/login?lang=zh", { accept: "text/html", languages: "en" })).body;
-    assert.match(signIn, /<title>登录 gemsbang<\/title>/);
+    assert.match(signIn, /<title>登录 GemsBang<\/title>/);
     assert.match(signIn, /"page.email":"邮箱"/, "the web signs in by email (architecture §3.2)");
     assert.match(signIn, /email.type = "email"/);
     assert.equal(signIn.includes("page.phone"), false);

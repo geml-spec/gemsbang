@@ -8,9 +8,9 @@ import { deviceName, runGb } from "../dist/gemsbang/ops.js";
 import { gbService, readClient } from "../dist/gemsbang/home.js";
 
 /** A service on a free port, its mail kept; a client home per machine, signing in to that service with no relay named. */
-async function world() {
+async function world(more = {}) {
   const mail = [];
-  const s = await startAvatarRelay({ root: mkdtempSync(join(tmpdir(), "gemsbang-account-relay-")), name: "relay.test", mailFrom: "gemsbang.com", mailer: (m) => { mail.push(m); } });
+  const s = await startAvatarRelay({ root: mkdtempSync(join(tmpdir(), "gemsbang-account-relay-")), name: "relay.test", mailFrom: "gemsbang.com", mailer: (m) => { mail.push(m); }, ...more });
   const machine = (device) => {
     const home = mkdtempSync(join(tmpdir(), "gemsbang-account-home-"));
     const gb = (call, args = {}) => runGb(call, args, { home, now: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"), service: s.url, ...(device !== undefined ? { device } : {}) });
@@ -42,6 +42,62 @@ test("signing in on a machine (architecture §3.2): an email and its code, no se
     assert.deepEqual([named.avatars.map((a) => a.name), named.bodies["s-1"]], [["John"], named.avatars[0].id]);
     bad(await mac.gb("first-avatar", { name: "Lily 爸爸" }), "avatar.notFirst");
     assert.equal(readClient(mac.home).relay, "", "the service is not written down as a relay");
+  } finally { await s.close(); }
+});
+
+test("the beta before mail (2026-11-04): an email the service gives the code back for is signed in by login-start itself, and one more way in added by method-start; any other gets its code by mail", async () => {
+  const { s, mail, machine } = await world({ showCodeTo: ["john@example.com", "john@work.example"] });
+  try {
+    const mac = machine();
+    const inside = ok(await mac.gb("login-start", { email: "John@example.com" })).view;
+    assert.deepEqual([inside.loggedIn, mail.length], [true, 0]);
+    assert.equal(ok(await mac.gb("method-start", { email: "john@work.example" })).account.methods.length, 2);
+    const lily = machine();
+    assert.match(ok(await lily.gb("login-start", { email: "lily@example.com" })).text, /^验证码已发到 l\*\*\*@example\.com/);
+    assert.equal(ok(await lily.gb("status")).view.loggedIn, false);
+  } finally { await s.close(); }
+});
+
+test("through another account from a machine (S28, S32): nobody signed in, the view carries a link per account the service set up, its hash from a secret kept here; the browser opening it and the account's yes sign this machine in on the next wait; 加一种 adds GitHub to the account the same way; 取消 makes a new secret", async () => {
+  const people = { c1: { id: 77, login: "smith" }, c2: { id: 78, login: "john" } };
+  const reply = (v, status = 200) => ({ ok: status < 300, status, text: async () => JSON.stringify(v) });
+  const accounts = async (url, init = {}) => {
+    const u = new URL(url), code = new URLSearchParams(init.body ?? "").get("code");
+    if (u.pathname.endsWith("access_token")) return reply({ access_token: `t-${code}` });
+    const me = people[(init.headers?.authorization ?? "").replace(/^Bearer t-/, "")];
+    return me === undefined ? reply({}, 401) : reply(u.pathname === "/user/emails" ? [] : me);
+  };
+  const { s, machine, code } = await world({ sso: { github: { id: "gh-id", secret: "gh-secret" } }, fetch: accounts });
+  try {
+    const mac = machine("这台 Mac · Claude Code");
+    const before = ok(await mac.gb("status")).view;
+    assert.deepEqual([before.loggedIn, before.signIn.map((l) => l.kind)], [false, ["github"]]);
+    const link = new URL(before.signIn[0].url);
+    assert.deepEqual([link.origin, link.pathname, link.searchParams.get("h").length, link.searchParams.get("lang")], [s.url, "/login/sso/github", 64, "zh"]);
+    assert.equal(ok(await mac.gb("status")).view.signIn[0].url, link.href, "the same secret until it is used");
+    assert.equal(readClient(mac.home).sso.length, 64, "the secret stays on this machine");
+    assert.equal((await mac.gb("sso-wait", { seen: "none", timeout: 0 })).sso.state, "none", "not opened yet");
+    const go = await (await fetch(link, { headers: { accept: "text/html" } })).text();
+    assert.match(go, /正在打开 GitHub…/);
+    assert.deepEqual((await mac.gb("sso-wait", { seen: "none", timeout: 0 })).sso, { state: "opened", kind: "github" }, "the pane learns the browser opened it");
+    const h = link.searchParams.get("h");
+    const waiting = mac.gb("sso-wait", { seen: "opened", timeout: 5 });
+    assert.match(await (await fetch(`${s.url}/login/callback/github?code=c1&state=${h}`)).text(), /登好了/);
+    const inside = ok(await waiting);
+    assert.deepEqual([inside.sso.state, inside.view.loggedIn, inside.view.avatars], ["done", true, []]);
+    assert.equal(readClient(mac.home).sso, undefined, "the secret goes once used");
+    const added = ok(await mac.gb("sso-add"));
+    assert.deepEqual(added.links.map((l) => l.kind), ["github"]);
+    const addLink = new URL(added.links[0].url);
+    await fetch(addLink, { headers: { accept: "text/html" } });
+    assert.match(await (await fetch(`${s.url}/login/callback/github?code=c2&state=${addLink.searchParams.get("h")}`)).text(), /加好了/);
+    const account = ok(await mac.gb("sso-wait", { add: true, seen: "opened", timeout: 0 }));
+    assert.deepEqual([account.sso.state, account.account.methods.map((m) => [m.kind, m.shown])], ["added", [["github", "@smith"], ["github", "@john"]]]);
+    const lily = machine();
+    const first = ok(await lily.gb("status")).view.signIn[0].url;
+    ok(await lily.gb("sso-cancel"));
+    assert.notEqual(ok(await lily.gb("status")).view.signIn[0].url, first, "取消: a new secret");
+    void code;
   } finally { await s.close(); }
 });
 

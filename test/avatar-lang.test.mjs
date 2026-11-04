@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { pickLang, say } from "../dist/core/avatar/words.js";
 
-test("a browser's language (spec §7.6): the best-weighted one gemsbang speaks, region dropped; none spoken, none; the agent's join instructions say the same steps in each language", () => {
+test("a browser's language (spec §7.6): the best-weighted one GemsBang speaks, region dropped; none spoken, none; the agent's join instructions say the same steps in each language", () => {
   assert.equal(pickLang("en-US,en;q=0.9,zh;q=0.8"), "en");
   assert.equal(pickLang("fr-FR,fr;q=0.9,ja;q=0.5,zh;q=0.6"), "zh");
   assert.equal(pickLang("zh-Hant-TW"), "zh");

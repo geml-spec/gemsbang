@@ -329,7 +329,7 @@ function page(title: string, script: string, lang: Lang): string {
 <html lang="${lang}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><style>${STYLE}</style></head>
 <body>
-<header><a class="brand" href="/">gemsbang</a><nav></nav></header>
+<header><a class="brand" href="/">GemsBang</a><nav></nav></header>
 <main id="app"></main>
 <script>
 var LANG = ${JSON.stringify(lang)};
@@ -342,7 +342,29 @@ ${script}
 `;
 }
 
-export const joinPage = (lang: Lang): string => page("gemsbang", JOIN_JS, lang);
-export const groupPage = (lang: Lang): string => page("gemsbang", GROUP_JS, lang);
+const esc = (t: string): string => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+/** A page with no script of its own: the brand, a title, a line. */
+function plainPage(title: string, line: string, lang: Lang, head = ""): string {
+  return `<!doctype html>
+<html lang="${lang}">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${head}<title>${esc(title)}</title><style>${STYLE}</style></head>
+<body>
+<header><a class="brand" href="/">GemsBang</a><nav></nav></header>
+<main id="app"><h1>${esc(title)}</h1><p>${line}</p></main>
+</body>
+</html>
+`;
+}
+/** On the way to the account (S28): straight there, with a link in case the browser does not move. */
+export const ssoGoPage = (url: string, account: string, lang: Lang): string =>
+  plainPage(say("page.sso.go", lang, { account }), `<a href="${esc(url)}">${esc(say("page.sso.continue", lang))}</a>`, lang, `<meta http-equiv="refresh" content="0;url=${esc(url)}">`);
+/** Back from the account (S28, sketch ③): in, added, or why not; the pane goes on by itself. */
+export const ssoEndPage = (outcome: "in" | "added" | { fail: string }, lang: Lang): string =>
+  typeof outcome === "string"
+    ? plainPage(say(outcome === "in" ? "page.sso.in" : "page.sso.added", lang), esc(say("page.sso.back", lang)), lang)
+    : plainPage(say("page.sso.notIn", lang), esc(say(outcome.fail, lang)), lang);
+
+export const joinPage = (lang: Lang): string => page("GemsBang", JOIN_JS, lang);
+export const groupPage = (lang: Lang): string => page("GemsBang", GROUP_JS, lang);
 export const loginPage = (lang: Lang): string => page(say("page.login.title", lang), LOGIN_JS, lang);
 export const minePage = (lang: Lang): string => page(say("page.mine.title", lang), MINE_JS, lang);

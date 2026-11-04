@@ -30,7 +30,7 @@ test("sign in by email (architecture §3.2): the code mailed in the language ask
   bad(r.startLogin({}), 400, "address.required");
   const started = ok(r.startLogin({ email: " John@Example.com ", lang: "en" }));
   assert.deepEqual([started.known, started.to, started.from, started.tail], [false, "j***@example.com", "gemsbang.com", undefined]);
-  assert.deepEqual([r.mail[0].to, r.mail[0].subject.startsWith("Gemsbang code "), r.texts.length], ["john@example.com", true, 0]);
+  assert.deepEqual([r.mail[0].to, r.mail[0].subject.startsWith("GemsBang code "), r.texts.length], ["john@example.com", true, 0]);
   const first = ok(r.finishLogin({ email: "john@example.com", code: codeIn(r.mail[0]), lang: "en" }));
   assert.equal(first.new, true);
   assert.equal(r.languageOf(first.person), "en");

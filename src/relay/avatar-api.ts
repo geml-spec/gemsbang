@@ -67,6 +67,9 @@ export function routeAvatars(r: AvatarRequest, relay: AvatarRelay): AvatarRespon
   // Logging in (spec §6.2): no token yet, by definition.
   if (a === "login" && parts.length === 1) return only("POST", () => answer(relay.startLogin({ lang, ...obj(r.body) }, r.ip)));
   if (a === "login" && parts.length === 2 && b === "verify") return only("POST", () => answer(relay.finishLogin({ lang, ...obj(r.body) })));
+  // Through another account (S28): the accounts set up, and the check of the client holding a sign-in's secret (the shell holds a waiting one open).
+  if (a === "login" && parts.length === 2 && b === "providers") return only("GET", () => json(200, { providers: relay.providers() }));
+  if (a === "login" && parts.length === 3 && b === "sso" && c === "check") return only("POST", () => answer(relay.ssoCheck(r.body)));
   // A link (spec §6.1–§6.3): its page's facts for anyone, the agent's instructions, the way in.
   const lp = a === "i" && b !== undefined ? LINK_PART.exec(b) : null;
   if (lp !== null && parts.length === 2) {
@@ -109,6 +112,8 @@ export function routeAvatars(r: AvatarRequest, relay: AvatarRelay): AvatarRespon
   if (a === "me" && b === "methods") {
     if (parts.length === 2) return m === "GET" ? answer(relay.methods(by)) : only("POST", () => answer(relay.startMethod(by, r.body, r.ip)));
     if (parts.length === 3 && c === "verify") return only("POST", () => answer(relay.addMethod(by, r.body)));
+    // 加一种 through another account (S32): the hash the person's client holds, before its browser opens the account.
+    if (parts.length === 3 && c === "sso") return only("POST", () => answer(relay.ssoAdd(by, r.body)));
     if (parts.length === 4 && c !== undefined && d === "remove") return only("POST", () => answer(relay.removeMethod(by, c)));
   }
   if (a === "me" && b === "devices") {

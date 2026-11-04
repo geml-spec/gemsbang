@@ -29,6 +29,8 @@ export type GbPage = "inbox" | "chat" | "info" | "invite" | "avatars" | "account
 
 export type GbAction =
   | { op: "page"; page: GbPage }
+  /** 取消 (S28): the sign-in through another account let go, or the way in being added in 账号. */
+  | { op: "sso-cancel"; add?: true }
   | { op: "open"; owner: string; id: string }
   | { op: "copy"; text: string }
   | { op: "rotate" }
@@ -136,6 +138,13 @@ export type GbRow =
   /** A call handed to the agent, while it answers: its card folded to one dim line (agent 在回…) until the answer is in the chat. */
   | { kind: "pending"; key: string; text: string }
   | { kind: "text"; key: string; text: string; tone: Tone }
+  /**
+   * Links the person's browser opens (S28): the plugin cannot open one itself, so what signs in through another
+   * account is a link, drawn as a button where `boxed`; `account` names which, for its mark.
+   */
+  | { kind: "links"; key: string; items: { key: string; label: string; href: string; account?: string }[]; boxed?: true }
+  /** 或者, between the other accounts and the field (sketch ①). */
+  | { kind: "or"; key: string; text: string }
   | { kind: "section"; key: string; text: string; badge?: Badge; note?: string; press?: GbPress }
   /** Which avatars a 底子 entry is given to (P8c): 给：, a pill each — ✓ given, faded not — pressed to give or not; 删 at the right. */
   | { kind: "give"; key: string; lead: string; items: { key: string; badge: Badge; on: boolean; action?: GbAction }[]; press?: GbPress }
@@ -199,7 +208,16 @@ export interface PaneState {
   leaving?: boolean; heir?: string | null;
   /** Each avatar's standing 以后不用问 (S23), as last read when 我 opened. */
   allows?: Readonly<Record<string, readonly GbAllow[]>>;
+  /** The account a browser opened to sign in with (S28, sketch ②): which, and its link again. */
+  sso?: { kind: string; url: string } | null;
+  /** 加一种登录方式's other accounts (S32), each with the link that adds it. */
+  addLinks?: readonly { kind: string; url: string }[] | null;
 }
+
+/** What the person typed in 邮箱或手机号 (S29), as the service takes it: an email has an @, anything else is a number. */
+export const addressArgs = (typed: string): { email: string } | { phone: string } => (typed.includes("@") ? { email: typed } : { phone: typed });
+/** The other accounts as links (S28, S32): 用 GitHub 继续, boxed as the sketch has them. */
+const signInLinks = (key: string, links: readonly { kind: string; url: string }[], l: Lang): GbRow => ({ kind: "links", key, boxed: true, items: links.map((x) => ({ key: `${key}-${x.kind}`, label: say("signin.with", l, { account: say(`account.kind.${x.kind}`, l) }), href: x.url, account: x.kind })) });
 
 /** A pasted link as 用链接进群 shows it (P3): the group, who owns it, the avatar the inviter knows; naming a new one, the suggestions and the blank being filled. */
 export interface JoinView {
@@ -213,23 +231,41 @@ const langRow = (lang: Lang): GbRow => ({ kind: "select", key: "lang", label: sa
 /** Who a code says it comes from: the service's host. */
 const hostOf = (origin: string): string => origin.replace(/^https?:\/\//, "");
 
-/** The sign-in (architecture §3.2): an email, then its code — both typed here, never in the conversation; no server to fill in. */
+/**
+ * The sign-in (architecture §3.2, S28, S29, sketch ①–④): the other accounts the service set up, each a link the
+ * browser opens; or an email or a number, then its code — typed here, never in the conversation; no server to fill
+ * in. A browser opened for an account, the pane waits for it (②) with its link again and 取消.
+ */
 function loginRows(v: GbView, s: PaneState): GbRow[] {
   const l = v.lang;
-  if (s.address === null) {
+  const head: GbRow = { kind: "head", key: "head-login", title: "GemsBang", sub: say("signin.tagline", l), actions: [] };
+  if (s.sso !== undefined && s.sso !== null) {
+    const account = say(`account.kind.${s.sso.kind}`, l);
     return [
-      { kind: "head", key: "head-login", title: "Gemsbang", sub: say("signin.tagline", l), actions: [] },
-      { kind: "input", key: "email", field: "email", label: say("signin.email", l), placeholder: say("signin.emailHint", l) },
-      text("signin-note", say("signin.note", l)),
+      head,
+      text("sso-title", say("signin.browser", l, { account }), "plain"),
+      text("sso-note", say("signin.browserNote", l)),
+      { kind: "links", key: "sso-again", items: [{ key: "sso-reopen", label: say("signin.reopen", l), href: s.sso.url }] },
+      { kind: "buttons", key: "sso-cancel", items: [{ key: "sso-cancel", label: say("signin.cancel", l), action: { op: "sso-cancel" } }] },
+      text("signin-private", say("signin.private", l)),
+    ];
+  }
+  if (s.address === null) {
+    const links = v.signIn ?? [];
+    return [
+      head,
+      ...(links.length > 0 ? [signInLinks("sso", links, l), { kind: "or", key: "or", text: say("signin.or", l) } as GbRow] : []),
+      { kind: "input", key: "email", field: "email", label: say("signin.address", l), placeholder: say("signin.addressHint", l) },
       text("signin-private", say("signin.private", l)),
       langRow(l),
     ];
   }
+  const phone = !s.address.includes("@");
   return [
     { kind: "head", key: "head-code", title: say("signin.codeTitle", l), actions: [] },
     text("code-sent", say("code.sentTo", l, { to: s.address, from: hostOf(v.relay) }), "plain"),
     { kind: "input", key: "code", field: "code", label: say("page.code", l), placeholder: say("signin.codeHint", l) },
-    { kind: "buttons", key: "login-again", items: [{ key: "resend", label: say("signin.resend", l), action: { op: "resend" } }, { key: "change-address", label: say("signin.other", l), action: { op: "change-address" } }] },
+    { kind: "buttons", key: "login-again", items: [{ key: "resend", label: say("signin.resend", l), action: { op: "resend" } }, { key: "change-address", label: say(phone ? "signin.otherPhone" : "signin.other", l), action: { op: "change-address" } }] },
   ];
 }
 
@@ -237,7 +273,7 @@ function loginRows(v: GbView, s: PaneState): GbRow[] {
 function firstNameRows(v: GbView): GbRow[] {
   const l = v.lang;
   return [
-    { kind: "head", key: "head-first", title: "Gemsbang", actions: [] },
+    { kind: "head", key: "head-first", title: "GemsBang", actions: [] },
     { kind: "input", key: "first-name", field: "first-name", label: say("signin.nameTitle", l), placeholder: say("signin.name", l) },
     text("first-note", say("signin.nameNote", l)),
   ];
@@ -270,7 +306,14 @@ function accountRows(v: GbView, s: PaneState): GbRow[] {
     rows.push(text("add-sent", say("code.sentTo", l, { to: adding, from: hostOf(v.relay) }), "plain"));
     rows.push({ kind: "input", key: "add-code", field: "add-code", placeholder: say("signin.codeHint", l) });
     rows.push({ kind: "buttons", key: "add-cancel", items: [{ key: "add-cancel", label: say("signin.other", l), action: { op: "add-cancel" } }] });
-  } else if (s.addOpen === true) rows.push({ kind: "card", key: "add", top: { kind: "input", key: "add-email", field: "add-email", placeholder: say("account.addHint", l), submitLabel: say("account.sendCode", l) }, lines: [], fields: [] });
+  } else if (s.addOpen === true) {
+    // 加一种 (S32, sketch ⑤): the other accounts as on the sign-in page, then 邮箱或手机号.
+    const field: GbRow = { kind: "input", key: "add-email", field: "add-email", placeholder: say("signin.address", l), submitLabel: say("account.sendCode", l) };
+    const links = s.addLinks ?? [];
+    rows.push(links.length > 0
+      ? { kind: "card", key: "add", top: signInLinks("add-sso", links, l), lines: [], fields: [{ kind: "or", key: "add-or", text: say("signin.or", l) }, field] }
+      : { kind: "card", key: "add", top: field, lines: [], fields: [] });
+  }
   else rows.push({ kind: "line", key: "add", text: "", press: { key: "add-open", label: say("account.add", l), action: { op: "add-open", open: true } } });
   rows.push({ kind: "section", key: "devices", text: say("account.devices", l) });
   a.devices.forEach((d, i) => {
@@ -382,7 +425,7 @@ function waitOf(v: GbView, r: InboxRow): { flag?: string; waits: boolean } {
 function inboxRows(v: GbView, s: PaneState): GbRow[] {
   const l = v.lang;
   // The head: the name, ＋ at the right; 我 is in the row at the foot.
-  const rows: GbRow[] = [{ kind: "head", key: "head-inbox", title: "Gemsbang", ...(v.unread > 0 ? { sub: say("panel.unreadBand", l, { count: v.unread }) } : {}), actions: [
+  const rows: GbRow[] = [{ kind: "head", key: "head-inbox", title: "GemsBang", ...(v.unread > 0 ? { sub: say("panel.unreadBand", l, { count: v.unread }) } : {}), actions: [
     { key: "plus", label: "＋", primary: true, action: { op: "plus" } },
   ] }];
   if (v.offline !== undefined) rows.push(text("offline", say("panel.offline", l, { detail: v.offline }), "error"));
@@ -712,7 +755,7 @@ function ownRows(v: GbView, s: PaneState): GbRow[] {
   rows.push({ kind: "kv", key: "lang", label: say("panel.uiLang", l), value: LANG_NAMES[l], press: { key: "lang-open", label: say("panel.switch", l), action: { op: "lang-open", open: s.langOpen !== true } } });
   if (s.langOpen === true) rows.push({ kind: "list", key: "langs", mark: "tick", items: LANGS.map((x) => ({ key: `lang-${x}`, label: LANG_NAMES[x], on: x === l, action: { op: "lang", lang: x } as GbAction })) });
   rows.push({ kind: "kv", key: "account", label: say("panel.account", l), value: say("panel.accountWhat", l), go: { op: "page", page: "account" } });
-  rows.push({ kind: "kv", key: "about", label: say("panel.about", l), value: s.version !== undefined && s.version !== null ? `gemsbang ${s.version}` : "gemsbang" });
+  rows.push({ kind: "kv", key: "about", label: say("panel.about", l), value: s.version !== undefined && s.version !== null ? `GemsBang ${s.version}` : "GemsBang" });
   return rows;
 }
 
@@ -828,7 +871,7 @@ export function gbBand(v: GbView | null, problem: string | null, now?: string, s
       // something new, the muted not counted (their unread is a grey dot, S17).
       if (v === null) return undefined;
       const fresh = v.rows.filter((r) => r.unread > 0 && !mutedChat(v, r.owner, r.id, r.as.id)).length;
-      return { text: fresh > 0 ? say(fresh === 1 ? "band.unreadOne" : "band.unread", l, { count: fresh }) : "Gemsbang", tone: "dim", open: say("panel.open", l), actions: [], more: 0 };
+      return { text: fresh > 0 ? say(fresh === 1 ? "band.unreadOne" : "band.unread", l, { count: fresh }) : "GemsBang", tone: "dim", open: say("panel.open", l), actions: [], more: 0 };
     }
     const lastLine = c.lines[c.lines.length - 1]!;
     // B3: a round handed it failed: the line says so, as an error.
@@ -847,10 +890,10 @@ export function fieldAction(field: GbField, typed: string, s: { chat: GbChat | n
   if (t === "" && field !== "default-name" && field !== "repo") return undefined;
   switch (field) {
     case "email": return { local: "email", email: t };
-    case "code": return s.address === null ? undefined : { call: "login-verify", args: { email: s.address, code: t } };
+    case "code": return s.address === null ? undefined : { call: "login-verify", args: { ...addressArgs(s.address), code: t } };
     case "first-name": return { call: "first-avatar", args: { name: t, ...(s.session !== undefined && s.session !== "" ? { session: s.session } : {}) } };
     case "add-email": return { local: "add-email", email: t };
-    case "add-code": return s.adding === undefined || s.adding === null ? undefined : { call: "method-verify", args: { email: s.adding, code: t } };
+    case "add-code": return s.adding === undefined || s.adding === null ? undefined : { call: "method-verify", args: { ...addressArgs(s.adding), code: t } };
     case "say": return s.chat === null ? undefined : { call: "say", args: { owner: s.chat.owner, id: s.chat.id, text: typed } };
     // `groupAs` resolved by the caller (groupAsOf): one of theirs, or "new" with the name picked or typed.
     case "group": return { call: "group", args: { name: t, ...(s.groupAs !== "new" && s.groupAs !== "" ? { as: s.groupAs } : s.groupAvatar !== undefined && s.groupAvatar !== "" ? { avatarName: s.groupAvatar } : {}) } };

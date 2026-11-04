@@ -41,6 +41,10 @@ declare module 'claude-code' {
       listLead: number
       asOpen: boolean
       joining: GemsbangJson
+      /** The account a browser opened to sign in with (S28): which, and its link. */
+      sso: GemsbangJson
+      /** 加一种登录方式's other accounts (S32), each with its link. */
+      addLinks: GemsbangJson
       /** The card of 我 whose 改 is open, by its row's key; null when none is (one at a time). */
       editing: string | null
       /** 叫人's 换一个链接 asked, not yet answered (P4c); the page 叫人 was opened from, where its ‹ goes back to. */

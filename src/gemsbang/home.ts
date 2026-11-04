@@ -37,6 +37,9 @@ export interface Client {
   firstSession?: string;
   /** Avatar and chat (calls.ts's `callKey`) → the line the last round handed it answered, and why that round failed (B3): the call is the person's again. */
   failed?: Record<string, { last: string; why: string }>;
+  /** The secret of the sign-in through another account the pane offers now (S28), and of one being added in 账号 (S32): only its hash leaves this machine. */
+  sso?: string;
+  ssoAdd?: string;
 }
 
 export const CLIENT = "client.json", CACHE = "cache", SEEN = "seen.json";
@@ -75,7 +78,7 @@ export function readClient(home: string): Client {
   const str = (k: string): string | undefined => (typeof c[k] === "string" && c[k] !== "" ? (c[k] as string) : undefined);
   const lang = c["lang"];
   const notes = Array.isArray(c["notes"]) ? (c["notes"] as unknown[]).map(obj).filter((n) => typeof n["url"] === "string" && typeof n["at"] === "string").map((n) => ({ url: n["url"] as string, at: n["at"] as string })) : [];
-  const token = str("token"), person = str("person"), firstSession = str("firstSession");
+  const token = str("token"), person = str("person"), firstSession = str("firstSession"), sso = str("sso"), ssoAdd = str("ssoAdd");
   const muted = obj(c["muted"]);
   const list = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
   return {
@@ -83,6 +86,8 @@ export function readClient(home: string): Client {
     ...(token !== undefined ? { token } : {}),
     ...(person !== undefined ? { person } : {}),
     ...(firstSession !== undefined ? { firstSession } : {}),
+    ...(sso !== undefined ? { sso } : {}),
+    ...(ssoAdd !== undefined ? { ssoAdd } : {}),
     ...(isLang(lang) ? { lang } : {}),
     avatars: strings(c["avatars"]),
     bodies: strings(c["bodies"]),

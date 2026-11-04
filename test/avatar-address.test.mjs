@@ -25,6 +25,6 @@ test("kept as a salted hash, its key in the login index by kind; a number's hash
 });
 
 test("the mail that carries a code says it in the person's language", () => {
-  assert.deepEqual(codeMail("123456", "zh"), { subject: "Gemsbang 验证码 123456", text: "Gemsbang 验证码 123456，10 分钟内有效。不是你在登录的话，不用管。" });
+  assert.deepEqual(codeMail("123456", "zh"), { subject: "GemsBang 验证码 123456", text: "GemsBang 验证码 123456，10 分钟内有效。不是你在登录的话，不用管。" });
   assert.match(codeMail("654321", "en").subject, /654321/);
 });

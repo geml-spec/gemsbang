@@ -32,7 +32,7 @@ test("login (spec §6.2): a code texted to the number, six digits, ten minutes, 
   const started = ok(r.startLogin({ phone: "138 0013 8000" }, "10.0.0.1"));
   assert.deepEqual([started.known, started.tail], [false, "8000"]);
   assert.equal(r.texts[0].to, "+8613800138000");
-  assert.match(r.texts[0].text, /^Gemsbang 验证码 \d{6}，10 分钟内有效。/);
+  assert.match(r.texts[0].text, /^GemsBang 验证码 \d{6}，10 分钟内有效。/);
   const code = codeIn(r.texts[0]);
   assert.equal(bad(r.finishLogin({ phone: "13800138000", code: "12" }), 400, "验证码是六位数字").code, "code.short");
   bad(r.finishLogin({ phone: "13800138000", code: code === "000000" ? "000001" : "000000" }), 401, "验证码不对或过期了");
@@ -59,9 +59,27 @@ test("login (spec §6.2): a code texted to the number, six digits, ten minutes, 
   bad(net.startLogin({ phone: "+14155552000" }, "10.9.9.9"), 429);
   ok(net.startLogin({ phone: "+14155552000" }, "10.9.9.8"));
   ok(r.startLogin({ phone: "+14155550100", lang: "en" }));
-  assert.match(r.texts[r.texts.length - 1].text, /^Gemsbang code \d{6}, valid for 10 minutes\./);
+  assert.match(r.texts[r.texts.length - 1].text, /^GemsBang code \d{6}, valid for 10 minutes\./);
   const disk = allText(r.root);
   assert.ok(!disk.includes("13800138000") && !disk.includes("8613700137000"), "no number on disk in the clear");
+});
+
+test("the beta before mail (2026-11-04): an email the operator listed gets its code in the answer and no mail, as a way in or one more; it still counts toward the three in ten minutes; any other email is mailed as before", () => {
+  const mail = [];
+  const r = relay({ mailer: (m) => { mail.push(m); }, showCodeTo: [" John@Example.com ", "not an email"] });
+  const shown = ok(r.startLogin({ email: "john@example.com" }));
+  assert.match(shown.code, /^\d{6}$/);
+  assert.equal(mail.length, 0, "no mail for it");
+  const john = ok(r.finishLogin({ email: "JOHN@example.com", code: shown.code }));
+  assert.equal(ok(r.startLogin({ email: "lily@example.com" })).code, undefined, "another email: mailed, no code in the answer");
+  assert.deepEqual(mail.map((m) => m.to), ["lily@example.com"]);
+  const more = relay({ mailer: () => undefined, showCodeTo: ["john@example.com", "john@work.example"] });
+  const person = ok(more.finishLogin({ email: "john@example.com", code: ok(more.startLogin({ email: "john@example.com" })).code }));
+  assert.match(ok(more.startMethod(more.verify(person.token), { email: "john@work.example" })).code, /^\d{6}$/, "one more way in, its code given back too");
+  ok(r.startLogin({ email: "john@example.com" }));
+  ok(r.startLogin({ email: "john@example.com" }));
+  bad(r.startLogin({ email: "john@example.com" }), 429);
+  assert.ok(john.token !== undefined);
 });
 
 test("a relay given no texter writes the code to a file under its own folder", () => {
@@ -69,5 +87,5 @@ test("a relay given no texter writes the code to a file under its own folder", (
   ok(r.startLogin({ phone: "13800138000" }));
   const files = readdirSync(join(r.root, "_relay", "texts"));
   assert.equal(files.length, 1);
-  assert.match(readFileSync(join(r.root, "_relay", "texts", files[0]), "utf8"), /^To: \+8613800138000\n\nGemsbang 验证码 \d{6}，10 分钟内有效。/);
+  assert.match(readFileSync(join(r.root, "_relay", "texts", files[0]), "utf8"), /^To: \+8613800138000\n\nGemsBang 验证码 \d{6}，10 分钟内有效。/);
 });

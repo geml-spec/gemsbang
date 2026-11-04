@@ -8,11 +8,11 @@ import { issueToken, verifyToken } from "../dist/relay/tokens.js";
 
 test("the texters: the file texter writes each text under the relay's own folder; the command texter runs the command with the number in its environment and the text on stdin, and a failing command rejects", async () => {
   const root = mkdtempSync(join(tmpdir(), "gemsbang-text-"));
-  fileTexter(root)({ to: "+8613800138000", text: "Gemsbang 验证码 123456" });
+  fileTexter(root)({ to: "+8613800138000", text: "GemsBang 验证码 123456" });
   const dir = join(root, "_relay", "texts");
   const files = readdirSync(dir);
   assert.equal(files.length, 1);
-  assert.equal(readFileSync(join(dir, files[0]), "utf8"), "To: +8613800138000\n\nGemsbang 验证码 123456\n");
+  assert.equal(readFileSync(join(dir, files[0]), "utf8"), "To: +8613800138000\n\nGemsBang 验证码 123456\n");
   const script = join(root, "text.cjs"), out = join(root, "sent.txt");
   writeFileSync(script, 'const fs = require("node:fs"); let s = ""; process.stdin.on("data", (c) => { s += c; }).on("end", () => fs.writeFileSync(process.argv[2], process.env.TEXT_TO + "|" + s));');
   await commandTexter(`"${process.execPath}" "${script}" "${out}"`)({ to: "+8613800138000", text: "body" });
