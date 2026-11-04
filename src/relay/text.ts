@@ -19,11 +19,11 @@ export function fileTexter(root: string): Texter {
   };
 }
 
-/** The command through the shell, TEXT_TO in its environment, the text on stdin; a non-zero exit rejects with its stderr. */
+/** The command through the shell, TEXT_TO in its environment, the text on stdin; a non-zero exit rejects with its stderr.
+ *  `shell: true` hands cmd.exe the line as typed: an argument list would have its quotes escaped as `\"`, which cmd.exe does not read. */
 export function commandTexter(command: string): Texter {
   return (t) => new Promise<void>((done, failed) => {
-    const win = process.platform === "win32";
-    const child = spawn(win ? "cmd.exe" : "sh", win ? ["/d", "/s", "/c", command] : ["-c", command], { env: { ...process.env, TEXT_TO: t.to }, stdio: ["pipe", "ignore", "pipe"] });
+    const child = spawn(command, { shell: true, env: { ...process.env, TEXT_TO: t.to }, stdio: ["pipe", "ignore", "pipe"] });
     let err = "";
     child.stderr.on("data", (c: Buffer) => { err += c; });
     child.on("error", failed);

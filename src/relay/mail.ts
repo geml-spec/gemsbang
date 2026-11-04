@@ -20,11 +20,11 @@ export function fileMailer(root: string): Mailer {
   };
 }
 
-/** The command through the shell, MAIL_TO and MAIL_SUBJECT in its environment, the text on stdin; a non-zero exit rejects with its stderr. */
+/** The command through the shell, MAIL_TO and MAIL_SUBJECT in its environment, the text on stdin; a non-zero exit rejects with its stderr.
+ *  `shell: true` hands cmd.exe the line as typed: an argument list would have its quotes escaped as `\"`, which cmd.exe does not read. */
 export function commandMailer(command: string): Mailer {
   return (m) => new Promise<void>((done, failed) => {
-    const win = process.platform === "win32";
-    const child = spawn(win ? "cmd.exe" : "sh", win ? ["/d", "/s", "/c", command] : ["-c", command], { env: { ...process.env, MAIL_TO: m.to, MAIL_SUBJECT: m.subject }, stdio: ["pipe", "ignore", "pipe"] });
+    const child = spawn(command, { shell: true, env: { ...process.env, MAIL_TO: m.to, MAIL_SUBJECT: m.subject }, stdio: ["pipe", "ignore", "pipe"] });
     let err = "";
     child.stderr.on("data", (c: Buffer) => { err += c; });
     child.on("error", failed);
