@@ -179,7 +179,7 @@ test('nobody signed in: the line says so; the pane asks for an email, then its c
   await pane.input({ key: 'first-name', text: 'John' })
   expect(calls(w, 'first-avatar').at(-1)?.args).toEqual({ name: 'John', session: SESSION })
   await pane.unmount()
-  expect(await paneText($)).toContain('[我] [＋] 还没有聊天 [建群] [用链接进群]')
+  expect(await paneText($)).toContain('[＋] 还没有聊天 [建群] [用链接进群] 聊天 我')
   expect(await bandText($)).toBe('')
 })
 
@@ -195,7 +195,7 @@ test('账号与登录 (architecture §3.1, P10): from 我 (/gemsbang settings go
   w.answers['method-verify'] = () => ACCOUNT([MAIL, { id: 'email-2', kind: 'email', shown: 'j***@work.example', at: 't' }], [HERE])
   await start($, on)
   await $.command.run({ command: 'gemsbang', args: 'settings', origin: COMPOSER, presentation: PRESENTATION })
-  expect(await paneText($), '/gemsbang settings is 我').toContain('[‹] 我')
+  expect(await paneText($), '/gemsbang settings is 我').toContain('0.5.3 我 J John [改]')
   let pane = await mountPane($)
   await pane.press({ key: 'account-open' })
   await pane.unmount()
@@ -256,14 +256,15 @@ test('the box (architecture §5.2, §6.2): no poll — the module waits on the b
   expect(calls(w, 'wait').length > stopped, 'signed in: waiting again').toBe(true)
 })
 
-test('the total inbox (spec §7.1, S11, direction ①): WeChat\'s — the name with the unread, 我 and ＋; every chat with its avatar\'s initial, its time, its last line and its unread, no filters; a chat opens, its lines show `身份` where an agent said it, a stamp where the talk picks up, and the box says as the avatar there', async ($, on) => {
+test('the total inbox (spec §7.1, S11, direction ①): WeChat\'s — the name with the unread and ＋, 聊天 · 我 at the foot; every chat with its avatar\'s initial, its time, its last line and its unread, no filters; a chat opens, its lines show `身份` where an agent said it, a stamp where the talk picks up, and the box says as the avatar there', async ($, on) => {
   const w = world(on)
   w.answers['open'] = () => ({ ok: true, chat: CHAT, view: w.view })
   w.answers['say'] = (args) => ({ ok: true, chat: { ...CHAT, items: [...CHAT.items, { kind: 'message', id: 'p-1', avatar: JOHN.id, who: 'John', text: args['text'], at: '2026-11-01T06:09:00Z', mark: false, mine: true }] }, view: w.view })
   await start($, on)
   await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
   const text = await paneText($)
-  expect(text).toContain('Gemsbang 2 条未读 [我] [＋] L 三年二班家长 19:31 [你的身份：我看一下，晚点回。]')
+  expect(text).toContain('Gemsbang 2 条未读 [＋] L 三年二班家长 19:31 [你的身份：我看一下，晚点回。]')
+  expect(text, '聊天 · 我 at the foot, the unread on 聊天').toMatch(/ 聊天 2 我$/)
   expect(text).toContain('J 设置页改版 14:05 [李四：@John Safari 里导出按钮没反应] 2')
   expect(text, 'no filters, no 对话 heading').not.toContain('全部')
   const pane = await mountPane($)
@@ -289,7 +290,7 @@ const all = (el: DrawnNode | string, type: string, out: DrawnNode[] = []): Drawn
 }
 const mountDesktop = ($: Engine) => $.ui.mount({ plugin: 'gemsbang', surface: 'desktop', component: 'Pane', requestId: 'gemsbang-board', props: PANE })
 
-test('the inbox where the surface takes pictures (S11, S13–S15, direction ①): WeChat\'s rows — each chat\'s picture with the avatar at its corner and the unread, the red words while it needs the person, first — and no 需要你 card; 我 a blank button over its link; a chat opens from its name; there its lines are bubbles, the card the bar above the box, 自己写 opening its field', async ($, on) => {
+test('the inbox where the surface takes pictures (S11, S13–S15, direction ①): WeChat\'s rows — each chat\'s picture with the avatar at its corner and the unread, the red words while it needs the person, first — and no 需要你 card; 聊天 · 我 at the foot, blank buttons over their pictures; a chat opens from its name; there its lines are bubbles, the card the bar above the box, 自己写 opening its field', async ($, on) => {
   const w = world(on)
   w.view = VIEW({ needs: [NEED('need-1', { draft: '周五我可以去，几点集合？' })] })
   w.answers['open'] = () => ({ ok: true, chat: CHAT2, view: w.view })
@@ -302,7 +303,8 @@ test('the inbox where the surface takes pictures (S11, S13–S15, direction ①)
   expect(alts.filter((a) => a.includes(' · '))).toEqual(['三年二班家长 · Lily 爸爸', '设置页改版 · John'])
   expect(alts, 'the red words before its last line').toContain('[等你定]')
   expect(alts, 'no avatar pills, no colour bars').not.toContain('John')
-  expect(all(drawn, 'Button').map((b) => String(b.props?.['label'])).filter((l) => /^\u3000+$/.test(l)).length, '我 a blank button over its link').toBe(1)
+  expect(all(drawn, 'Button').map((b) => String(b.props?.['label'])).filter((l) => /^\u3000+$/.test(l)).length, '聊天 and 我 blank buttons over their pictures').toBe(2)
+  expect(alts, 'the tabs, 聊天 with the unread').toContain('聊天 2')
   expect(all(drawn, 'Button').some((b) => String(b.key ?? b.props?.['key']).startsWith('need-')), 'no card in the inbox').toBe(false)
   const chats = all(drawn, 'Button').map((b) => String(b.key ?? b.props?.['key'] ?? '')).filter((k) => k.startsWith('chat-') && k.endsWith('-go'))
   expect(chats).toEqual([`chat-${ROW2.owner}-${ROW2.id}-go`, `chat-${ROW.owner}-${ROW.id}-go`])
@@ -318,6 +320,34 @@ test('the inbox where the surface takes pictures (S11, S13–S15, direction ①)
   drawn = (await pane.drawn()) as unknown as DrawnNode
   expect(all(drawn, 'Input').map((x) => String(x.key ?? x.props?.['key']))).toContain(`need-${LILY.id}-need-1-own`)
   await pane.unmount()
+})
+
+test('聊天 · 我 pinned at the foot (S11, S22): docked, the inbox and 我 are drawn one window tall — the head kept at the top, the row at the foot, the list between cut to what fits — on both surfaces; a tab goes to its page; a chat, or the pane above the prompt, flows as before', async ($, on) => {
+  const w = world(on)
+  w.answers['open'] = () => ({ ok: true, chat: CHAT, view: w.view })
+  await start($, on)
+  await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const pane = await $.ui.mount({ plugin: 'gemsbang', surface, component: 'Pane', requestId: 'gemsbang-board', props: PANE })
+    const drawn = (await pane.drawn()) as unknown as DrawnNode
+    expect(drawn.props?.['height'], `${surface}: one window tall`).toBe(PANE.scroll.bodyRows)
+    const list = all(drawn, 'Box').find((b) => String(b.key ?? b.props?.['key']) === 'pane-list')
+    expect(list?.props?.['overflow'], `${surface}: the list cut to the window`).toBe('hidden')
+    expect(shown(list as unknown as Drawn).join(' '), `${surface}: the chats in the list, the tabs not`).not.toContain('聊天')
+    await pane.unmount()
+  }
+  const go = async (key: string) => { const pane = await mountPane($); await pane.press({ key }); await pane.unmount() }
+  await go('tab-me')
+  expect(await paneText($), '我, its tabs at the foot').toMatch(/^@ 0\.5\.3 我 J John .* 聊天 2 我$/)
+  await go('tab-chats')
+  await go(`chat-${JOHN.id}-g-000000000a-go`)
+  const chat = await mountPane($)
+  expect(((await chat.drawn()) as unknown as DrawnNode).props?.['height'], 'a chat flows: no tabs, its own scroll').toBeUndefined()
+  await chat.unmount()
+  await go('head-chat-back')
+  const inline = await $.ui.mount({ plugin: 'gemsbang', surface: 'terminal', component: 'Pane', requestId: 'gemsbang-board', props: { ...PANE, placement: 'inline' as const } })
+  expect(((await inline.drawn()) as unknown as DrawnNode).props?.['height'], 'above the prompt the frame fits the tree: not pinned').toBeUndefined()
+  await inline.unmount()
 })
 
 test('群信息 and 叫人 (P4, P6, Q17): the head opens 群信息 — the members, 叫人 ›, 静音, 自动回 and the owner\'s 进群要我同意; 叫人 shows the link and the line, each copied on a press in the terminal; ‹ goes back to 群信息; 换一个链接 asks first, 换 swaps it', async ($, on) => {
@@ -395,7 +425,7 @@ test('退出群 (S19, P7) from 群信息: the 群主 is asked to pick who keeps 
   expect(await paneText($)).toContain('李四 ✓ [交给李四，退出] [算了]')
   await go('leave-go')
   expect(calls(w, 'leave').at(-1)?.args).toEqual({ owner: JOHN.id, id: 'g-000000000a', heir: 'a-00000000b1' })
-  expect(await paneText($), 'back on the inbox').toContain('[我] [＋]')
+  expect(await paneText($), 'back on the inbox').toContain('Gemsbang 2 条未读 [＋]')
 })
 
 test('im_join (spec §6.3): a link the person did not paste is not followed and the pane says so; one they pasted asks them in gemsbang\'s own dialog which avatar — the one the inviter knows by default — and then this session speaks for it', async ($, on) => {
@@ -429,7 +459,7 @@ test('用链接进群 in the pane (S9, P3): ＋ opens its two ways; the link pas
   let pane = await mountPane($)
   await pane.press({ key: 'plus' })
   await pane.unmount()
-  expect(await paneText($)).toContain('[我] [＋] 建群 › 用链接进群 ›')
+  expect(await paneText($)).toContain('[＋] 建群 › 用链接进群 ›')
   pane = await mountPane($)
   await pane.press({ key: 'go-join' })
   await pane.unmount()
@@ -495,7 +525,7 @@ test('我 (spec §7.5, S22, P8) through /gemsbang avatars: a card per avatar wit
   await $.command.run({ command: 'gemsbang', args: 'avatars', origin: COMPOSER, presentation: PRESENTATION })
   await clock.settle()
   const text = await paneText($)
-  expect(text).toContain('[‹] 我 J John [改] 在哪： 设置页改版 谁来演： 这个会话 自动回： 没有 agent 说的话： 对外标出来')
+  expect(text).toContain('0.5.3 我 J John [改] 在哪： 设置页改版 谁来演： 这个会话 自动回： 没有 agent 说的话： 对外标出来')
   expect(text).toContain('L Lily 爸爸 [改] 在哪： 三年二班家长 谁来演： 还没有会话 自动回： 没有 agent 说的话： 对外不标')
   expect(text).not.toContain('让这个会话替它')
   expect(text).toContain('默认名： 起名时作建议，不预选 [改] 界面语言： 中文 [换] 账号： [登录方式和登录的设备 ›] 关于： gemsbang 0.5.3')
@@ -534,14 +564,14 @@ test('不用问 in 我 (S23, P8a): the standing ones read through the client whe
   expect(await paneText($)).not.toContain('不用问')
 })
 
-test('底子 (S27, P8a, P9b′): an agent\'s entry waits — 我 on the inbox\'s head counts it, 我 shows it with 记下 · 不记, 记下 goes through the client; 改 makes the page 底子 alone and an entry added is given to the avatar this session plays; im_remember goes through the client as this session', async ($, on) => {
+test('底子 (S27, P8a, P9b′): an agent\'s entry waits — 我 at the foot counts it, 我 shows it with 记下 · 不记, 记下 goes through the client; 改 makes the page 底子 alone and an entry added is given to the avatar this session plays; im_remember goes through the client as this session', async ($, on) => {
   const w = world(on)
   const NUT = { id: 'base-3', label: '家人', text: 'Lily 对花生过敏', for: [LILY.id], state: 'pending', by: LILY.id, who: '王老师', at: 't' }
   w.view = VIEW({ base: [NUT], bodies: { [SESSION]: LILY.id } })
   w.answers['tool-remember'] = () => ({ ok: true, text: '已经记成待本人点头：「家人：Lily 对花生过敏」。' })
   const clock = await start($, on)
   await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
-  expect(await paneText($)).toContain('[我 1]')
+  expect(await paneText($), '我 at the foot counts it').toMatch(/ 聊天 2 我 1$/)
   await $.command.run({ command: 'gemsbang', args: 'avatars', origin: COMPOSER, presentation: PRESENTATION })
   await clock.settle()
   expect(await paneText($)).toContain('底子 [改] Lily 爸爸想记（王老师说的） 家人 · Lily 对花生过敏 · 给 Lily 爸爸 [记下] [不记]')

@@ -36,7 +36,8 @@ import { GEMSBANG_BLUE, GEMSBANG_MARK_CHAR } from '../dist/hosts/claude-code/gem
 import { LOCKUP, MARK as BRAND_MARK } from '../dist/hosts/claude-code/gb-brand.js'
 import { fieldAction, gbBand, GB_PANE_ID, groupAsOf, paneRows } from '../dist/hosts/claude-code/gb-panel.js'
 import type { GbAction, GbField, GbPage, GbPress, GbRow, JoinView, PaneState, Span, Tint, Tone } from '../dist/hosts/claude-code/gb-panel.js'
-import { barSvg, chatRowPicSvg, countSvg, dangerSvg, flagSvg, linkSvg, mutedSvg, peopleColor, personSvg, pillSvg, qrSvg, RULE_SVG, switchSvg, tagSvg, textWidth } from '../dist/hosts/claude-code/gb-svg.js'
+import { barSvg, chatRowPicSvg, countSvg, dangerSvg, flagSvg, linkSvg, mutedSvg, peopleColor, personSvg, pillSvg, qrSvg, RULE_SVG, switchSvg, tabSvg, tagSvg, textWidth } from '../dist/hosts/claude-code/gb-svg.js'
+import { lastLead, pinnedOf, scrolledTo } from '../dist/hosts/claude-code/pinned.js'
 import { qrModules } from '../dist/core/qr.js'
 import type { Pic } from '../dist/hosts/claude-code/gb-svg.js'
 import { BRIDGE_TIMEOUT_MS, decodeResponse, encodeRequest, SLOW_TIMEOUT_MS, unreadableText } from '../dist/hosts/claude-code/protocol.js'
@@ -69,6 +70,8 @@ const pastedAtom = atom({ plugin: 'gemsbang', key: 'pasted' } as const, [] as Ge
 const writingAtom = atom({ plugin: 'gemsbang', key: 'writing' } as const, null as string | null)
 /** The inbox's ＋ open (P1b); 建群's list of avatars open (P2c); 用链接进群 once the link was read (P3). */
 const plusOpenAtom = atom({ plugin: 'gemsbang', key: 'plusOpen' } as const, false as boolean)
+/** Which item leads the list of a page with 聊天 · 我 pinned at its foot (S11): the wheel moves it, a new page starts it over. */
+const listLeadAtom = atom({ plugin: 'gemsbang', key: 'listLead' } as const, 0 as number)
 const asOpenAtom = atom({ plugin: 'gemsbang', key: 'asOpen' } as const, false as boolean)
 const joiningAtom = atom({ plugin: 'gemsbang', key: 'joining' } as const, null as GemsbangJson)
 /** The card of 我 whose 改 is open: one at a time. */
@@ -572,6 +575,7 @@ async function act($: EngineInterface, action: GbAction, surface?: string): Prom
     case 'page': {
       const from = await read($, pageAtom)
       await update($, pageAtom, () => action.page)
+      await update($, listLeadAtom, () => 0)
       await update($, rotatingAtom, () => false)
       await update($, langOpenAtom, () => false)
       await update($, repoOpenAtom, () => false)
@@ -1207,6 +1211,19 @@ function drawPictured($: EngineInterface, els: Els, row: GbRow, columns: number,
         </Box>
       )
     }
+    // 聊天 · 我 at the foot (S11): a rule over it, the two tabs side by side, each its picture over its name, pressed through the blank button laid over it.
+    case 'tabs': return (
+      <Box key={row.key} flexDirection="column">
+        {rule(els, `${row.key}-rule`)}
+        <Box key={`${row.key}-row`} alignItems="center" paddingY={1}>
+          {row.items.map((t) => (
+            <Box key={`${t.key}-cell`} width={`${Math.floor(100 / row.items.length)}%`} justifyContent="center">
+              {picPress($, els, t.key, tabSvg(t.icon, t.label, t.on, t.count), t.action)}
+            </Box>
+          ))}
+        </Box>
+      </Box>
+    )
     default: return undefined
   }
 }
@@ -1433,8 +1450,42 @@ function drawRow($: EngineInterface, els: Els, row: GbRow, columns: number, vers
           : <Text dimColor>{row.own.placeholder}</Text>)}
       </Box>
     )
+    // 聊天 · 我 at the foot: the one on underlined, a count after each.
+    case 'tabs': return (
+      <Box key={row.key} gap={3} justifyContent="center">
+        {row.items.map((t) => (
+          <Button key={t.key} plain onPress={press(t.action)}>
+            <Text {...(t.on ? { bold: true, underline: true } : { dimColor: true })}>{t.label}</Text>{t.count !== undefined && <Text color="error">{` ${t.count}`}</Text>}
+          </Button>
+        ))}
+      </Box>
+    )
     default: return null
   }
+}
+
+/** What the pane draws from: the view, the pane's own state, the version; read alike to draw it and to scroll it. */
+async function paneNow($: EngineInterface): Promise<{ view: GbView | null; state: PaneState; version: string | null }> {
+  const [view, chat, link, page, address, groupAs, problem, setup, version, now, allow, adding, accountNow, writing, editing, plusOpen, asOpen, groupAvatarNow, joiningNow, rotating, inviteBack, node] = await Promise.all([
+    readView($), read($, chatAtom), read($, linkAtom), read($, pageAtom), read($, addressAtom), read($, groupAsAtom), read($, problemAtom), read($, setupAtom), read($, versionAtom), $.clock.now(),
+    read($, allowAtom), read($, addingAtom), read($, accountAtom), read($, writingAtom), read($, editingAtom), read($, plusOpenAtom), read($, asOpenAtom), read($, groupAvatarAtom), read($, joiningAtom),
+    read($, rotatingAtom), read($, inviteBackAtom), read($, nodeAtom),
+  ])
+  const [langOpen, repoOpen, addOpen, loggingOut, allows, leaving, heir] = await Promise.all([read($, langOpenAtom), read($, repoOpenAtom), read($, addOpenAtom), read($, loggingOutAtom), read($, allowsAtom), read($, leavingAtom), read($, heirAtom)])
+  const rounds = await readRounds($)
+  const session = await $.session.id().catch(() => '')
+  const state: PaneState = {
+    page: (PAGES as readonly string[]).includes(page) ? page as GbPage : 'inbox', chat: chat as unknown as GbChat | null, link: link as unknown as GbLink | null, address, groupAs, session, problem: problem ?? setup, now: new Date(now).toISOString(),
+    allow: (allow as unknown as Record<string, { person?: boolean; venue?: boolean }>) ?? {}, adding, account: accountNow as unknown as GbAccount | null, writing, editing, plusOpen, asOpen, groupAvatar: groupAvatarNow, joining: joiningNow as unknown as JoinView | null,
+    // The chats where this session's agent answers a call handed to it, while it does.
+    replying: Object.values(rounds).map((r) => `${r.owner}/${r.id}`),
+    rotating, inviteBack: inviteBack === 'info' ? 'info' : 'chat', langOpen, repoOpen, addOpen, loggingOut, version, allows: (allows as unknown as Record<string, GbAllow[]> | null) ?? {}, leaving, heir,
+    // The desktop is a Mac or Windows; a Node found as node.exe is Windows, where Ctrl+C copies.
+    copyKey: node !== null && /\.exe$/i.test(node) ? 'Ctrl+C' : '⌘C',
+    // A card's time in this machine's zone, which the client knows; a view from an older bridge has none (UTC).
+    ...(view?.zoneMinutes !== undefined ? { zoneMinutes: view.zoneMinutes } : {}),
+  }
+  return { view, state, version }
 }
 
 function safeRow($: EngineInterface, els: Els, row: GbRow, columns: number, version: string | null = null): unknown {
@@ -1580,51 +1631,65 @@ export const register: Register = (on) => {
     const els = elementsOf($, e)
     const { Box, Text, Svg } = els
     const columns: number = e.props.bodyColumns
-    const [view, chat, link, page, address, groupAs, problem, setup, version, now, allow, adding, accountNow, writing, editing, plusOpen, asOpen, groupAvatarNow, joiningNow, rotating, inviteBack, node] = await Promise.all([
-      readView($), read($, chatAtom), read($, linkAtom), read($, pageAtom), read($, addressAtom), read($, groupAsAtom), read($, problemAtom), read($, setupAtom), read($, versionAtom), $.clock.now(),
-      read($, allowAtom), read($, addingAtom), read($, accountAtom), read($, writingAtom), read($, editingAtom), read($, plusOpenAtom), read($, asOpenAtom), read($, groupAvatarAtom), read($, joiningAtom),
-      read($, rotatingAtom), read($, inviteBackAtom), read($, nodeAtom),
-    ])
-    const [langOpen, repoOpen, addOpen, loggingOut, allows, leaving, heir] = await Promise.all([read($, langOpenAtom), read($, repoOpenAtom), read($, addOpenAtom), read($, loggingOutAtom), read($, allowsAtom), read($, leavingAtom), read($, heirAtom)])
-    const rounds = await readRounds($)
-    const session = await $.session.id().catch(() => '')
-    const state: PaneState = {
-      page: (PAGES as readonly string[]).includes(page) ? page as GbPage : 'inbox', chat: chat as unknown as GbChat | null, link: link as unknown as GbLink | null, address, groupAs, session, problem: problem ?? setup, now: new Date(now).toISOString(),
-      allow: (allow as unknown as Record<string, { person?: boolean; venue?: boolean }>) ?? {}, adding, account: accountNow as unknown as GbAccount | null, writing, editing, plusOpen, asOpen, groupAvatar: groupAvatarNow, joining: joiningNow as unknown as JoinView | null,
-      // The chats where this session's agent answers a call handed to it, while it does.
-      replying: Object.values(rounds).map((r) => `${r.owner}/${r.id}`),
-      rotating, inviteBack: inviteBack === 'info' ? 'info' : 'chat', langOpen, repoOpen, addOpen, loggingOut, version, allows: (allows as unknown as Record<string, GbAllow[]> | null) ?? {}, leaving, heir,
-      // The desktop is a Mac or Windows; a Node found as node.exe is Windows, where Ctrl+C copies.
-      copyKey: node !== null && /\.exe$/i.test(node) ? 'Ctrl+C' : '⌘C',
-      // A card's time in this machine's zone, which the client knows; a view from an older bridge has none (UTC).
-      ...(view?.zoneMinutes !== undefined ? { zoneMinutes: view.zoneMinutes } : {}),
-    }
+    const { view, state, version } = await paneNow($)
     let rows: GbRow[]
     try {
       rows = paneRows(view ?? EMPTY_VIEW, state)
     } catch (err) {
       rows = [{ kind: 'text', key: 'failed', text: `gemsbang：${reasonOf(err)}`, tone: 'error' }]
     }
-    let body = rows.map((r) => safeRow($, els, r, columns, version))
+    const draw = (rs: readonly GbRow[]): unknown[] => rs.map((r) => safeRow($, els, r, columns, version))
     // The desktop draws and presses a pane of some 1,100 elements and none past it: the body stops short, and says what it left out.
-    if (Svg !== undefined) {
-      const fit = fitToBudget(body)
-      if (fit.left > 0) body = [...fit.kept, <Text key="rows-cut" dimColor>{`… ${fit.left}`}</Text>]
+    const fitted = (drawn: unknown[]): unknown[] => {
+      if (Svg === undefined) return drawn
+      const fit = fitToBudget(drawn)
+      return fit.left > 0 ? [...fit.kept, <Text key="rows-cut" dimColor>{`… ${fit.left}`}</Text>] : drawn
     }
     // The inbox's own head carries the mark and the version where the surface takes pictures (GbInbox); every other page has them above it.
     const marked = Svg !== undefined && rows.some((r) => r.key === 'head-inbox')
-    return (
-      <Box flexDirection="column">
-        {!marked && (
-          <Box key="mark" gap={1} alignItems="center">
-            {Svg !== undefined ? drawLockup(els, 'mark-lockup') : <Text color={GEMSBANG_BLUE} bold>{GEMSBANG_MARK_CHAR}</Text>}
-            <Box flexGrow={1} />
-            {version !== null && <Text dimColor>{version}</Text>}
-          </Box>
-        )}
-        {body}
+    const mark = !marked && (
+      <Box key="mark" gap={1} alignItems="center">
+        {Svg !== undefined ? drawLockup(els, 'mark-lockup') : <Text color={GEMSBANG_BLUE} bold>{GEMSBANG_MARK_CHAR}</Text>}
+        <Box flexGrow={1} />
+        {version !== null && <Text dimColor>{version}</Text>}
       </Box>
     )
+    // 聊天 · 我 at the foot of the inbox and of 我 (S11): docked, the pane is drawn one window tall, its head and that row
+    // kept, the list between led by the item the wheel moved to (ui.scroll, below) and cut to what fits.
+    const pin = e.props.placement === 'dock' ? pinnedOf(rows) : undefined
+    if (pin !== undefined) {
+      const bodyRows: number = e.props.scroll.bodyRows
+      const lead = Math.min(await read($, listLeadAtom), lastLead(pin.list, bodyRows))
+      return (
+        <Box flexDirection="column" height={bodyRows}>
+          {mark}
+          {draw(pin.top)}
+          <Box key="pane-list" flexDirection="column" flexGrow={1} flexShrink={1} minHeight={0} overflow="hidden">
+            {/* The rows at their own height, the window cutting what does not fit rather than squeezing them. */}
+            <Box key="pane-list-rows" flexDirection="column" flexShrink={0}>{fitted(draw(pin.list.slice(lead)))}</Box>
+          </Box>
+          {draw([pin.foot])}
+        </Box>
+      )
+    }
+    return (
+      <Box flexDirection="column">
+        {mark}
+        {fitted(draw(rows))}
+      </Box>
+    )
+  })
+
+  // The wheel and the scroll keys over a page with 聊天 · 我 pinned at its foot (S11): drawn one window tall, it leaves the
+  // engine nothing to scroll, so the list's lead moves instead, an item a tick. A tree taller than its window (another
+  // page, or the pane above the prompt) scrolls as the engine scrolls it.
+  on('ui.scroll', { component: 'Pane', requestId: 'gemsbang-board' }, async ($, e, next) => {
+    if (e.contentRows > e.bodyRows) return next(e)
+    const { view, state } = await paneNow($)
+    const pin = pinnedOf(paneRows(view ?? EMPTY_VIEW, state))
+    if (pin === undefined) return next(e)
+    await update($, listLeadAtom, (was) => scrolledTo(was, e.by, pin.list, e.bodyRows))
+    return {}
   })
 
   // /gemsbang: the pane on the inbox, or 我 (/gemsbang settings too: 我 is the settings).

@@ -7,7 +7,7 @@ const LILY = { id: "a-0000000002", name: "Lily 爸爸", color: "#b5543c", initia
 const ROW = (name, as, extra = {}) => ({ owner: as.id, id: `g-${name.length}000000000`.slice(0, 12), kind: "group", name, as, last: { who: "李四", text: "hi" }, at: "2026-11-01T06:00:00Z", time: "14:00", unread: 1, ...extra });
 const VIEW = (extra = {}) => ({ relay: "https://im.example", loggedIn: true, lang: "zh", person: "p-0000000001", avatars: [JOHN, LILY], rows: [ROW("设置页改版", JOHN), ROW("三年二班家长", LILY)], unread: 2, needs: [], muted: { avatars: [], venues: [] }, notes: [], bodies: {}, ...extra });
 const STATE = (extra = {}) => ({ page: "inbox", chat: null, link: null, address: null, groupAs: "new", session: "s-1", problem: null, zoneMinutes: 480, now: "2026-11-01T12:00:00Z", ...extra });
-const words = (rows) => rows.map((r) => r.kind === "head" ? `#${r.title}${r.sub ? `(${r.sub})` : ""}${r.actions.length > 0 ? ` ${r.actions.map((a) => `[${a.label}]`).join("")}` : ""}` : r.kind === "text" || r.kind === "section" || r.kind === "event" ? r.text : r.kind === "chat" ? `[${r.row.as.initial}]${r.row.name}${r.flag ?? ""}${r.muted ? "~" : ""}` : r.kind === "input" ? `<${r.placeholder}>` : r.kind === "buttons" ? r.items.map((i) => `[${i.label}]`).join("") : r.kind === "toggle" ? `${r.on ? "☑" : "☐"}${r.label}` : r.kind === "copy" ? `{${r.text}}[${r.label}]` : r.kind === "message" ? `${r.item.who}${r.tag !== undefined ? `(${r.tag})` : ""} ${r.time}: ${r.item.text}` : r.kind === "list" ? r.items.map((i) => `${i.label}${r.mark === "tick" ? (i.on ? "✓" : "") : "›"}`).join("|") : r.kind === "pick" ? `${r.lead}{${r.badge.name}}${r.trail}${r.press !== undefined ? `[${r.press.label}]` : ""}` : r.kind === "empty" ? `(${r.text})${r.items.map((i) => `[${i.label}]`).join("")}` : r.kind);
+const words = (rows) => rows.map((r) => r.kind === "head" ? `#${r.title}${r.sub ? `(${r.sub})` : ""}${r.actions.length > 0 ? ` ${r.actions.map((a) => `[${a.label}]`).join("")}` : ""}` : r.kind === "text" || r.kind === "section" || r.kind === "event" ? r.text : r.kind === "chat" ? `[${r.row.as.initial}]${r.row.name}${r.flag ?? ""}${r.muted ? "~" : ""}` : r.kind === "input" ? `<${r.placeholder}>` : r.kind === "buttons" ? r.items.map((i) => `[${i.label}]`).join("") : r.kind === "toggle" ? `${r.on ? "☑" : "☐"}${r.label}` : r.kind === "copy" ? `{${r.text}}[${r.label}]` : r.kind === "message" ? `${r.item.who}${r.tag !== undefined ? `(${r.tag})` : ""} ${r.time}: ${r.item.text}` : r.kind === "list" ? r.items.map((i) => `${i.label}${r.mark === "tick" ? (i.on ? "✓" : "") : "›"}`).join("|") : r.kind === "pick" ? `${r.lead}{${r.badge.name}}${r.trail}${r.press !== undefined ? `[${r.press.label}]` : ""}` : r.kind === "empty" ? `(${r.text})${r.items.map((i) => `[${i.label}]`).join("")}` : r.kind === "tabs" ? `▁${r.items.map((i) => `${i.on ? "*" : ""}${i.label}${i.count ?? ""}`).join("|")}` : r.kind);
 
 test("the sign-in (architecture §3.2): an email — no server to fill in — with why there is no password and that Claude never sees it, the language at the foot; the email given, where its code went, 重发 and 换个邮箱; a new person names their first avatar; just in, who this computer plays and the two ways to a first chat", () => {
   assert.deepEqual(words(paneRows(VIEW({ loggedIn: false, avatars: [], rows: [] }), STATE())), ["#Gemsbang(你的几个身份，替你在各个群里)", "<you@example.com，回车发验证码>", "不用密码。内测先用邮箱；以后手机号、Apple、Google、公司账号都能登。", "邮箱和验证码只填在这个侧栏里，Claude 看不到。", "select"]);
@@ -15,7 +15,7 @@ test("the sign-in (architecture §3.2): an email — no server to fill in — wi
   const first = paneRows(VIEW({ avatars: [], rows: [], unread: 0, synced: "2026-11-01T12:00:00Z" }), STATE());
   assert.deepEqual(words(first), ["#Gemsbang", "<名字，回车进去>", "这是你的第一个身份。到了别的场合可以换一个，比如在家长群里叫「Lily 爸爸」。以后随时能改名。"]);
   assert.equal(first[1].label, "大家怎么叫你？");
-  assert.deepEqual(words(paneRows(VIEW({ avatars: [JOHN], rows: [], unread: 0, bodies: { "s-1": JOHN.id } }), STATE())), ["#Gemsbang [我][＋]", "(还没有聊天)[建群][用链接进群]"], "just in: no chat yet, the two ways in the middle (P1c)");
+  assert.deepEqual(words(paneRows(VIEW({ avatars: [JOHN], rows: [], unread: 0, bodies: { "s-1": JOHN.id } }), STATE())), ["#Gemsbang [＋]", "(还没有聊天)[建群][用链接进群]", "▁*聊天|我"], "just in: no chat yet, the two ways in the middle (P1c)");
 });
 
 test("账号与登录 (architecture §3.1, P10): the ways in, 解绑 only when there are two; 加一种登录方式 a link that opens its field, then its code in the same place (P10b); the devices with the avatars their agents play, this one tagged, the others signed out one by one or all at once; 退出这台设备的登录 in red, asked first (P10c); back to 我; nothing read yet, said so", () => {
@@ -39,16 +39,17 @@ test("账号与登录 (architecture §3.1, P10): the ways in, 解绑 only when t
   assert.deepEqual(shown(paneRows(VIEW(), STATE({ page: "account", account: null }))), ["#账号与登录", "正在读账号…"]);
 });
 
-test("the total inbox (spec §7.1, S11, direction ①): WeChat's — the name with the unread, 我 and ＋ at the right (＋'s two ways, 建群 and 用链接进群, under it once pressed, P1b); the chats alone, each with its avatar's initial — no filters, no 对话 heading; nothing yet, those two ways in the middle (P1c); a relay out of reach and an invitation not followed said first", () => {
-  assert.deepEqual(words(paneRows(VIEW(), STATE())), ["#Gemsbang(2 条未读) [我][＋]", "[J]设置页改版", "[L]三年二班家长"]);
+test("the total inbox (spec §7.1, S11, direction ①): WeChat's — the name with the unread and ＋ at the right (＋'s two ways, 建群 and 用链接进群, under it once pressed, P1b); the chats alone, each with its avatar's initial — no filters, no 对话 heading; 聊天 · 我 at the foot, 聊天 on with the unread; nothing yet, those two ways in the middle (P1c); a relay out of reach and an invitation not followed said first", () => {
+  assert.deepEqual(words(paneRows(VIEW(), STATE())), ["#Gemsbang(2 条未读) [＋]", "[J]设置页改版", "[L]三年二班家长", "▁*聊天2|我"]);
   const plus = paneRows(VIEW(), STATE({ plusOpen: true }));
-  assert.deepEqual(words(plus).slice(0, 2), ["#Gemsbang(2 条未读) [我][＋]", "建群›|用链接进群›"]);
-  assert.deepEqual(plus[0].actions[1].action, { op: "plus" }, "＋ again folds it");
+  assert.deepEqual(words(plus).slice(0, 2), ["#Gemsbang(2 条未读) [＋]", "建群›|用链接进群›"]);
+  assert.deepEqual(plus[0].actions[0].action, { op: "plus" }, "＋ again folds it");
   assert.deepEqual(plus[1].items.map((i) => i.action), [{ op: "page", page: "new-group" }, { op: "page", page: "join" }]);
   assert.deepEqual(words(paneRows(VIEW({ avatars: [], rows: [], unread: 0, offline: "连不上中继：refused", notes: [{ url: "https://evil.example/i/abcd9ahe.md", at: "t" }] }), STATE())), [
-    "#Gemsbang [我][＋]", "断了：连不上中继：refused · 显示的是上次同步的", "有一份进群说明，没照做：不是你亲手贴的（https://evil.example/i/abcd9ahe.md）", "(还没有聊天)[建群][用链接进群]",
+    "#Gemsbang [＋]", "断了：连不上中继：refused · 显示的是上次同步的", "有一份进群说明，没照做：不是你亲手贴的（https://evil.example/i/abcd9ahe.md）", "(还没有聊天)[建群][用链接进群]", "▁*聊天|我",
   ]);
-  assert.deepEqual(paneRows(VIEW(), STATE())[0].actions.map((a) => [a.action, a.primary === true]), [[{ op: "page", page: "avatars" }, false], [{ op: "plus" }, true]], "我 a link, ＋ the one to press");
+  const tabs = paneRows(VIEW(), STATE()).at(-1);
+  assert.deepEqual(tabs.items.map((t) => [t.icon, t.on, t.action]), [["chats", true, { op: "page", page: "inbox" }], ["me", false, { op: "page", page: "avatars" }]], "聊天 · 我, the last row: 我 moved there from the head");
 });
 
 test("a chat (spec §7.2, S13, direction ①): its name, its size and who you are there; a group's head opens 群信息 (P5, Q17), a two-person chat keeps 静音 and 自动回 on it; the earlier lines counted; who came in, and when; the lines as bubbles — the person's own at the right — with a stamp where the talk picks up, `身份` where an agent said it, a mention of the person's avatar set off; a call's bar above the box 「以 <身份> 说…」", () => {
@@ -74,7 +75,8 @@ test("a chat (spec §7.2, S13, direction ①): its name, its size and who you ar
   const card = withCall.find((r) => r.kind === "need");
   assert.deepEqual([card.line, card.body, card.options.map((o) => o.label)], [true, [[{ text: "李四 @ 了你" }]], ["交给 agent 回"]], "one step on the bar; answering yourself is the box below, not answering is leaving it");
   assert.deepEqual(paneRows(VIEW(), STATE({ page: "chat", chat: { ...chat, kind: "dm", items: [] } }))[0].actions.map((a) => a.label), ["静音", "自动回"], "a two-person chat invites nobody; its 自动回 on its head");
-  assert.deepEqual(words(paneRows(VIEW(), STATE({ page: "chat", chat: null }))).slice(0, 1), ["#Gemsbang(2 条未读) [我][＋]"], "no chat open: the inbox");
+  assert.deepEqual(words(paneRows(VIEW(), STATE({ page: "chat", chat: null }))).slice(0, 1), ["#Gemsbang(2 条未读) [＋]"], "no chat open: the inbox");
+  assert.equal(rows.some((r) => r.kind === "tabs"), false, "in a chat the row at the foot folds away, as WeChat's");
 });
 
 test("群信息 (P6 ②, Q17): 叫人 ›, 静音, 自动回 and, for the owner, 进群要我同意 as switches, above the members — the owner first, 你 and 群主 marked; a member has no 进群要我同意; every member listed — a row each for the first two hundred, the rest named in one line — so anyone can be found", () => {
@@ -119,7 +121,8 @@ test("我 (spec §7.5, S22, P8): a card per avatar — where it is, who plays it
   const card = (r) => `${r.title ?? "-"}${r.tag !== undefined ? `(${r.tag})` : ""}${r.edit !== undefined ? ` [${r.edit.label}]` : ""}${r.lines.map((x) => ` ; ${x.label}：${x.value}${(x.presses ?? []).map((p) => `[${p.label}]`).join("")}`).join("")}`;
   const own = (r) => r.kind === "kv" ? `${r.label}：${r.value}${r.note !== undefined ? `·${r.note}` : ""}${r.press !== undefined ? `[${r.press.label}]` : ""}${r.go !== undefined ? "›" : ""}` : r.kind === "input" ? `<${r.placeholder}|${r.value ?? ""}|${r.submitLabel}>` : r.kind === "list" ? r.items.map((i) => `${i.label}${i.on ? "✓" : ""}`).join("|") : r.kind;
   const rows = paneRows(VIEW({ defaultName: "老张", bodies: { "s-1": LILY.id }, avatars: [JOHN, { ...LILY, muted: true }] }), STATE({ page: "avatars", version: "0.5.24" }));
-  assert.deepEqual([rows[0].title, rows[0].sub, rows[0].back, rows[0].backLabel, rows[0].actions], ["我", undefined, { op: "page", page: "inbox" }, undefined, []], "the page is 我, ‹ only (P8a)");
+  assert.deepEqual([rows[0].title, rows[0].sub, rows[0].back, rows[0].backLabel, rows[0].actions], ["我", undefined, undefined, undefined, []], "the page is 我, reached from the row at the foot: no ‹ (S22)");
+  assert.deepEqual(words([rows.at(-1)]), ["▁聊天2|*我"], "聊天 · 我 at its foot too, 我 on");
   assert.deepEqual(rows.filter((r) => r.kind === "card").map(card), [
     "John [改] ; 在哪：设置页改版 ; 谁来演：还没有会话 ; 自动回：没有 ; agent 说的话：对外标出来",
     "Lily 爸爸(静音) [改] ; 在哪：三年二班家长 ; 谁来演：这个会话 ; 自动回：没有 ; agent 说的话：对外不标",
@@ -198,7 +201,7 @@ test("用链接进群 (S9, P3): the link pasted with 进; read, the group and wh
   assert.deepEqual(fieldAction("join", " https://im.example/i/k7pqm3 ", { chat: null, address: null, groupAs: "" }), { local: "join", url: "https://im.example/i/k7pqm3" });
 });
 
-test("底子 in 我 (S27, P8a, P8c, P9b′): each entry with whom it is given to, 改 at the right; 改 makes the page 底子 alone — each entry's words in a field, 给： its avatars as pills (the last one stays), 删, and 加一条 given to the avatar this session plays; an agent's entry waits with 记下 · 不记, and 我 on the inbox's bar carries how many wait", () => {
+test("底子 in 我 (S27, P8a, P8c, P9b′): each entry with whom it is given to, 改 at the right; 改 makes the page 底子 alone — each entry's words in a field, 给： its avatars as pills (the last one stays), 删, and 加一条 given to the avatar this session plays; an agent's entry waits with 记下 · 不记, and 我 at the foot carries how many wait", () => {
   const base = [
     { id: "base-1", label: "家人", text: "Lily，8 岁，三年二班", for: [LILY.id], state: "kept", by: "person", at: "t" },
     { id: "base-2", label: "时区", text: "上海", for: [JOHN.id, LILY.id], state: "kept", by: "person", at: "t" },
@@ -211,9 +214,9 @@ test("底子 in 我 (S27, P8a, P8c, P9b′): each entry with whom it is given to
   const wait = rows.find((r) => r.key === "base-wait-base-3");
   assert.deepEqual(wait.fields[1].items.map((b) => b.action), [{ op: "base-keep", item: "base-3", keep: true }, { op: "base-keep", item: "base-3", keep: false }]);
   assert.deepEqual(rows[from].press.action, { op: "edit", card: "base" });
-  const head = paneRows(VIEW({ base }), STATE())[0];
-  assert.deepEqual(head.actions.map((a) => [a.label, a.count]), [["我", 1], ["＋", undefined]], "the waiting one counted beside 我, on the inbox's head");
-  assert.equal(paneRows(VIEW({ base: base.slice(0, 2) }), STATE())[0].actions[0].count, undefined);
+  const tabs = paneRows(VIEW({ base }), STATE()).at(-1);
+  assert.deepEqual(tabs.items.map((t) => [t.label, t.count]), [["聊天", 2], ["我", 1]], "the waiting one counted on 我, at the foot");
+  assert.equal(paneRows(VIEW({ base: base.slice(0, 2) }), STATE()).at(-1).items[1].count, undefined);
   // 改 (P8c): the page is 底子 alone.
   const open = paneRows(VIEW({ base }), STATE({ page: "avatars", editing: "base" }));
   assert.deepEqual(open.map((r) => r.kind), ["head", "section", "card", "card", "input", "card"]);

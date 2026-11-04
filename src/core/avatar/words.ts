@@ -289,6 +289,8 @@ const WORDS: Readonly<Record<string, Readonly<Record<Lang, string>>>> = {
   "panel.info.autoHint": { zh: "有人叫到 {name}，交给 agent 回，不再问你；五种事照样问你", en: "When someone calls {name}, the agent answers without asking you; the five kinds of things still ask you", ja: "{name} が呼ばれたらエージェントが返事し、あなたには聞きません。五つのことは今まで通り聞きます" },
   "panel.dmAuto": { zh: "自动回", en: "Answer on its own", ja: "自動で返事" },
   "panel.dmAutoOff": { zh: "取消自动回", en: "Stop answering on its own", ja: "自動返事をやめる" },
+  "panel.tab.chats": { zh: "聊天", en: "Chats", ja: "チャット" },
+  "panel.tab.me": { zh: "我", en: "Me", ja: "自分" },
   "panel.flag.call": { zh: "[有人@我]", en: "[Mentioned]", ja: "[メンション]" },
   "panel.flag.ask": { zh: "[等你定]", en: "[Your call]", ja: "[あなた次第]" },
   "panel.flag.task": { zh: "[任务]", en: "[Task]", ja: "[タスク]" },

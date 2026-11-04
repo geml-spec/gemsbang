@@ -37,6 +37,8 @@ declare module 'claude-code' {
       writing: string | null
       /** The inbox's ＋ open; 建群's list of avatars open; 用链接进群 once the link was read (what it says, where the person is in it). */
       plusOpen: boolean
+      /** Which item leads the list of a page with 聊天 · 我 pinned at its foot (S11). */
+      listLead: number
       asOpen: boolean
       joining: GemsbangJson
       /** The card of 我 whose 改 is open, by its row's key; null when none is (one at a time). */

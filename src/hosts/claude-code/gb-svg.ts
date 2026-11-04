@@ -116,6 +116,19 @@ export function flagSvg(label: string): Pic {
   return { source: svg(w, h, text(1, h / 2, size, "#e5484d", label)), width: Math.ceil(w), height: h, alt: label };
 }
 
+/** A tab of 聊天 · 我 at the pane's foot (S11): its picture (a speech bubble, a person) over its name, blue while on and grey else, a red count at the picture's upper right. */
+export function tabSvg(icon: "chats" | "me", label: string, on: boolean, count?: number): Pic {
+  const w = Math.max(56, textWidth(label, 11) + 24), h = 40, c = on ? "#2a6fdb" : "#8a8986", x = w / 2 - 11;
+  const glyph = icon === "chats" ? '<path d="M4 5h16v11H9l-5 4z"/>' : '<circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20c.8-4 4-6 7.5-6s6.7 2 7.5 6"/>';
+  let badge = "";
+  if (count !== undefined && count > 0) {
+    const n = count > 99 ? "99+" : String(count), bh = 14, bw = Math.max(bh, textWidth(n, 9.5, true) + 8), bx = w / 2 + 4;
+    badge = `<rect x="${n2(bx)}" y="0.5" width="${n2(bw)}" height="${bh}" rx="${bh / 2}" fill="#ef3b3f"/>${text(bx + bw / 2, 0.5 + bh / 2, 9.5, "#fff", n, { bold: true, anchor: "middle" })}`;
+  }
+  const body = `<g transform="translate(${n2(x)} 2) scale(0.92)" fill="none" stroke="${c}" stroke-width="1.7" stroke-linejoin="round">${glyph}</g>${text(w / 2, 33, 11, c, label, { anchor: "middle" })}${badge}`;
+  return { source: svg(w, h, body), width: Math.ceil(w), height: h, alt: count !== undefined && count > 0 ? `${label} ${count}` : label };
+}
+
 /** A muted chat's mark at the right of its row (S17): a struck bell, grey. */
 export function mutedSvg(alt: string): Pic {
   const s = 14;

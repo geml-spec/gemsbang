@@ -1,6 +1,7 @@
 // gemsbang's pane in Claude Code (spec §7.1–§7.6, transport §4), as rows the
 // hooks module draws, laid out as WeChat lays its own out (direction ①, the
-// person's pick of 2026-11-03): the inbox is the chats alone — each with its
+// person's pick of 2026-11-03): 聊天 · 我 in a row at the foot of the inbox and
+// of 我, pinned there (2026-11-04); the inbox is the chats alone — each with its
 // picture, the avatar in it at the picture's corner, its name, time, last
 // line and unread; the ones that need the person first, their last line
 // after red words ([有人@我], [等你定], [任务]); a muted one in its place,
@@ -159,7 +160,13 @@ export type GbRow =
   /** A label and its value on a page of settings (我's 默认名, 界面语言, 账号, 关于; 账号与登录's 邮箱): a grey note after the value, a press as a link, or › to go. */
   | { kind: "kv"; key: string; label: string; value: string; note?: string; tone?: Tone; press?: GbPress; go?: GbAction }
   /** One thing in a list of a page's (GbAccount): its name, a line under it, a press or a tag at its right; `rule`, a line above it. */
-  | { kind: "item"; key: string; title: string; sub?: string; press?: GbPress; tag?: string; rule?: true };
+  | { kind: "item"; key: string; title: string; sub?: string; press?: GbPress; tag?: string; rule?: true }
+  /**
+   * 聊天 · 我 (S11, S22): the row at the foot of the inbox and of 我, as a phone's IM has it, pinned there where the
+   * surface lets the pane keep its own window; each with its picture, the one on in blue, a red count (聊天 the unread,
+   * 我 the 底子 entries that wait for the person's yes). Always the last row of its page.
+   */
+  | { kind: "tabs"; key: string; items: { key: string; label: string; icon: "chats" | "me"; on: boolean; count?: number; action: GbAction }[] };
 /** A card's line: a label, a value (its tone), then presses, or a choice (the language). */
 export interface CardLine { key: string; label: string; value: string; tone?: Tone; presses?: GbPress[]; choice?: { options: { value: string; label: string }[]; value: string } }
 /** A card's kind as its label's colour: a call, a thing to nod to, gone wrong, expired. */
@@ -373,9 +380,8 @@ function waitOf(v: GbView, r: InboxRow): { flag?: string; waits: boolean } {
 /** The inbox (spec §7.1, S11): WeChat's — the chats alone, the ones that need the person first. */
 function inboxRows(v: GbView, s: PaneState): GbRow[] {
   const l = v.lang;
-  // The head: the name; 我 (with how many 底子 entries an agent left wait for the person's yes, P9b′) and ＋ at the right.
+  // The head: the name, ＋ at the right; 我 is in the row at the foot.
   const rows: GbRow[] = [{ kind: "head", key: "head-inbox", title: "Gemsbang", ...(v.unread > 0 ? { sub: say("panel.unreadBand", l, { count: v.unread }) } : {}), actions: [
-    { key: "go-avatars", label: say("panel.avatars", l), action: { op: "page", page: "avatars" }, ...(baseWaiting(v) > 0 ? { count: baseWaiting(v) } : {}) },
     { key: "plus", label: "＋", primary: true, action: { op: "plus" } },
   ] }];
   if (v.offline !== undefined) rows.push(text("offline", say("panel.offline", l, { detail: v.offline }), "error"));
@@ -393,14 +399,23 @@ function inboxRows(v: GbView, s: PaneState): GbRow[] {
       { key: "empty-new-group", label: say("panel.newGroup", l), primary: true, action: { op: "page", page: "new-group" } },
       { key: "empty-join", label: say("panel.joinLink", l), action: { op: "page", page: "join" } },
     ] });
-    return rows;
+    return [...rows, tabsRow(v, "inbox")];
   }
   // The chats that need the person first, newest first among them; then the rest, the muted in their place (S17).
   const shown = v.rows.map((r) => ({ r, ...waitOf(v, r), muted: mutedChat(v, r.owner, r.id, r.as.id) }));
   for (const x of [...shown.filter((x) => x.waits && !x.muted), ...shown.filter((x) => !x.waits || x.muted)]) {
     rows.push({ kind: "chat", key: `chat-${x.r.owner}-${x.r.id}`, row: x.r, action: { op: "open", owner: x.r.owner, id: x.r.id }, ...(x.flag !== undefined ? { flag: x.flag } : {}), ...(x.muted ? { muted: true as const } : {}) });
   }
-  return rows;
+  return [...rows, tabsRow(v, "inbox")];
+}
+
+/** 聊天 · 我 at the foot (S11, S22): the one on in blue; 聊天 with the unread, 我 with the 底子 entries an agent left waiting (P9b′). */
+function tabsRow(v: GbView, on: "inbox" | "avatars"): GbRow {
+  const l = v.lang;
+  return { kind: "tabs", key: "tabs", items: [
+    { key: "tab-chats", label: say("panel.tab.chats", l), icon: "chats", on: on === "inbox", ...(v.unread > 0 ? { count: v.unread } : {}), action: { op: "page", page: "inbox" } },
+    { key: "tab-me", label: say("panel.tab.me", l), icon: "me", on: on === "avatars", ...(baseWaiting(v) > 0 ? { count: baseWaiting(v) } : {}), action: { op: "page", page: "avatars" } },
+  ] };
 }
 
 /** A time as the chat's lines carry it, HH:MM in the person's zone. */
@@ -571,9 +586,9 @@ const folderOf = (path: string): string => path.split(/[\\/]+/).filter((x) => x 
  */
 function avatarRows(v: GbView, s: PaneState): GbRow[] {
   const l = v.lang;
-  const rows: GbRow[] = [{ kind: "head", key: "head-avatars", title: say("panel.avatars", l), back: { op: "page", page: "inbox" }, actions: [] }];
-  // 底子's 改 (P8c): the page is 底子 alone until 好了.
-  if (s.editing === "base") return [...rows, ...baseRows(v, s, true)];
+  // 底子's 改 (P8c): the page is 底子 alone until 好了, a page under 我, back to it; else 我 is reached from the row at its foot.
+  if (s.editing === "base") return [{ kind: "head", key: "head-avatars", title: say("panel.avatars", l), back: { op: "edit", card: null }, actions: [] }, ...baseRows(v, s, true)];
+  const rows: GbRow[] = [{ kind: "head", key: "head-avatars", title: say("panel.avatars", l), actions: [] }];
   // A session given none plays the avatar the person last spoke as (S21); another open session of this machine, said so; none, said so too (B1: its calls ask the person).
   const body = v.bodies[s.session] ?? v.recent;
   const played = new Set(v.played ?? []);
@@ -617,7 +632,7 @@ function avatarRows(v: GbView, s: PaneState): GbRow[] {
     ];
     rows.push({ kind: "card", key, badge: a, title: a.name, ...tag, edit, lines, fields: [] });
   }
-  rows.push(...baseRows(v, s, false), ...ownRows(v, s));
+  rows.push(...baseRows(v, s, false), ...ownRows(v, s), tabsRow(v, "avatars"));
   return rows;
 }
 
