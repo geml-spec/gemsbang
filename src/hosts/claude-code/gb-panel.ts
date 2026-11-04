@@ -15,8 +15,9 @@
 // name, the language, the account, the version), the account (the ways in,
 // the devices signed in, signing out) and the sign-in (an email, its code, a
 // name for a new person's first avatar; no server to fill in). The band says
-// only what needs the person — the first card and its options — or that
-// gemsbang cannot work or nobody is logged in. Pure and Node-free.
+// what needs the person first — the first card and its options — or that
+// gemsbang cannot work or nobody is logged in; with nothing to say it stays,
+// how many chats have something new. Pure and Node-free.
 import { factsLine } from "../../core/avatar/borrow.js";
 import { timeLabel, type Badge, type ChatItem, type InboxRow } from "../../core/avatar/inbox.js";
 import { expiresIn } from "../../core/avatar/needs.js";
@@ -810,7 +811,7 @@ export function paneRows(v: GbView, s: PaneState): GbRow[] {
   return [...rows, ...inboxRows(v, s)];
 }
 
-/** The band (transport §4): the first thing that needs the person, with its options and how many more; else nothing, unless gemsbang cannot work or nobody is logged in. */
+/** The band (transport §4): the first thing that needs the person, with its options and how many more; else, signed in, how many chats have something new; what stops gemsbang; nobody logged in, in the first session alone. */
 export function gbBand(v: GbView | null, problem: string | null, now?: string, session?: string): { text: string; tone: Tone; open: string; actions: GbPress[]; more: number } | undefined {
   const l = v?.lang ?? "zh";
   if (problem !== null) return { text: problem, tone: "error", open: say("panel.open", l), actions: [], more: 0 };
@@ -822,7 +823,13 @@ export function gbBand(v: GbView | null, problem: string | null, now?: string, s
   if (first === undefined) {
     // No card waits: the newest call, with its one step, 交给 agent 回 (architecture §6.3).
     const c = calls[0];
-    if (c === undefined) return undefined;
+    if (c === undefined) {
+      // Nothing waits (S12, 2026-11-04, 本人): the line stays while signed in, a way into the pane; how many chats have
+      // something new, the muted not counted (their unread is a grey dot, S17).
+      if (v === null) return undefined;
+      const fresh = v.rows.filter((r) => r.unread > 0 && !mutedChat(v, r.owner, r.id, r.as.id)).length;
+      return { text: fresh > 0 ? say(fresh === 1 ? "band.unreadOne" : "band.unread", l, { count: fresh }) : "Gemsbang", tone: "dim", open: say("panel.open", l), actions: [], more: 0 };
+    }
     const lastLine = c.lines[c.lines.length - 1]!;
     // B3: a round handed it failed: the line says so, as an error.
     const said = c.failed !== undefined ? say("call.failed", l, { why: say(`call.why.${c.failed}`, l) }) : say("call.line", l, { who: lastLine.who, text: lastLine.text });

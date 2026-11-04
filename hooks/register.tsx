@@ -12,7 +12,8 @@
 // what needs them there in a bar above its box; 群信息, 叫人, 我 with its 底子, the
 // account, the sign-in — and a line above the prompt with the first thing that needs them,
 // its options and how many more, or that gemsbang cannot work or nobody is
-// logged in. 被叫到 (architecture §6.3): when someone calls one of the
+// logged in; else how many chats have something new, the mark and the words a
+// press into the pane. 被叫到 (architecture §6.3): when someone calls one of the
 // person's avatars, the chat's bar asks them — 交给 agent 回 — and a
 // press, or a chat set to answer on its own (for the avatar this session
 // speaks for), starts an agent in the background that reads the chat and
@@ -818,6 +819,8 @@ function drawPic(els: Els, key: string, p: Pic): unknown {
 
 /** A blank label about `px` wide: ideographic spaces, which HTML does not collapse as it does plain ones. */
 const blankOf = (px: number): string => '\u3000'.repeat(Math.max(1, Math.floor((px - 12) / 13)))
+/** A blank label as wide as so many cells of words: full-width spaces, which HTML does not fold. */
+const blankCells = (cells: number): string => '\u3000'.repeat(Math.max(1, Math.ceil(cells / 2)))
 
 /** A picture that is a press by itself: the picture, and over it a blank Button, painted last. */
 function picPress($: EngineInterface, els: Els, key: string, p: Pic, action: GbAction): unknown {
@@ -1597,7 +1600,7 @@ export const register: Register = (on) => {
   on('tool.call', { tool: 'mcp__gemsbang__im_read' }, ($, e) => serveTool($, 'im_read', e)).catch(() => ({ result: 'gemsbang could not do that' }))
   on('tool.call', { tool: 'mcp__gemsbang__im_remember' }, ($, e) => serveTool($, 'im_remember', e)).catch(() => ({ result: 'gemsbang could not do that' }))
 
-  // The band: one line under whatever a plugin below drew, only when gemsbang cannot work or nobody is logged in.
+  // The band: one line under whatever a plugin below drew — what needs the person first, else how many chats have something new.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const els = elementsOf($, e)
@@ -1613,14 +1616,38 @@ export const register: Register = (on) => {
     const below = await next(e).catch(() => null)
     const columns: number = e.props.bodyColumns
     const lang = (await readView($).catch(() => null))?.lang ?? 'zh'
+    const open = () => keep(openPane($).then(() => undefined), $)
+    const title = truncate(band.text, Math.max(6, columns - cellWidth(band.open) - 8 - band.actions.reduce((w, b) => w + cellWidth(b.label) + 5, 0)))
+    // The mark and the words open the pane as 打开 does (S12, 2026-11-04): where pictures are drawn, a blank Button laid
+    // over each (a Button holds only words); on the terminal each is the Button itself.
     const line = (
       <Box key="gemsbang-band" gap={1} alignItems="center" flexGrow={1}>
-        {Svg !== undefined ? <Svg source={BRAND_MARK.source} alt="Gems'Bang" width={14} height={14} /> : <Text color={GEMSBANG_BLUE} bold>{GEMSBANG_MARK_CHAR}</Text>}
-        <Box key="band-title" flexShrink={1} minWidth={0}><Text wrap="truncate-end" {...toneOf(band.tone)}>{truncate(band.text, Math.max(6, columns - cellWidth(band.open) - 8 - band.actions.reduce((w, b) => w + cellWidth(b.label) + 5, 0)))}</Text></Box>
+        {Svg !== undefined
+          ? (
+            <Box key="band-mark" flexShrink={0} alignItems="center" paddingX={1}>
+              <Svg source={BRAND_MARK.source} alt="Gems'Bang" width={14} height={14} />
+              <Box position="absolute" top={0} left={0} right={0} bottom={0} justifyContent="center" alignItems="center">
+                <Button key="band-mark-open" plain label={blankCells(2)} onPress={open} />
+              </Box>
+            </Box>
+          )
+          : <Button key="band-mark-open" plain label={band.open} onPress={open}><Text color={GEMSBANG_BLUE} bold>{GEMSBANG_MARK_CHAR}</Text></Button>}
+        {Svg !== undefined
+          ? (
+            <Box key="band-title" flexShrink={1} minWidth={0}>
+              <Box flexShrink={1} minWidth={0} overflow="hidden">
+                <Text wrap="truncate-end" {...toneOf(band.tone)}>{title}</Text>
+                <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+                  <Button key="band-title-open" plain label={blankCells(cellWidth(title))} onPress={open} />
+                </Box>
+              </Box>
+            </Box>
+          )
+          : <Box key="band-title" flexShrink={1} minWidth={0}><Button key="band-title-open" plain label={band.text} onPress={open}><Text wrap="truncate-end" {...toneOf(band.tone)}>{title}</Text></Button></Box>}
         {band.actions.map((b) => <Button key={b.key} {...(Svg === undefined ? { plain: true } : {})} label={b.label} {...(b.primary ? { variant: 'primary' } : {})} onPress={() => keep(act($, b.action), $)} />)}
         <Box key="band-push" flexGrow={1} />
         {band.more > 0 && <Text key="band-more" dimColor>{say('need.more', lang, { count: band.more })}</Text>}
-        <Button key="band-open" {...(Svg === undefined ? { plain: true } : {})} label={band.open} onPress={() => keep(openPane($).then(() => undefined), $)} />
+        <Button key="band-open" {...(Svg === undefined ? { plain: true } : {})} label={band.open} onPress={open} />
       </Box>
     )
     return below === null ? line : <Box flexDirection="column" flexGrow={1}>{below}{line}</Box>

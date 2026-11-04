@@ -313,6 +313,8 @@ const WORDS: Readonly<Record<string, Readonly<Record<Lang, string>>>> = {
   "panel.logout": { zh: "退出登录", en: "Log out", ja: "ログアウト" },
   "panel.notFollowed": { zh: "有一份进群说明，没照做：不是你亲手贴的（{url}）", en: "An invitation was not followed: you did not paste it ({url})", ja: "参加の案内に従いませんでした。あなたが貼ったものではありません（{url}）" },
   "panel.offline": { zh: "断了：{detail} · 显示的是上次同步的", en: "Offline: {detail} · showing the last sync", ja: "オフライン：{detail} · 前回の同期を表示中" },
+  "band.unread": { zh: "Gemsbang · {count} 个聊天有新消息", en: "Gemsbang · new messages in {count} chats", ja: "Gemsbang · {count} 件のチャットに新着" },
+  "band.unreadOne": { zh: "Gemsbang · {count} 个聊天有新消息", en: "Gemsbang · new messages in {count} chat", ja: "Gemsbang · {count} 件のチャットに新着" },
   "panel.loginBand": { zh: "gemsbang 还没登录", en: "gemsbang: not logged in", ja: "gemsbang：未ログイン" },
   "panel.open": { zh: "打开", en: "Open", ja: "開く" },
   "panel.noSurface": { zh: "侧栏只在电脑上的 Claude Code 里显示，现在这个连接没有地方画它。回到电脑上打 /gemsbang 就能看到。", en: "The pane shows only in Claude Code on your computer; this connection has nowhere to draw it. Back at your computer, type /gemsbang to see it.", ja: "サイドバーはパソコンの Claude Code にだけ表示されます。この接続には表示する場所がありません。パソコンに戻って /gemsbang と入力すると見られます。" },

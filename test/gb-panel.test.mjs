@@ -161,8 +161,8 @@ test("我 (spec §7.5, S22, P8): a card per avatar — where it is, who plays it
   assert.deepEqual(words(alone).slice(1, 2), ["(群里还只有你)[叫人]"], "made a moment ago: straight in, 叫人 first (P2d)");
 });
 
-test("the band and the fields: nothing unless gemsbang cannot work or nobody is logged in; Enter in each field does its one thing, an empty one nothing", () => {
-  assert.equal(gbBand(VIEW(), null), undefined);
+test("the band and the fields: signed in with nothing waiting, the name and the chats with something new (S12); what stops gemsbang; nobody logged in; Enter in each field does its one thing, an empty one nothing", () => {
+  assert.deepEqual(gbBand(VIEW(), null), { text: "Gemsbang · 2 个聊天有新消息", tone: "dim", open: "打开", actions: [], more: 0 });
   assert.deepEqual(gbBand(VIEW({ loggedIn: false }), null), { text: "gemsbang 还没登录", tone: "dim", open: "打开", actions: [], more: 0 });
   assert.deepEqual(gbBand(null, "gemsbang：找不到 node"), { text: "gemsbang：找不到 node", tone: "error", open: "打开", actions: [], more: 0 });
   const s = { chat: { owner: JOHN.id, id: "g-000000000a" }, address: "john@example.com", adding: "j@work.example", groupAs: "new", groupAvatar: "John", session: "s-1" };

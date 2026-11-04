@@ -123,7 +123,22 @@ test('the start: the five tools and /gemsbang registered; every request one call
   expect(w.registered).toEqual(['im_join', 'im_say', 'im_ask', 'im_remember', 'im_read'])
   expect(w.commands).toEqual(['gemsbang'])
   expect(w.sent[0]).toEqual({ v: 1, call: 'status', args: { session: SESSION } })
-  expect(await bandText($), 'logged in, nothing needs the person: no line').toBe('')
+  expect(await bandText($), 'logged in, nothing needs the person: the line stays, how many chats have something new').toBe('@ Gemsbang · 1 个聊天有新消息 [打开]')
+})
+
+test('the line above the prompt (S12, 2026-11-04): its mark and its words open the pane as 打开 does, on the terminal and where pictures are drawn; a muted chat is not counted', async ($, on) => {
+  const w = world(on)
+  const clock = await start($, on)
+  for (const [surface, key] of [['terminal', 'band-mark-open'], ['terminal', 'band-title-open'], ['desktop', 'band-mark-open'], ['desktop', 'band-title-open']] as const) {
+    const band = await $.ui.mount({ plugin: 'gemsbang', surface, component: 'AbovePrompt', props: BAND })
+    await band.press({ key })
+    await band.unmount()
+  }
+  expect(w.opened).toEqual(['gemsbang-board', 'gemsbang-board', 'gemsbang-board', 'gemsbang-board'])
+  w.view = VIEW({ muted: { avatars: [], venues: [`${ROW.owner}/${ROW.id}`] } })
+  await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  await clock.advance(1)
+  expect(await bandText($)).toBe('@ Gemsbang [打开]')
 })
 
 test('no Node: the line says so with 打开, nothing is asked of a bridge, and a call goes through', async ($, on) => {
@@ -182,7 +197,7 @@ test('nobody signed in: the line says so; the pane asks for an email, then its c
   expect(calls(w, 'first-avatar').at(-1)?.args).toEqual({ name: 'John', session: SESSION })
   await pane.unmount()
   expect(await paneText($)).toContain('[＋] 还没有聊天 [建群] [用链接进群] 聊天 我')
-  expect(await bandText($)).toBe('')
+  expect(await bandText($), 'signed in, no chat yet: the line with the name alone').toBe('@ Gemsbang [打开]')
 })
 
 test('账号与登录 (architecture §3.1, P10): from 我 (/gemsbang settings goes there), the account read through the client; a device signed out; 加一种登录方式 opens its field, an email added with its code; 退出这台设备的登录 asked first, then signed out to the sign-in', async ($, on) => {
@@ -618,7 +633,7 @@ test('需要你 (spec §7.3, S15, direction ①): the line above the prompt name
   await band.press({ key: 'band-answer-1' })
   await band.unmount()
   expect(calls(w, 'answer').at(-1)?.args).toEqual({ avatar: LILY.id, need: 'need-1', choice: 1 })
-  expect(await bandText($), 'answered: nothing waits').toBe('')
+  expect(await bandText($), 'answered: nothing waits, the chats with something new').toBe('@ Gemsbang · 1 个聊天有新消息 [打开]')
   const asked = await $.tool.call({ tool: 'mcp__gemsbang__im_ask', tool_use_id: 'a1', venue: 'a-00000000c1/g-000000000b', kind: 'pay', summary: '春游车费 30 元', draft: '车费我转了', options: [{ label: '付', text: '车费我转了' }], placeholder: true })
   expect(asked.result).toBe('im_ask: 已经问了本人（花钱）')
   expect(calls(w, 'tool-ask').at(-1)?.args).toEqual({ venue: 'a-00000000c1/g-000000000b', kind: 'pay', summary: '春游车费 30 元', draft: '车费我转了', options: [{ label: '付', text: '车费我转了' }], placeholder: true, session: SESSION })
