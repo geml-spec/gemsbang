@@ -75,13 +75,14 @@ everywhere.
 
 ## Test accounts: Smith
 
-The emails listed in the `SHOW_CODE_TO` secret, separated by commas, get their code back in the
-`/login` answer, and no mail is sent. The plugin signs in with that code straight away, so typing
-the address is enough. That is how the test account Smith signs in (Q21): `SHOW_CODE_TO` is
+The emails listed in `SHOW_CODE_TO`, separated by commas, get their code back in the `/login`
+answer, and no mail is sent. The plugin signs in with that code straight away, so typing the
+address is enough. That is how the test account Smith signs in (Q21): `SHOW_CODE_TO` is
 `smith@test.gemsbang.com`, and the first sign-in names the first avatar Smith. Anyone who types
 that address gets in, so keep nothing real in a test account.
 
-    npx wrangler secret put SHOW_CODE_TO -c cloudflare/wrangler.jsonc
+It is an address, not a secret, so it sits in `vars` in `wrangler.jsonc`, and the next `deploy`
+carries a change to it.
 
 On this machine, `gemsbang relay serve --show-code-to smith@test.gemsbang.com` does the same.
 

@@ -2,8 +2,9 @@
 // gemsbang.com and its one Durable Object, built from the relay
 // (`npm run build` first). Codes are mailed through Resend with the
 // RESEND_API_KEY secret, from mustapi.com, the domain the maintainer's
-// Resend already sends for (2026-11-04). Deploying is the maintainer's call: see
-// cloudflare/README.md.
+// Resend already sends for (2026-11-04). SHOW_CODE_TO names the test accounts,
+// which sign in without a mail (Q21): an address, not a secret. Deploying is the
+// maintainer's call: see cloudflare/README.md.
 {
   "name": "gemsbang",
   "main": "../dist/relay/worker.js",
@@ -12,6 +13,6 @@
   "routes": [{ "pattern": "gemsbang.com", "custom_domain": true }],
   "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "RelayObject" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayObject"] }],
-  "vars": { "NAME": "gemsbang.com", "MAIL_FROM": "no-reply@mustapi.com" },
+  "vars": { "NAME": "gemsbang.com", "MAIL_FROM": "no-reply@mustapi.com", "SHOW_CODE_TO": "smith@test.gemsbang.com" },
   "observability": { "enabled": true }
 }

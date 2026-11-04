@@ -16,6 +16,7 @@ test("the Cloudflare configuration agrees with the code (architecture §2.3): th
   assert.deepEqual(config.migrations.map((m) => m.new_sqlite_classes), [[binding.class_name]]);
   assert.equal(config.send_email, undefined);
   assert.equal("RESEND_API_KEY" in config.vars, false, "the key is a secret");
+  assert.equal(config.vars.SHOW_CODE_TO, "smith@test.gemsbang.com", "the test account Smith signs in from any computer (Q21)");
   assert.deepEqual([config.vars.NAME, config.vars.MAIL_FROM, config.routes], ["gemsbang.com", "no-reply@mustapi.com", [{ pattern: "gemsbang.com", custom_domain: true }]], "codes come from mustapi.com, which the maintainer's Resend sends for (2026-11-04)");
   assert.ok(config.compatibility_flags.includes("nodejs_compat"));
   assert.equal(typeof worker.default.fetch, "function");

@@ -162,6 +162,7 @@ test("我 (spec §7.5, S22, P8): a card per avatar — where it is, who plays it
   assert.deepEqual(groupOf({ view: { recent: LILY.id } }), ["#建群", "<群名>", "以{Lily 爸爸}建[换]"], "several: the one last spoken as, and 换 (P2b, Q1)");
   assert.deepEqual(groupOf({}), ["#建群", "<群名>", "以{John}建[换]"], "nothing said yet: the first");
   assert.equal(paneRows(VIEW(), STATE({ page: "new-group", groupAs: "" })).find((r) => r.key === "group").submitLabel, "建");
+  assert.deepEqual([paneRows(VIEW(), STATE({ page: "new-group", groupAs: "" }))[0].backLabel, paneRows(VIEW({ lang: "en" }), STATE({ page: "join" }))[0].backLabel], ["聊天", "Chats"], "back to 聊天, as the tab says: never 收件箱 (S11, 2026-11-04)");
   assert.deepEqual(groupOf({ state: { asOpen: true, groupAs: LILY.id } }), ["#建群", "<群名>", "John|Lily 爸爸✓|新的身份…"], "换: theirs, a new one last (P2c, Q2)");
   assert.deepEqual(groupOf({ view: { defaultName: "老张" }, state: { groupAs: "new" } }), ["#建群", "<群名>", "[老张]", "<自己写一个>"], "a new one: the default name a suggestion, not picked (Q9)");
   assert.equal(groupOf({ state: { groupAs: "new" } }).some((w) => w.includes("贴进群链接")), false, "no link to paste here any more");

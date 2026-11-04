@@ -1604,7 +1604,7 @@ export const register: Register = (on) => {
     await update($, setupAtom, () => null)
     await update($, pastedAtom, () => [])
     for (const x of TOOLS) await registerOne($, x.name, () => $.tool.register({ name: x.name, description: x.description, inputSchema: x.inputSchema, isDeferred: false }))
-    await registerOne($, '/gemsbang', () => $.command.register({ name: 'gemsbang', description: 'GemsBang：总收件箱；/gemsbang avatars 我', argumentHint: '[avatars]' }))
+    await registerOne($, '/gemsbang', () => $.command.register({ name: 'gemsbang', description: 'GemsBang：聊天；/gemsbang avatars 我', argumentHint: '[avatars]' }))
     try {
       const manifest = JSON.parse(String(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`))) as { version?: unknown }
       if (typeof manifest.version === 'string') { const v = manifest.version; await update($, versionAtom, () => v) }

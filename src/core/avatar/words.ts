@@ -287,7 +287,7 @@ const WORDS: Readonly<Record<string, Readonly<Record<Lang, string>>>> = {
   "panel.about": { zh: "关于", en: "About", ja: "情報" },
   "panel.uiLang": { zh: "界面语言", en: "Language", ja: "表示言語" },
   "panel.account": { zh: "账号", en: "Account", ja: "アカウント" },
-  "panel.inbox": { zh: "收件箱", en: "Inbox", ja: "受信箱" },
+  "panel.inbox": { zh: "聊天", en: "Chats", ja: "チャット" },
   "panel.avatars": { zh: "我", en: "My avatars", ja: "わたしの分身" },
   "panel.back": { zh: "返回", en: "Back", ja: "戻る" },
   "panel.invite": { zh: "叫人", en: "Invite", ja: "招待" },
