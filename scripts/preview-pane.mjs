@@ -16,7 +16,7 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const OUT = join(ROOT, "preview", "out");
 const CANVAS = join(ROOT, "docs", "design", "ui", "2026-10-30-agent-im-ui", "project");
 /** Each scene and the canvas board it is drawn from. */
-const BOARDS = { inbox: "GbInbox", "inbox-muted": "GbInbox", chat: "GbChat", "chat-card": "GbChat", avatars: "GbAvatars", plus: "GbInbox", "new-group": "GbInbox", "call-failed": "GbInbox", info: "GbChat", "leave-pick": "GbChat", "avatar-edit": "GbAvatars", "base-edit": "GbAvatars", account: "GbAccount", logout: "GbAccount", invite: "GbChat", rotate: "GbChat", live: "GbInbox" };
+const BOARDS = { inbox: "GbInbox", "inbox-muted": "GbInbox", chat: "GbChat", "chat-card": "GbAsk", avatars: "GbAvatars", plus: "GbInbox", "new-group": "GbInbox", "call-failed": "GbInbox", info: "GbInfo", "leave-pick": "GbInfo", "avatar-edit": "GbAvatars", "base-edit": "GbAvatars", account: "GbAccount", logout: "GbAccount", invite: "GbChat", rotate: "GbChat", live: "GbInbox" };
 const PLUGIN = ["hooks", "dist", "types", ".claude-plugin", "package.json"];
 
 const tmp = mkdtempSync(join(tmpdir(), "gemsbang-preview-"));
