@@ -37,7 +37,7 @@ declare module 'claude-code' {
       writing: string | null
       /** The inbox's ＋ open; 建群's list of avatars open; 用链接进群 once the link was read (what it says, where the person is in it). */
       plusOpen: boolean
-      /** Which item leads the list of a page with 聊天 · 我 pinned at its foot (S11). */
+      /** Which item leads the list of a page with 聊天 · 联系人 · 我 pinned at its foot (S11). */
       listLead: number
       asOpen: boolean
       joining: GemsbangJson
@@ -45,6 +45,8 @@ declare module 'claude-code' {
       sso: GemsbangJson
       /** 加一种登录方式's other accounts (S32), each with its link. */
       addLinks: GemsbangJson
+      /** The name card open (S35): whose, as which of the person's avatars knows them, and the page its ‹ goes back to. */
+      contact: GemsbangJson
       /** The card of 我 whose 改 is open, by its row's key; null when none is (one at a time). */
       editing: string | null
       /** 叫人's 换一个链接 asked, not yet answered (P4c); the page 叫人 was opened from, where its ‹ goes back to. */

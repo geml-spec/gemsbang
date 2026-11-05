@@ -1,4 +1,4 @@
-// A page with its head kept at the top and a row kept at its foot (聊天 · 我, S11) while its list scrolls between,
+// A page with its head kept at the top and a row kept at its foot (聊天 · 联系人 · 我, S11) while its list scrolls between,
 // as a phone's IM has it. The engine scrolls a pane's tree as a whole, so such a page is drawn one window tall, the
 // list cut to what fits, and the hooks module takes the wheel and the keys over the list (`ui.scroll`), moving which
 // of its items leads it. How far it may go is reckoned from each item's rows, on the generous side: a list that
@@ -11,10 +11,10 @@ export const FIXED_ROWS = 8;
 /** What the reckoning reads of a row: its kind, and how many lines, fields, items or lines of words it holds. */
 export interface Reckoned { kind: string; lines?: readonly unknown[]; fields?: readonly unknown[]; items?: readonly unknown[]; body?: readonly unknown[] }
 
-/** The rows an item of the list is reckoned at: a chat's row four (its picture), a card two for each of its lines, a bar its words and its presses. */
+/** The rows an item of the list is reckoned at: a chat's row four (its picture), someone in 联系人 the same, a card two for each of its lines, a bar its words and its presses. */
 export function rowsOf(r: Reckoned): number {
   switch (r.kind) {
-    case "chat": return 4;
+    case "chat": case "contact": return 4;
     case "card": return 3 + 2 * ((r.lines?.length ?? 0) + (r.fields?.length ?? 0));
     case "need": return 6 + 2 * (r.body?.length ?? 0);
     case "list": case "people": case "menu": return 2 + 2 * (r.items?.length ?? 0);

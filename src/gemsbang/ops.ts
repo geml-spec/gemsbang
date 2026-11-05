@@ -13,6 +13,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { borrowEnvelope, factsOf, repoCommands } from "../core/avatar/borrow.js";
+import { contactsOf, type Contact } from "../core/avatar/contacts.js";
 import { badgesOf, chatOf, inboxOf, itemsOf, recentAvatar, venueKey, type Badge, type Card, type ChatItem, type InboxRow, type Mirror, type MirrorVenue, type MirrorWork } from "../core/avatar/inbox.js";
 import { invitePrompt, parseInvite, relayOrigin } from "../core/avatar/invite.js";
 import { orderNeeds, type Allow, type Need } from "../core/avatar/needs.js";
@@ -55,6 +56,8 @@ export interface GbView {
   zoneMinutes?: number;
   /** Nobody signed in (S28): each account the service set up, and the link that signs in with it from this machine. */
   signIn?: SignInLink[];
+  /** 联系人 (S34): the others the person's avatars know, by letter and name. */
+  contacts?: Contact[];
 }
 /** One other account to sign in or add a way in with (S28, S32): which, and where the browser goes for it. */
 export interface SignInLink { kind: string; url: string }
@@ -159,7 +162,7 @@ export class Gb {
     return {
       relay: this.origin, loggedIn: c.token !== undefined, lang: this.lang,
       ...(c.person !== undefined ? { person: c.person } : {}), ...(m?.defaultName !== undefined ? { defaultName: m.defaultName } : {}),
-      avatars, rows: box.rows, unread: box.unread, needs, calls, muted: c.muted, work, ...(m !== undefined ? { synced: m.at } : {}), ...(offline !== undefined ? { offline } : {}), notes: c.notes, bodies: c.bodies, ...(m?.base !== undefined ? { base: m.base } : {}), ...(c.firstSession !== undefined ? { firstSession: c.firstSession } : {}), ...(m !== undefined && recentAvatar(m) !== undefined ? { recent: recentAvatar(m)! } : {}), played: [...played],
+      avatars, rows: box.rows, unread: box.unread, needs, calls, muted: c.muted, work, contacts: m === undefined ? [] : contactsOf(m), ...(m !== undefined ? { synced: m.at } : {}), ...(offline !== undefined ? { offline } : {}), notes: c.notes, bodies: c.bodies, ...(m?.base !== undefined ? { base: m.base } : {}), ...(c.firstSession !== undefined ? { firstSession: c.firstSession } : {}), ...(m !== undefined && recentAvatar(m) !== undefined ? { recent: recentAvatar(m)! } : {}), played: [...played],
       ...(this.o.zoneMinutes !== undefined ? { zoneMinutes: this.o.zoneMinutes } : {}),
     };
   }
@@ -550,6 +553,17 @@ export class Gb {
     const r = await this.call("POST", "/groups", body);
     if (this.isFail(r)) return r;
     if (r.status !== 201) return this.refused(r);
+    const v = obj(obj(r.body)["venue"]);
+    const synced = await this.sync();
+    if (!synced.ok) return synced;
+    return this.open({ owner: v["owner"], id: v["id"] });
+  }
+
+  /** 发消息 on a name card (S35): the two-person chat of the person's avatar `as` with `with`, opened the first time, the same one after. */
+  async dmOpen(args: Record<string, unknown>): Promise<GbResult> {
+    const r = await this.call("POST", "/dms", { as: args["as"], with: args["with"] });
+    if (this.isFail(r)) return r;
+    if (r.status !== 201 && r.status !== 200) return this.refused(r);
     const v = obj(obj(r.body)["venue"]);
     const synced = await this.sync();
     if (!synced.ok) return synced;
@@ -1081,7 +1095,7 @@ export class Gb {
 }
 
 /** The calls the bridge answers, by name. */
-export const GB_CALLS = ["status", "wait", "sso-wait", "sso-cancel", "sso-add", "setup", "login-start", "login-verify", "logout", "first-avatar", "account", "method-start", "method-verify", "method-remove", "device-revoke", "devices-revoke-others", "open", "say", "group", "link", "rotate", "link-rules", "rename", "mark", "default-name", "lang", "bind", "note", "link-info", "join", "answer", "mute", "wake", "auto", "allows", "rounds", "round-done", "round-failed", "repo", "work-take", "work-done", "work-now", "tool-read", "tool-say", "tool-ask", "tool-remember", "base-add", "base-set", "leave"] as const;
+export const GB_CALLS = ["status", "wait", "sso-wait", "sso-cancel", "sso-add", "setup", "login-start", "login-verify", "logout", "first-avatar", "account", "method-start", "method-verify", "method-remove", "device-revoke", "devices-revoke-others", "open", "say", "group", "dm-open", "link", "rotate", "link-rules", "rename", "mark", "default-name", "lang", "bind", "note", "link-info", "join", "answer", "mute", "wake", "auto", "allows", "rounds", "round-done", "round-failed", "repo", "work-take", "work-done", "work-now", "tool-read", "tool-say", "tool-ask", "tool-remember", "base-add", "base-set", "leave"] as const;
 export type GbCall = (typeof GB_CALLS)[number];
 
 export async function runGb(call: string, args: Record<string, unknown>, o: GbOptions): Promise<GbResult> {
@@ -1106,6 +1120,7 @@ export async function runGb(call: string, args: Record<string, unknown>, o: GbOp
     case "open": return gb.open(args);
     case "say": return gb.say(args);
     case "group": return gb.group(args);
+    case "dm-open": return gb.dmOpen(args);
     case "link": return gb.link(args);
     case "rotate": return gb.link(args, true);
     case "link-rules": return gb.linkRules(args);

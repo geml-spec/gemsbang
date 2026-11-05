@@ -1,7 +1,7 @@
 // gemsbang's pane in Claude Code (spec §7.1–§7.6, transport §4), as rows the
 // hooks module draws, laid out as WeChat lays its own out (direction ①, the
-// person's pick of 2026-11-03): 聊天 · 我 in a row at the foot of the inbox and
-// of 我, pinned there (2026-11-04); the inbox is the chats alone — each with its
+// person's pick of 2026-11-03): 聊天 · 联系人 · 我 in a row at the foot of the
+// three, pinned there (2026-11-04, 2026-11-05); the inbox is the chats alone — each with its
 // picture, the avatar in it at the picture's corner, its name, time, last
 // line and unread; the ones that need the person first, their last line
 // after red words ([有人@我], [等你定], [任务]); a muted one in its place,
@@ -9,7 +9,10 @@
 // lines as bubbles (the person's at the right, `分身` under an agent's), and
 // what needs the person there — a call, a card, a task — one at a time in a
 // bar above the box 「以 <分身> 说…」, which only they see; a group's head
-// opens 群信息 (叫人, 静音, 自动回, the owner's 进群要我同意, every member).
+// opens 群信息 (叫人, 静音, 自动回, the owner's 进群要我同意, every member),
+// a two-person chat's its 聊天信息 (静音, 自动回). 联系人 lists the others the
+// person's avatars know, by letter; each one's name card says which avatar
+// knows them and the groups they share, and 发消息 opens the two-person chat.
 // Then 叫人 (the link for a person with its QR code, the line for an agent, a
 // new link), 我 (each avatar's card, its marking, a new name; the default
 // name, the language, the account, the version), the account (the ways in,
@@ -22,16 +25,21 @@ import { factsLine } from "../../core/avatar/borrow.js";
 import { timeLabel, type Badge, type ChatItem, type InboxRow } from "../../core/avatar/inbox.js";
 import { expiresIn } from "../../core/avatar/needs.js";
 import { LANGS, say, type Lang } from "../../core/avatar/words.js";
+import type { Contact } from "../../core/avatar/contacts.js";
 import type { GbAccount, GbAllow, GbCalled, GbChat, GbLink, GbNeed, GbView, GbWork } from "../../gemsbang/ops.js";
 
 export const GB_PANE_ID = "gemsbang-board";
-export type GbPage = "inbox" | "chat" | "info" | "invite" | "avatars" | "account" | "new-group" | "join";
+export type GbPage = "inbox" | "chat" | "info" | "invite" | "avatars" | "account" | "new-group" | "join" | "contacts" | "contact";
 
 export type GbAction =
   | { op: "page"; page: GbPage }
   /** 取消 (S28): the sign-in through another account let go, or the way in being added in 账号. */
   | { op: "sso-cancel"; add?: true }
   | { op: "open"; owner: string; id: string }
+  /** A name card (S35): someone's avatar `id`, as the person's `as` knows it; `back`, the page its ‹ goes to (联系人, 群信息). */
+  | { op: "contact"; id: string; as: string; back: GbPage }
+  /** 发消息 (S35): the two-person chat of `as` with `with` — the one they have (`owner`, `id`), or a new one. */
+  | { op: "dm"; as: string; with: string; owner?: string; id?: string }
   | { op: "copy"; text: string }
   | { op: "rotate" }
   /** 叫人's 换一个链接: its warning and 换 · 算了 in place of the page (P4c), or folded again. */
@@ -103,8 +111,12 @@ export type GbRow =
    * where to (‹ 收件箱), as WeChat, WhatsApp and Telegram all say more than an arrow.
    */
   | { kind: "head"; key: string; title: string; sub?: string; back?: GbAction; backLabel?: string; actions: GbPress[]; open?: GbAction }
-  /** 群信息's members (P6), every one of them: a row each — a round initial, the name, who is the owner and which is you — and past MEMBER_ROWS the rest's names in one line (`rest`). */
-  | { kind: "people"; key: string; items: { key: string; name: string; color?: string; note?: string }[]; rest?: string }
+  /** 群信息's members (P6), every one of them: a row each — a round initial, the name, who is the owner and which is you — and past MEMBER_ROWS the rest's names in one line (`rest`); another's opens their name card (S18). */
+  | { kind: "people"; key: string; items: { key: string; name: string; color?: string; note?: string; action?: GbAction }[]; rest?: string }
+  /** Someone in 联系人 (S34): their picture with the person's avatar that knows them at its corner, the name, where they met in grey. */
+  | { kind: "contact"; key: string; name: string; as: Badge; sub: string; action: GbAction }
+  /** A name card's head (S35, 聊天信息): the big picture with the avatar at its corner, the name, 你以 <分身> 认识. */
+  | { kind: "profile"; key: string; name: string; as: Badge; lead: string; trail: string }
   /** Rows of a page's settings, a rule between (P6): one to go to (›), a switch (what it does in grey under it), or one in red that leaves. */
   | { kind: "menu"; key: string; items: { key: string; label: string; action: GbAction; go?: true; on?: boolean; danger?: true; hint?: string }[] }
   /**
@@ -130,7 +142,8 @@ export type GbRow =
   /** Something that happened in a chat, centred where the surface takes pictures (GbChat): who came in and when, how many lines came before, a reply that went too far. */
   | { kind: "event"; key: string; text: string; time?: string; tone: Tone }
   /** Rows to go to or pick from, one under another (P1b's 建群 ›, P2c's John ✓): `mark` an arrow at the right, or a tick on the one picked. */
-  | { kind: "list"; key: string; mark: "arrow" | "tick"; items: { key: string; label: string; badge?: Badge; person?: true; on?: boolean; action: GbAction }[] }
+  /** `group`, a group's picture before it (共同的群, S35), and `note` its size in grey before the arrow. */
+  | { kind: "list"; key: string; mark: "arrow" | "tick"; items: { key: string; label: string; badge?: Badge; person?: true; group?: true; note?: string; on?: boolean; action: GbAction }[] }
   /** A line around an avatar's pill (以 John 建 · 换, 用 John 进「前端周会」？): the words before and after it, then a press. */
   | { kind: "pick"; key: string; lead: string; badge: Badge; trail: string; press?: GbPress }
   /** Nothing here yet, centred, with the ways on (P1c: 还没有聊天 with 建群 and 用链接进群; P2d: 群里还只有你 with 叫人). */
@@ -151,7 +164,8 @@ export type GbRow =
   /** A field; the chat's box (`compose`) holds 「以 <分身> 说…」 as its hint and says 发送 beside it, for a surface that takes pictures. */
   | { kind: "input"; key: string; field: GbField; placeholder: string; target?: string; label?: string; submitLabel?: string; value?: string; compose?: { as: Badge; placeholder: string; submitLabel: string } }
   | { kind: "select"; key: string; label: string; options: { value: string; label: string }[]; value: string }
-  | { kind: "buttons"; key: string; items: GbPress[] }
+  /** Presses side by side; `center`, under a name card's centred head (S35). */
+  | { kind: "buttons"; key: string; items: GbPress[]; center?: true }
   | { kind: "toggle"; key: string; label: string; on: boolean; action: GbAction }
   | { kind: "copy"; key: string; text: string; label: string }
   /**
@@ -172,11 +186,11 @@ export type GbRow =
   /** One thing in a list of a page's (GbAccount): its name, a line under it, a press or a tag at its right; `rule`, a line above it. */
   | { kind: "item"; key: string; title: string; sub?: string; press?: GbPress; tag?: string; rule?: true }
   /**
-   * 聊天 · 我 (S11, S22): the row at the foot of the inbox and of 我, as a phone's IM has it, pinned there where the
+   * 聊天 · 联系人 · 我 (S11, S22, S34): the row at the foot of the three, as a phone's IM has it, pinned there where the
    * surface lets the pane keep its own window; each with its picture, the one on in blue, a red count (聊天 the unread,
-   * 我 the 底子 entries that wait for the person's yes). Always the last row of its page.
+   * 我 the 底子 entries that wait for the person's yes; 联系人 none, with no friend to add). Always the last row of its page.
    */
-  | { kind: "tabs"; key: string; items: { key: string; label: string; icon: "chats" | "me"; on: boolean; count?: number; action: GbAction }[] };
+  | { kind: "tabs"; key: string; items: { key: string; label: string; icon: "chats" | "contacts" | "me"; on: boolean; count?: number; action: GbAction }[] };
 /** A card's line: a label, a value (its tone), then presses, or a choice (the language). */
 export interface CardLine { key: string; label: string; value: string; tone?: Tone; presses?: GbPress[]; choice?: { options: { value: string; label: string }[]; value: string } }
 /** A card's kind as its label's colour: a call, a thing to nod to, gone wrong, expired. */
@@ -212,6 +226,8 @@ export interface PaneState {
   sso?: { kind: string; url: string } | null;
   /** 加一种登录方式's other accounts (S32), each with the link that adds it. */
   addLinks?: readonly { kind: string; url: string }[] | null;
+  /** The name card open (S35): whose, as which of the person's avatars knows them, and the page its ‹ goes back to. */
+  contact?: { id: string; as: string; back: GbPage } | null;
 }
 
 /** What the person typed in 邮箱或手机号 (S29), as the service takes it: an email has an @, anything else is a number. */
@@ -421,28 +437,32 @@ function waitOf(v: GbView, r: InboxRow): { flag?: string; waits: boolean } {
   return call.kind === "group" ? { flag: say("panel.flag.call", l), waits: true } : { waits: true };
 }
 
+/** ＋ (P1b, Q4): its two ways under the head, as WeChat's ＋ opens; pressed again, folded. */
+const plusWays = (l: Lang): GbRow => ({ kind: "list", key: "plus-ways", mark: "arrow", items: [
+  { key: "go-new-group", label: say("panel.newGroup", l), action: { op: "page", page: "new-group" } },
+  { key: "go-join", label: say("panel.joinLink", l), action: { op: "page", page: "join" } },
+] });
+/** Nothing here yet (P1c): the two ways ＋ holds, laid out in the middle. */
+const emptyWays = (key: string, words: string, l: Lang): GbRow => ({ kind: "empty", key, text: words, items: [
+  { key: `${key}-new-group`, label: say("panel.newGroup", l), primary: true, action: { op: "page", page: "new-group" } },
+  { key: `${key}-join`, label: say("panel.joinLink", l), action: { op: "page", page: "join" } },
+] });
+
 /** The inbox (spec §7.1, S11): WeChat's — the chats alone, the ones that need the person first. */
 function inboxRows(v: GbView, s: PaneState): GbRow[] {
   const l = v.lang;
-  // The head: the name, ＋ at the right; 我 is in the row at the foot.
+  // The head: the name, ＋ at the right; 联系人 and 我 are in the row at the foot.
   const rows: GbRow[] = [{ kind: "head", key: "head-inbox", title: "GemsBang", ...(v.unread > 0 ? { sub: say("panel.unreadBand", l, { count: v.unread }) } : {}), actions: [
     { key: "plus", label: "＋", primary: true, action: { op: "plus" } },
   ] }];
   if (v.offline !== undefined) rows.push(text("offline", say("panel.offline", l, { detail: v.offline }), "error"));
   for (const n of v.notes) rows.push(text(`note-${n.url}`, say("panel.notFollowed", l, { url: n.url }), "error"));
-  // ＋ (P1b, Q4): its two ways under the head, as WeChat's ＋ opens; pressed again, folded.
-  if (s.plusOpen === true) rows.push({ kind: "list", key: "plus-ways", mark: "arrow", items: [
-    { key: "go-new-group", label: say("panel.newGroup", l), action: { op: "page", page: "new-group" } },
-    { key: "go-join", label: say("panel.joinLink", l), action: { op: "page", page: "join" } },
-  ] });
+  if (s.plusOpen === true) rows.push(plusWays(l));
   // A card with no chat to stand in waits at the head, as a chat's bar would.
   for (const n of v.needs) if (n.state === "open" && n.venue === undefined && !n.muted) rows.push(needRow(n, l, s));
   // No chat yet (P1c): the two ways ＋ holds, laid out in the middle; ＋ stays where it is.
   if (v.rows.length === 0) {
-    rows.push({ kind: "empty", key: "empty", text: say("panel.empty", l), items: [
-      { key: "empty-new-group", label: say("panel.newGroup", l), primary: true, action: { op: "page", page: "new-group" } },
-      { key: "empty-join", label: say("panel.joinLink", l), action: { op: "page", page: "join" } },
-    ] });
+    rows.push(emptyWays("empty", say("panel.empty", l), l));
     return [...rows, tabsRow(v, "inbox")];
   }
   // The chats that need the person first, newest first among them; then the rest, the muted in their place (S17).
@@ -453,13 +473,65 @@ function inboxRows(v: GbView, s: PaneState): GbRow[] {
   return [...rows, tabsRow(v, "inbox")];
 }
 
-/** 聊天 · 我 at the foot (S11, S22): the one on in blue; 聊天 with the unread, 我 with the 底子 entries an agent left waiting (P9b′). */
-function tabsRow(v: GbView, on: "inbox" | "avatars"): GbRow {
+/** 聊天 · 联系人 · 我 at the foot (S11, S22, S34): the one on in blue; 聊天 with the unread, 我 with the 底子 entries an agent left waiting (P9b′). */
+function tabsRow(v: GbView, on: "inbox" | "contacts" | "avatars"): GbRow {
   const l = v.lang;
   return { kind: "tabs", key: "tabs", items: [
     { key: "tab-chats", label: say("panel.tab.chats", l), icon: "chats", on: on === "inbox", ...(v.unread > 0 ? { count: v.unread } : {}), action: { op: "page", page: "inbox" } },
+    { key: "tab-contacts", label: say("panel.tab.contacts", l), icon: "contacts", on: on === "contacts", action: { op: "page", page: "contacts" } },
     { key: "tab-me", label: say("panel.tab.me", l), icon: "me", on: on === "avatars", ...(baseWaiting(v) > 0 ? { count: baseWaiting(v) } : {}), action: { op: "page", page: "avatars" } },
   ] };
+}
+
+/** How many people 联系人 gives a row each, as 群信息 does its members: past them, the rest's names in one line. */
+const CONTACT_ROWS = 150;
+
+/** Where the person's avatar met someone, in grey under their name (S34): the group, 等 N 个群 for more, 私聊过 for a two-person chat. */
+function metAt(c: Contact, l: Lang): string {
+  const first = c.groups[0];
+  const groups = first === undefined ? "" : c.groups.length === 1 ? first.name : say("panel.contacts.groups", l, { group: first.name, count: c.groups.length });
+  return [groups, ...(c.dm !== undefined ? [say("panel.contacts.dm", l)] : [])].filter((x) => x !== "").join(" · ");
+}
+
+/** 联系人 (S34, Q22 (a)): everyone the person's avatars know, a letter over each run of names; nobody yet, the two ways in. */
+function contactsRows(v: GbView, s: PaneState): GbRow[] {
+  const l = v.lang;
+  const rows: GbRow[] = [{ kind: "head", key: "head-contacts", title: say("panel.tab.contacts", l), actions: [{ key: "plus", label: "＋", primary: true, action: { op: "plus" } }] }];
+  if (s.plusOpen === true) rows.push(plusWays(l));
+  const all = v.contacts ?? [];
+  if (all.length === 0) return [...rows, emptyWays("contacts-empty", say("panel.contacts.empty", l), l), tabsRow(v, "contacts")];
+  let letter: string | undefined;
+  for (const c of all.slice(0, CONTACT_ROWS)) {
+    if (c.letter !== letter) rows.push({ kind: "section", key: `letter-${c.letter}`, text: c.letter });
+    letter = c.letter;
+    rows.push({ kind: "contact", key: `contact-${c.id}-${c.as.id}`, name: c.name, as: c.as, sub: metAt(c, l), action: { op: "contact", id: c.id, as: c.as.id, back: "contacts" } });
+  }
+  if (all.length > CONTACT_ROWS) rows.push(text("contacts-rest", say("panel.contacts.rest", l, { count: all.length - CONTACT_ROWS, names: all.slice(CONTACT_ROWS).map((c) => c.name).join(say("call.sep", l)) })));
+  rows.push(text("contacts-foot", say("panel.contacts.foot", l)));
+  return [...rows, tabsRow(v, "contacts")];
+}
+
+/** The groups two avatars share, each to go to (共同的群, S35). */
+const sharedRows = (c: Contact, l: Lang): GbRow[] => c.groups.length === 0 ? [] : [
+  { kind: "section", key: "shared", text: say("panel.contact.shared", l) },
+  { kind: "list", key: "shared-groups", mark: "arrow", items: c.groups.map((g) => ({ key: `shared-${g.owner}-${g.id}`, label: g.name, group: true as const, note: say("page.join.count", l, { count: g.count }), action: { op: "open", owner: g.owner, id: g.id } as GbAction })) },
+];
+const profileRow = (c: Contact, l: Lang): GbRow => ({ kind: "profile", key: "profile", name: c.name, as: c.as, lead: say("panel.contact.knownLead", l), trail: say("panel.contact.knownTrail", l) });
+
+/** A name card (S35, S18): who, which of the person's avatars knows them, the groups they share, 发消息; ‹ back to 联系人 or 群信息. */
+function contactRows(v: GbView, s: PaneState): GbRow[] {
+  const l = v.lang;
+  const k = s.contact;
+  const c = k === undefined || k === null ? undefined : (v.contacts ?? []).find((x) => x.id === k.id && x.as.id === k.as);
+  if (k === undefined || k === null || c === undefined) return contactsRows(v, s);
+  const backLabel = k.back === "info" && s.chat !== null ? s.chat.name : say("panel.tab.contacts", l);
+  return [
+    { kind: "head", key: "head-contact", title: "", back: { op: "page", page: k.back }, backLabel, actions: [] },
+    profileRow(c, l),
+    ...sharedRows(c, l),
+    { kind: "buttons", key: "contact-go", center: true, items: [{ key: "contact-message", label: say("panel.contact.message", l), primary: true, action: { op: "dm", as: c.as.id, with: c.id, ...(c.dm !== undefined ? { owner: c.dm.owner, id: c.dm.id } : {}) } }] },
+    text("contact-note", say("panel.contact.note", l, { me: c.as.name, them: c.name })),
+  ];
 }
 
 /** A time as the chat's lines carry it, HH:MM in the person's zone. */
@@ -502,16 +574,9 @@ function chatRows(v: GbView, s: PaneState, c: GbChat): GbRow[] {
   const l = v.lang;
   const me = c.as?.name ?? "";
   const key = `${c.owner}/${c.id}`;
-  const muted = v.muted.venues.includes(key);
-  const auto = c.as !== undefined && (v.avatars.find((a) => a.id === c.as?.id)?.autos ?? []).some((x) => x.venue === key);
-  // A group's head opens 群信息, where 叫人, 静音 and 自动回 are (P5, Q17); a two-person chat has no 群信息 yet, so 静音 and 自动回 stay on its head.
+  // The head opens 群信息 (P5, Q17), or a two-person chat's 聊天信息 (S36, Q23 (a)): 静音 and 自动回 are there, not on the head.
   const sub = `${say("page.join.count", l, { count: c.count })} · ${say("page.group.as", l, { name: me })}`;
-  const rows: GbRow[] = [c.kind === "group"
-    ? { kind: "head", key: "head-chat", title: c.name, sub, back: { op: "page", page: "inbox" }, actions: [], open: { op: "page", page: "info" } }
-    : { kind: "head", key: "head-chat", title: c.name, sub, back: { op: "page", page: "inbox" }, actions: [
-        { key: "mute-venue", label: say(muted ? "panel.unmute" : "panel.mute", l), action: { op: "mute", venue: key, on: !muted }, quiet: true },
-        ...(c.as !== undefined ? [{ key: "auto-venue", label: say(auto ? "panel.dmAutoOff" : "panel.dmAuto", l), action: { op: "auto", avatar: c.as.id, venue: key, on: !auto } as GbAction, quiet: true as const }] : []),
-      ] }];
+  const rows: GbRow[] = [{ kind: "head", key: "head-chat", title: c.name, ...(c.kind === "group" ? { sub } : {}), back: { op: "page", page: "inbox" }, actions: [], open: { op: "page", page: "info" } }];
   const zone = s.zoneMinutes ?? c.zoneMinutes;
   if (c.earlier > 0) rows.push({ kind: "event", key: "earlier", text: say("panel.earlier", l, { count: c.earlier }), tone: "dim" });
   // A group made a moment ago (P2d): only the person, and 叫人 first; a quiet chat with others, that nobody spoke.
@@ -547,6 +612,7 @@ const MEMBER_ROWS = 200;
  * person picked ② on 2026-11-03, as WhatsApp and Telegram lay it out: what is pressed often above, the list below it.
  */
 function infoRows(v: GbView, s: PaneState, c: GbChat): GbRow[] {
+  if (c.kind === "dm") return dmInfoRows(v, c);
   const l = v.lang;
   const key = `${c.owner}/${c.id}`;
   const muted = v.muted.venues.includes(key);
@@ -573,7 +639,8 @@ function infoRows(v: GbView, s: PaneState, c: GbChat): GbRow[] {
     { kind: "section", key: "members", text: say("panel.info.members", l, { count: members.length }) },
     {
       kind: "people", key: "people",
-      items: shown.map((m) => ({ key: `member-${m.id}`, name: m.name, ...(m.id === c.as?.id ? { color: c.as.color } : {}), ...(note(m.id) !== "" ? { note: note(m.id) } : {}) })),
+      // Another's row opens their name card (S18); the person's own avatars have none.
+      items: shown.map((m) => ({ key: `member-${m.id}`, name: m.name, ...(m.id === c.as?.id ? { color: c.as.color } : {}), ...(note(m.id) !== "" ? { note: note(m.id) } : {}), ...(c.as !== undefined && !v.avatars.some((a) => a.id === m.id) ? { action: { op: "contact", id: m.id, as: c.as.id, back: "info" } as GbAction } : {}) })),
       ...(ordered.length > shown.length ? { rest: ordered.slice(MEMBER_ROWS).map((m) => m.name).join(say("call.sep", l)) } : {}),
     },
     // 退出群 at the foot (P6 ②); asked, its confirmation in its place (P7a) — the last one told the group goes with them.
@@ -583,6 +650,28 @@ function infoRows(v: GbView, s: PaneState, c: GbChat): GbRow[] {
           { key: "leave-no", label: say("panel.leaveNo", l), action: { op: "leave-ask", open: false } },
         ] } as GbRow]
       : [{ kind: "menu", key: "info-leave", items: [{ key: "leave-open", label: say("panel.leave", l), danger: true, action: { op: "leave-ask", open: true } }] } as GbRow]),
+  ];
+}
+
+/** A two-person chat's 聊天信息 (S36, Q23 (a)): the other's name card on top, 静音 and 自动回, the groups they share; no link, nobody to add, no leaving. */
+function dmInfoRows(v: GbView, c: GbChat): GbRow[] {
+  const l = v.lang;
+  const key = `${c.owner}/${c.id}`;
+  const muted = v.muted.venues.includes(key);
+  const auto = c.as !== undefined && (v.avatars.find((a) => a.id === c.as?.id)?.autos ?? []).some((x) => x.venue === key);
+  const other = (c.members ?? []).find((m) => m.id !== c.as?.id);
+  const known = other === undefined ? undefined : (v.contacts ?? []).find((x) => x.id === other.id && x.as.id === c.as?.id);
+  return [
+    { kind: "head", key: "head-info", title: say("panel.dmInfo.title", l), back: { op: "page", page: "chat" }, backLabel: c.name, actions: [] },
+    ...(known !== undefined ? [profileRow(known, l)] : []),
+    {
+      kind: "menu", key: "info-menu", items: [
+        { key: "info-mute", label: say("panel.mute", l), on: muted, action: { op: "mute", venue: key, on: !muted } },
+        ...(c.as !== undefined ? [{ key: "info-auto", label: say("panel.info.auto", l), hint: say("panel.dmInfo.autoHint", l, { name: c.name }), on: auto, action: { op: "auto", avatar: c.as.id, venue: key, on: !auto } as GbAction }] : []),
+      ],
+    },
+    ...(known !== undefined ? sharedRows(known, l) : []),
+    text("dm-note", say("panel.dmInfo.note", l)),
   ];
 }
 
@@ -851,6 +940,8 @@ export function paneRows(v: GbView, s: PaneState): GbRow[] {
   if (s.page === "account") return [...rows, ...accountRows(v, s)];
   if (s.page === "new-group") return [...rows, ...newGroupRows(v, s)];
   if (s.page === "join") return [...rows, ...joinRows(v, s)];
+  if (s.page === "contacts") return [...rows, ...contactsRows(v, s)];
+  if (s.page === "contact") return [...rows, ...contactRows(v, s)];
   return [...rows, ...inboxRows(v, s)];
 }
 

@@ -196,7 +196,7 @@ test('nobody signed in: the line says so; the pane asks for an email, then its c
   await pane.input({ key: 'first-name', text: 'John' })
   expect(calls(w, 'first-avatar').at(-1)?.args).toEqual({ name: 'John', session: SESSION })
   await pane.unmount()
-  expect(await paneText($)).toContain('[＋] 还没有聊天 [建群] [用链接进群] 聊天 我')
+  expect(await paneText($)).toContain('[＋] 还没有聊天 [建群] [用链接进群] 聊天 联系人 我')
   expect(await bandText($), 'signed in, no chat yet: the line with the name alone').toBe('@ GemsBang [打开]')
 })
 
@@ -240,7 +240,7 @@ test('through another account (S28, sketch ①②): the pane opened with nobody 
   w.answers['sso-wait'] = () => { const next = steps.shift(); if (next?.['view'] !== undefined) w.view = next['view'] as Record<string, unknown>; return next ?? { ok: true, sso: { state: 'none' } } }
   await clock.advance(1_000)
   await clock.advance(1_000)
-  expect(await paneText($)).toContain('聊天 我')
+  expect(await paneText($)).toContain('聊天 联系人 我')
 })
 
 test('账号与登录 (architecture §3.1, P10): from 我 (/gemsbang settings goes there), the account read through the client; a device signed out; 加一种登录方式 opens its field, an email added with its code; 退出这台设备的登录 asked first, then signed out to the sign-in', async ($, on) => {
@@ -324,7 +324,7 @@ test('the box (architecture §5.2, §6.2): no poll — the module waits on the b
   expect(calls(w, 'wait').length > stopped, 'signed in: waiting again').toBe(true)
 })
 
-test('the total inbox (spec §7.1, S11, direction ①): WeChat\'s — the name with the unread and ＋, 聊天 · 我 at the foot; every chat with its avatar\'s initial, its time, its last line and its unread, no filters; a chat opens, its lines show `身份` where an agent said it, a stamp where the talk picks up, and the box says as the avatar there', async ($, on) => {
+test('the total inbox (spec §7.1, S11, direction ①): WeChat\'s — the name with the unread and ＋, 聊天 · 联系人 · 我 at the foot; every chat with its avatar\'s initial, its time, its last line and its unread, no filters; a chat opens, its lines show `身份` where an agent said it, a stamp where the talk picks up, and the box says as the avatar there', async ($, on) => {
   const w = world(on)
   w.answers['open'] = () => ({ ok: true, chat: CHAT, view: w.view })
   w.answers['say'] = (args) => ({ ok: true, chat: { ...CHAT, items: [...CHAT.items, { kind: 'message', id: 'p-1', avatar: JOHN.id, who: 'John', text: args['text'], at: '2026-11-01T06:09:00Z', mark: false, mine: true }] }, view: w.view })
@@ -332,7 +332,7 @@ test('the total inbox (spec §7.1, S11, direction ①): WeChat\'s — the name w
   await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
   const text = await paneText($)
   expect(text).toContain('GemsBang 2 条未读 [＋] L 三年二班家长 19:31 [你的身份：我看一下，晚点回。]')
-  expect(text, '聊天 · 我 at the foot, the unread on 聊天').toMatch(/ 聊天 2 我$/)
+  expect(text, '聊天 · 联系人 · 我 at the foot, the unread on 聊天').toMatch(/ 聊天 2 联系人 我$/)
   expect(text).toContain('J 设置页改版 14:05 [李四：@John Safari 里导出按钮没反应] 2')
   expect(text, 'no filters, no 对话 heading').not.toContain('全部')
   const pane = await mountPane($)
@@ -358,7 +358,7 @@ const all = (el: DrawnNode | string, type: string, out: DrawnNode[] = []): Drawn
 }
 const mountDesktop = ($: Engine) => $.ui.mount({ plugin: 'gemsbang', surface: 'desktop', component: 'Pane', requestId: 'gemsbang-board', props: PANE })
 
-test('the inbox where the surface takes pictures (S11, S13–S15, direction ①): WeChat\'s rows — each chat\'s picture with the avatar at its corner and the unread, the red words while it needs the person, first — and no 需要你 card; 聊天 · 我 at the foot, blank buttons over their pictures; a chat opens from its name; there its lines are bubbles, the card the bar above the box, 自己写 opening its field', async ($, on) => {
+test('the inbox where the surface takes pictures (S11, S13–S15, direction ①): WeChat\'s rows — each chat\'s picture with the avatar at its corner and the unread, the red words while it needs the person, first — and no 需要你 card; 聊天 · 联系人 · 我 at the foot, blank buttons over their pictures; a chat opens from its name; there its lines are bubbles, the card the bar above the box, 自己写 opening its field', async ($, on) => {
   const w = world(on)
   w.view = VIEW({ needs: [NEED('need-1', { draft: '周五我可以去，几点集合？' })] })
   w.answers['open'] = () => ({ ok: true, chat: CHAT2, view: w.view })
@@ -371,7 +371,7 @@ test('the inbox where the surface takes pictures (S11, S13–S15, direction ①)
   expect(alts.filter((a) => a.includes(' · '))).toEqual(['三年二班家长 · Lily 爸爸', '设置页改版 · John'])
   expect(alts, 'the red words before its last line').toContain('[等你定]')
   expect(alts, 'no avatar pills, no colour bars').not.toContain('John')
-  expect(all(drawn, 'Button').map((b) => String(b.props?.['label'])).filter((l) => /^\u3000+$/.test(l)).length, '聊天 and 我 blank buttons over their pictures').toBe(2)
+  expect(all(drawn, 'Button').map((b) => String(b.props?.['label'])).filter((l) => /^\u3000+$/.test(l)).length, '聊天, 联系人 and 我 blank buttons over their pictures').toBe(3)
   expect(alts, 'the tabs, 聊天 with the unread').toContain('聊天 2')
   expect(all(drawn, 'Button').some((b) => String(b.key ?? b.props?.['key']).startsWith('need-')), 'no card in the inbox').toBe(false)
   const chats = all(drawn, 'Button').map((b) => String(b.key ?? b.props?.['key'] ?? '')).filter((k) => k.startsWith('chat-') && k.endsWith('-go'))
@@ -390,7 +390,7 @@ test('the inbox where the surface takes pictures (S11, S13–S15, direction ①)
   await pane.unmount()
 })
 
-test('聊天 · 我 pinned at the foot (S11, S22): docked, the inbox and 我 are drawn one window tall — the head kept at the top, the row at the foot, the list between cut to what fits — on both surfaces; a tab goes to its page; a chat, or the pane above the prompt, flows as before', async ($, on) => {
+test('聊天 · 联系人 · 我 pinned at the foot (S11, S22, S34): docked, the inbox and 我 are drawn one window tall — the head kept at the top, the row at the foot, the list between cut to what fits — on both surfaces; a tab goes to its page; a chat, or the pane above the prompt, flows as before', async ($, on) => {
   const w = world(on)
   w.answers['open'] = () => ({ ok: true, chat: CHAT, view: w.view })
   await start($, on)
@@ -406,7 +406,7 @@ test('聊天 · 我 pinned at the foot (S11, S22): docked, the inbox and 我 are
   }
   const go = async (key: string) => { const pane = await mountPane($); await pane.press({ key }); await pane.unmount() }
   await go('tab-me')
-  expect(await paneText($), '我, its tabs at the foot').toMatch(/^@ 0\.5\.3 我 J John .* 聊天 2 我$/)
+  expect(await paneText($), '我, its tabs at the foot').toMatch(/^@ 0\.5\.3 我 J John .* 聊天 2 联系人 我$/)
   await go('tab-chats')
   await go(`chat-${JOHN.id}-g-000000000a-go`)
   const chat = await mountPane($)
@@ -416,6 +416,48 @@ test('聊天 · 我 pinned at the foot (S11, S22): docked, the inbox and 我 are
   const inline = await $.ui.mount({ plugin: 'gemsbang', surface: 'terminal', component: 'Pane', requestId: 'gemsbang-board', props: { ...PANE, placement: 'inline' as const } })
   expect(((await inline.drawn()) as unknown as DrawnNode).props?.['height'], 'above the prompt the frame fits the tree: not pinned').toBeUndefined()
   await inline.unmount()
+})
+
+const LISI = { id: 'a-00000000b1', name: '李四', as: JOHN, letter: 'L', groups: [{ owner: JOHN.id, id: 'g-000000000a', name: '设置页改版', count: 4 }] }
+const DM = { owner: JOHN.id, id: 'd-0000000001', kind: 'dm', name: '李四', count: 2, as: JOHN, members: [{ id: JOHN.id, name: 'John' }, { id: LISI.id, name: '李四' }], earlier: 0, isOwner: true, zoneMinutes: 480, items: [] }
+
+test('联系人 and 发消息 (S34, S35, S18, S36): the tab opens 联系人 — on the desktop each one\'s picture with the avatar at its corner — a name opens the card; 发消息 opens the two-person chat through the client, the first time with dm-open, after it with open; a member in 群信息 opens the same card; the two-person chat\'s head opens 聊天信息, 静音 and 自动回 there', async ($, on) => {
+  const w = world(on)
+  w.view = VIEW({ contacts: [LISI] })
+  w.answers['dm-open'] = () => ({ ok: true, chat: DM, view: w.view })
+  w.answers['open'] = (args) => ({ ok: true, chat: args['id'] === DM.id ? DM : { ...CHAT, members: [{ id: JOHN.id, name: 'John' }, { id: LISI.id, name: '李四' }] }, view: w.view })
+  await start($, on)
+  await $.command.run({ command: 'gemsbang', args: '联系人', origin: COMPOSER, presentation: PRESENTATION })
+  expect(await paneText($), '/gemsbang 联系人 opens it; the tabs at the foot, 联系人 on').toMatch(/联系人 \[＋\] L J 李四 设置页改版 .* 聊天 2 联系人 我$/)
+  const desk = await mountDesktop($)
+  const alts = all((await desk.drawn()) as unknown as DrawnNode, 'Svg').map((x) => String(x.props?.['alt']))
+  expect(alts[0], 'the wordmark on top, as the inbox').toBe('GemsBang')
+  expect(alts, 'their picture with John at its corner').toContain('李四 · John')
+  await desk.unmount()
+  const go = async (key: string) => { const pane = await mountPane($); await pane.press({ key }); await pane.unmount() }
+  await go(`contact-${LISI.id}-${JOHN.id}-go`)
+  expect(await paneText($)).toContain('[‹] 李四 你以 John 认识 共同的群 设置页改版 4 人 › [发消息]')
+  const card = await mountDesktop($)
+  expect(all((await card.drawn()) as unknown as DrawnNode, 'Button').map((b) => String(b.props?.['label'])), 'on the desktop ‹ says where it goes').toContain('‹ 联系人')
+  await card.unmount()
+  await go('contact-message')
+  expect(calls(w, 'dm-open').at(-1)?.args, 'the first time: a new chat').toEqual({ as: JOHN.id, with: LISI.id })
+  const chat = await paneText($)
+  expect(chat, 'the two-person chat: its name and ›, nothing else on its head').toContain('[‹] 李四 ›')
+  await go('head-chat-open')
+  expect(await paneText($)).toContain('聊天信息')
+  w.view = VIEW({ contacts: [{ ...LISI, dm: { owner: DM.owner, id: DM.id } }] })
+  await go('head-info-back')
+  await go('head-chat-back')
+  await go(`chat-${JOHN.id}-g-000000000a-go`)
+  await go('head-chat-open')
+  await go(`member-${LISI.id}`)
+  const fromInfo = await mountDesktop($)
+  expect(all((await fromInfo.drawn()) as unknown as DrawnNode, 'Button').map((b) => String(b.props?.['label'])), 'from 群信息: back to the group').toContain('‹ 设置页改版')
+  await fromInfo.unmount()
+  await go('contact-message')
+  expect(calls(w, 'open').at(-1)?.args, 'after: the chat they have').toEqual({ owner: DM.owner, id: DM.id })
+  expect(calls(w, 'dm-open').length).toBe(1)
 })
 
 test('群信息 and 叫人 (P4, P6, Q17): the head opens 群信息 — the members, 叫人 ›, 静音, 自动回 and the owner\'s 进群要我同意; 叫人 shows the link and the line, each copied on a press in the terminal; ‹ goes back to 群信息; 换一个链接 asks first, 换 swaps it', async ($, on) => {
@@ -469,7 +511,7 @@ test('群信息 of a big group on the desktop (P6): every member listed — five
   const count = (el: DrawnNode | string): number => (typeof el === 'string' ? 0 : 1 + (el.children ?? []).reduce((n, c) => n + count(c), 0))
   expect(count(drawn), 'under the desktop\'s some 1,100 elements, with room').toBeLessThan(1100)
   const texts = all(drawn, 'Text').flatMap((t) => (t.children ?? []).filter((c): c is string => typeof c === 'string'))
-  expect(texts).toContain('家长198')
+  expect(all(drawn, 'Button').map((b) => String(b.props?.['label'])), 'each name its press, to their name card (S18)').toContain('家长198')
   expect(texts.some((t) => t.startsWith('家长199、家长200、') && t.endsWith('家长498')), 'the rest named, the last of them too').toBe(true)
   expect(texts.join(' '), 'nothing cut').not.toMatch(/… \d/)
   await pane.press({ key: 'info-approve-switch' })
@@ -639,7 +681,7 @@ test('底子 (S27, P8a, P9b′): an agent\'s entry waits — 我 at the foot cou
   w.answers['tool-remember'] = () => ({ ok: true, text: '已经记成待本人点头：「家人：Lily 对花生过敏」。' })
   const clock = await start($, on)
   await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
-  expect(await paneText($), '我 at the foot counts it').toMatch(/ 聊天 2 我 1$/)
+  expect(await paneText($), '我 at the foot counts it').toMatch(/ 聊天 2 联系人 我 1$/)
   await $.command.run({ command: 'gemsbang', args: 'avatars', origin: COMPOSER, presentation: PRESENTATION })
   await clock.settle()
   expect(await paneText($)).toContain('底子 [改] Lily 爸爸想记（王老师说的） 家人 · Lily 对花生过敏 · 给 Lily 爸爸 [记下] [不记]')

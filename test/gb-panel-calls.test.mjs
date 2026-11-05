@@ -50,15 +50,15 @@ test("被叫到 in its chat, on the band and in 我 (architecture §6.3, S14): t
   assert.deepEqual(lines[0].presses[0].action, { op: "auto", avatar: JOHN.id, venue: "a-0000000001/g-000000000a", on: false });
 });
 
-test("自动回 (S14, direction ①): a switch in 群信息 beside 静音, what it does said under it; on a two-person chat's head, beside 静音", () => {
+test("自动回 (S14, direction ①): a switch in 群信息 beside 静音, what it does said under it; in a two-person chat's 聊天信息, beside 静音", () => {
   const call = CALL("前端周会", JOHN, "2026-11-02T11:40:00Z");
   const venue = `${call.owner}/${call.id}`;
   const menu = (avatars) => paneRows(VIEW({ avatars }), STATE({ page: "info", chat: CHAT(call) })).find((r) => r.kind === "menu").items.find((i) => i.key === "info-auto");
   assert.deepEqual(menu([JOHN, LILY]), { key: "info-auto", label: "自动回", hint: "有人叫到 John，交给 agent 回，不再问你；五种事照样问你", on: false, action: { op: "auto", avatar: JOHN.id, venue, on: true } });
   assert.deepEqual([menu([{ ...JOHN, autos: [{ venue, name: "前端周会" }] }, LILY]).on, menu([{ ...JOHN, autos: [{ venue, name: "前端周会" }] }, LILY]).action.on], [true, false]);
   const dm = CALL("王老师", LILY, "2026-11-02T11:00:00Z", { kind: "dm" });
-  const head = paneRows(VIEW(), STATE({ page: "chat", chat: CHAT(dm) }))[0];
-  assert.deepEqual(head.actions.map((a) => [a.label, a.action]), [["静音", { op: "mute", venue: `${dm.owner}/${dm.id}`, on: true }], ["自动回", { op: "auto", avatar: LILY.id, venue: `${dm.owner}/${dm.id}`, on: true }]]);
+  const info = paneRows(VIEW(), STATE({ page: "info", chat: CHAT(dm) })).find((r) => r.kind === "menu");
+  assert.deepEqual(info.items.map((a) => [a.label, a.action]), [["静音", { op: "mute", venue: `${dm.owner}/${dm.id}`, on: true }], ["自动回", { op: "auto", avatar: LILY.id, venue: `${dm.owner}/${dm.id}`, on: true }]], "moved from its head into its 聊天信息 (S36, Q23 (a))");
 });
 
 test("an avatar no open session plays (B1 of the 2026-11-03 review): a chat set to answer on its own asks the person as any call does, and says why; a task's bar says so too", () => {

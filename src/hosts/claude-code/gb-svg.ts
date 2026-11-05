@@ -110,16 +110,40 @@ export function chatRowPicSvg(kind: "group" | "dm", name: string, as: PillOf, un
   return { source: svg(w, h, `<g transform="translate(${x} ${y})">${chatPicBody(kind, name, size)}</g>${corner}${count}`), width: w, height: h, alt: `${name} · ${as.name}` };
 }
 
+/**
+ * Someone the person knows (联系人, S34; the name card, S35): their round initial, and at its lower right which of the
+ * person's avatars knows them, in a white ring as a chat's row has it. `size` the picture's, 36 in a row, 64 on a card.
+ */
+export function contactPicSvg(name: string, as: PillOf, size = 36): Pic {
+  const r = Math.round(size * 0.22), pad = 2;
+  const cx = pad + size - r * 0.4, cy = pad + size - r * 0.4, w = cx + r + 1.5, h = cy + r + 1.5;
+  const corner = `<circle cx="${n2(cx)}" cy="${n2(cy)}" r="${r}" fill="${as.color}" stroke="#fff" stroke-width="1.5"/>${text(cx, cy, r * 1.15, "#fff", as.initial, { bold: true, anchor: "middle" })}`;
+  return { source: svg(w, h, `<g transform="translate(${pad} ${pad})">${chatPicBody("dm", name, size)}</g>${corner}`), width: Math.ceil(w), height: Math.ceil(h), alt: `${name} · ${as.name}` };
+}
+
+/** A name set large and bold (a name card's, S35): the engine's Text takes no size on every surface yet, so a picture. */
+export function nameSvg(name: string, size = 17): Pic {
+  const h = Math.ceil(size * 1.5), w = textWidth(name, size, true) + 2;
+  return { source: svg(w, h, text(1, h / 2, size, "#1f1e1d", name, { bold: true })), width: Math.ceil(w), height: h, alt: name };
+}
+
+/** A group's round picture, as a chat's row draws it, without the marks (共同的群 on a name card, S35). */
+export function groupPicSvg(name: string, size = 26): Pic {
+  return { source: svg(size, size, chatPicBody("group", name, size)), width: size, height: size, alt: name };
+}
+
 /** The red words before a chat's last line while it needs the person (S11: [有人@我], [等你定], [任务]). */
 export function flagSvg(label: string): Pic {
   const size = 12, h = 18, w = textWidth(label, size) + 2;
   return { source: svg(w, h, text(1, h / 2, size, "#e5484d", label)), width: Math.ceil(w), height: h, alt: label };
 }
 
-/** A tab of 聊天 · 我 at the pane's foot (S11): its picture (a speech bubble, a person) over its name, blue while on and grey else, a red count at the picture's upper right. */
-export function tabSvg(icon: "chats" | "me", label: string, on: boolean, count?: number): Pic {
+/** A tab of 聊天 · 联系人 · 我 at the pane's foot (S11, S34): its picture (a speech bubble, a contact card, a person) over its name, blue while on and grey else, a red count at the picture's upper right. */
+export function tabSvg(icon: "chats" | "contacts" | "me", label: string, on: boolean, count?: number): Pic {
   const w = Math.max(56, textWidth(label, 11) + 24), h = 40, c = on ? "#2a6fdb" : "#8a8986", x = w / 2 - 11;
-  const glyph = icon === "chats" ? '<path d="M4 5h16v11H9l-5 4z"/>' : '<circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20c.8-4 4-6 7.5-6s6.7 2 7.5 6"/>';
+  const glyph = icon === "chats" ? '<path d="M4 5h16v11H9l-5 4z"/>'
+    : icon === "contacts" ? '<rect x="4" y="3.5" width="16" height="17" rx="2.5"/><circle cx="12" cy="10" r="2.8"/><path d="M7.5 17c.7-2.2 2.4-3.3 4.5-3.3s3.8 1.1 4.5 3.3" stroke-linecap="round"/>'
+    : '<circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20c.8-4 4-6 7.5-6s6.7 2 7.5 6"/>';
   let badge = "";
   if (count !== undefined && count > 0) {
     const n = count > 99 ? "99+" : String(count), bh = 14, bw = Math.max(bh, textWidth(n, 9.5, true) + 8), bx = w / 2 + 4;

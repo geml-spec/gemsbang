@@ -73,6 +73,23 @@ const ACCOUNT = { methods: [{ id: 'email-1', kind: 'email', shown: 'test@example
 // P4's link, as the client hands it.
 const LINK = { code: 'k7pqm3', url: `${RELAY}/i/k7pqm3`, line: `读 ${RELAY}/i/k7pqm3.md ，照着做：用我的身份进「设置页改版」。`, days: 7, forward: true, approve: true, isOwner: true, group: '设置页改版' }
 
+// GbContacts: whom John and Lily 爸爸 know, a name card, the two-person chat's 聊天信息 (S34–S36).
+const TEACHER = 'a-00000000t1'
+const KNOWN = (id: string, name: string, a: typeof JOHN, letter: string, groups: { name: string; count: number }[], dm?: string) => ({ id, name, as: badge(a), letter, groups: groups.map((g, i) => ({ owner: a.id, id: `g-0000000${i}${letter}`, ...g })), ...(dm !== undefined ? { dm: { owner: a.id, id: dm } } : {}) })
+const CONTACTS_VIEW = { ...INBOX, contacts: [
+  KNOWN(LI_ID, LI, JOHN, 'L', [{ name: '设置页改版', count: 4 }, { name: '前端周会', count: 6 }]),
+  KNOWN('a-00000000m1', 'Mia', LILY, 'M', [{ name: '三年二班家长', count: 12 }]),
+  KNOWN(TEACHER, '王老师', LILY, 'W', [{ name: '三年二班家长', count: 12 }], 'd-00000000wt'),
+  KNOWN('a-00000000b3', '王五', JOHN, 'W', [{ name: '前端周会', count: 6 }]),
+  KNOWN(ZHANG_ID, ZHANG, JOHN, 'Z', [{ name: '设置页改版', count: 4 }], 'd-00000000zs'),
+  KNOWN('a-00000000z2', '周', JOHN, 'Z', [{ name: '读书会', count: 9 }]),
+] }
+const DM_CHAT = { owner: LILY.id, id: 'd-00000000wt', kind: 'dm', name: '王老师', count: 2, as: badge(LILY), members: [{ id: LILY.id, name: 'Lily 爸爸' }, { id: TEACHER, name: '王老师' }], earlier: 0, isOwner: true, items: [
+  { kind: 'message', id: 'd-1', avatar: TEACHER, who: '王老师', text: 'Lily 爸爸，周五春游缺一个志愿者，您方便吗？', at: at(16, 12), mark: false, mine: false },
+  { kind: 'message', id: 'd-2', avatar: LILY.id, who: 'Lily 爸爸', text: '好的，我周五上午有空', at: at(16, 14), mark: false, mine: true },
+  { kind: 'message', id: 'd-3', avatar: TEACHER, who: '王老师', text: '太好了，8 点在校门口集合。', at: at(16, 15), mark: false, mine: false },
+] }
+
 type Req = { v: number; call: string; args: Record<string, unknown> }
 function world(on: On, view: Record<string, unknown>) {
   const ran = (stdout: string, exitCode = 0) => ({ exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false })
@@ -81,7 +98,7 @@ function world(on: On, view: Record<string, unknown>) {
     if (e.argv[0] === '/bin/sh') return { value: ran('', 1) }
     if (e.argv[2] === 'hook') {
       const req = JSON.parse(e.init?.stdin ?? '{}') as Req
-      const gb = req.call === 'wait' ? { ok: true } : req.call === 'open' ? { ok: true, chat: req.args['id'] === CLASS.id ? CLASS_CHAT : CHAT, view } : req.call === 'link' ? { ok: true, link: LINK, view } : req.call === 'account' ? { ok: true, account: ACCOUNT } : { ok: true, view }
+      const gb = req.call === 'wait' ? { ok: true } : req.call === 'open' ? { ok: true, chat: req.args['id'] === CLASS.id ? CLASS_CHAT : req.args['id'] === DM_CHAT.id ? DM_CHAT : CHAT, view } : req.call === 'link' ? { ok: true, link: LINK, view } : req.call === 'account' ? { ok: true, account: ACCOUNT } : { ok: true, view }
       return { value: ran(`${JSON.stringify({ v: 1, ok: true, gb })}\n`) }
     }
     return { deny: `unexpected ${e.argv.join(' ')}` }
@@ -135,4 +152,8 @@ test('rotate', async ($, on) => scene('rotate', $, on, CHAT_VIEW, async (_, pres
 test('leave-pick', async ($, on) => scene('leave-pick', $, on, CHAT_VIEW, async (_, press) => { await press(`chat-${JOHN.id}-g-00000000st-go`); await press('head-chat-open'); await press('leave-open'); await press(`heir-${LI_ID}`) }))
 test('call-failed', async ($, on) => scene('call-failed', $, on, { ...INBOX, calls: (INBOX.calls as Record<string, unknown>[]).map((c) => ({ ...c, failed: 'error' })) }))
 test('new-group', async ($, on) => scene('new-group', $, on, { ...INBOX, rows: [], calls: [], needs: [] }, async (pane) => { await pane.press({ key: 'empty-new-group' }) }))
+test('contacts', async ($, on) => scene('contacts', $, on, CONTACTS_VIEW, async (pane) => { await pane.press({ key: 'tab-contacts' }) }))
+test('contact', async ($, on) => scene('contact', $, on, CONTACTS_VIEW, async (_, press) => { await press('tab-contacts'); await press(`contact-${TEACHER}-${LILY.id}-go`) }))
+test('dm', async ($, on) => scene('dm', $, on, CONTACTS_VIEW, async (_, press) => { await press('tab-contacts'); await press(`contact-${TEACHER}-${LILY.id}-go`); await press('contact-message') }))
+test('dm-info', async ($, on) => scene('dm-info', $, on, CONTACTS_VIEW, async (_, press) => { await press('tab-contacts'); await press(`contact-${TEACHER}-${LILY.id}-go`); await press('contact-message'); await press('head-chat-open') }))
 if (LIVE !== null) test('live', async ($, on) => scene('live', $, on, LIVE))
