@@ -35,14 +35,14 @@ function world() {
   return { r, john, li, me, liA, g, other, venue: `${g.owner}/${g.id}` };
 }
 
-test("自动回 (architecture §6.3): the person sets a chat of their avatar to answer on its own, and takes it back; it is kept with the avatar, so every computer of theirs reads it; only the person, only a chat the avatar is in", () => {
+test("自动回复 (architecture §6.3): the person sets a chat of their avatar to answer on its own, and takes it back; it is kept with the avatar, so every computer of theirs reads it; only the person, only a chat the avatar is in", () => {
   const w = world();
   assert.deepEqual(w.r.autoOf(w.me.id), [], "off by default");
   assert.deepEqual(ok(w.r.setAuto(w.john.by, w.me.id, { venue: w.venue, on: true })).auto, [w.venue]);
   assert.deepEqual(ok(w.r.read(w.john.by, w.me.id, "auto.geml")).blocks.map((b) => [b.value.venue, b.value.on]), [[w.venue, true]], "the person's client reads it");
-  assert.deepEqual(ok(w.r.setAuto(w.john.by, w.me.id, { venue: w.venue, on: false })).auto, [], "撤");
+  assert.deepEqual(ok(w.r.setAuto(w.john.by, w.me.id, { venue: w.venue, on: false })).auto, [], "撤销");
   bad(w.r.setAuto(w.li.by, w.me.id, { venue: w.venue, on: true }), 403);
-  bad(w.r.setAuto(w.john.by, w.me.id, { venue: `${w.other.owner}/${w.other.id}`, on: true }), 403, "不在这个群里");
+  bad(w.r.setAuto(w.john.by, w.me.id, { venue: `${w.other.owner}/${w.other.id}`, on: true }), 403, "不在该群聊中");
   bad(w.r.setAuto(w.john.by, w.me.id, { venue: w.venue }), 400, "要写明是哪个聊天（venue：<owner>/<id>）、开还是关（on：true 或 false）");
   const r = routeAvatars({ method: "POST", path: `/avatars/${w.me.id}/auto`, query: {}, base: "https://im.example", token: w.john.token, body: { venue: w.venue, on: true } }, w.r);
   assert.deepEqual([r.status, JSON.parse(r.body).auto], [200, [w.venue]], "over HTTP");

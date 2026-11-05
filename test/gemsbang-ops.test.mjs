@@ -40,7 +40,7 @@ test("the person in the pane (spec §6.2, §7.1, §7.2): a relay, a phone and a 
     assert.deepEqual([made.chat.name, made.chat.count, made.chat.as.name, made.chat.isOwner], ["设置页改版", 1, "John", true]);
     const link = ok(await john.gb("link", { owner: made.chat.owner, id: made.chat.id })).link;
     assert.match(link.url, new RegExp(`^${s.url}/i/[a-z0-9]{8}\\?by=a-`));
-    assert.equal(link.line, `读 ${s.url}/i/${link.code}.md ，照着做：用我的身份进「设置页改版」。`);
+    assert.equal(link.line, `请阅读 ${s.url}/i/${link.code}.md 并按说明操作：以我的身份加入「设置页改版」。`);
     assert.deepEqual([link.days, link.forward, link.approve, link.isOwner], [7, true, false, true]);
     const li = person();
     await login(li, "13900139000");
@@ -148,7 +148,7 @@ test("out of reach (transport §2.7): the last mirror stays readable and says wh
   await s.close();
   const offline = ok(await john.gb("status")).view;
   assert.deepEqual(offline.rows.map((r) => r.name), ["设置页改版"]);
-  assert.match(offline.offline, /^连不上 GemsBang：/);
+  assert.match(offline.offline, /^无法连接 GemsBang：/);
   assert.deepEqual(offline.notes.map((n) => n.url), ["https://evil.example/i/abcd9ahe.md"]);
   const out = ok(await john.gb("logout")).view;
   assert.deepEqual([out.loggedIn, out.relay], [false, s.url]);

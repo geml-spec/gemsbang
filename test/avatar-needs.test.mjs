@@ -6,10 +6,10 @@ const NOW = "2026-11-01T09:00:00Z";
 
 test("the five kinds (spec §7.3): promise, pay, stance, borrow, error; a borrow's, an error's and money's options when the asker gives none, in the person's language; an ask's faults", () => {
   assert.deepEqual(NEED_KINDS, ["promise", "pay", "stance", "borrow", "error"]);
-  assert.deepEqual(defaultOptions("borrow", "zh").map((o) => o.label), ["现在干", "排着", "不干"]);
+  assert.deepEqual(defaultOptions("borrow", "zh").map((o) => o.label), ["立即执行", "稍后执行", "拒绝"]);
   assert.deepEqual(defaultOptions("error", "en").map((o) => o.label), ["Why", "Retry"]);
   assert.deepEqual(defaultOptions("pay", "ja").map((o) => o.label), ["払う", "払わない"]);
-  assert.deepEqual(defaultOptions("promise", "zh"), [], "a promise's options are the asker's, else only 自己写");
+  assert.deepEqual(defaultOptions("promise", "zh"), [], "a promise's options are the asker's, else only 自定义回复");
   assert.equal(needFault({ kind: "promise", summary: "王老师问周五能不能来当志愿者", options: [{ label: "能去", text: "周五我可以去" }] }, NOW), undefined);
   assert.deepEqual(needFault({ kind: "gossip", summary: "x" }, NOW), { code: "need.kind" });
   assert.deepEqual(needFault({ kind: "stance", summary: " " }, NOW), { code: "need.summary", params: { max: 400 } });
@@ -31,7 +31,7 @@ test("order and folding (spec §7.1, §7.3; architecture §6.3): no clock of its
   assert.equal(expiresIn("2026-11-01T20:30:00Z", NOW, "zh"), "11 小时后过期");
   assert.equal(expiresIn("2026-11-01T09:22:10Z", NOW, "en"), "expires in 23 min");
   assert.equal(expiresIn("2026-11-01T09:00:00Z", NOW, "ja"), "期限切れ");
-  const need = { options: [{ label: "能去", text: "周五我可以去，几点集合？" }, { label: "去不了", text: "这周五去不了，抱歉" }, { label: "现在干" }] };
+  const need = { options: [{ label: "能去", text: "周五我可以去，几点集合？" }, { label: "去不了", text: "这周五去不了，抱歉" }, { label: "立即执行" }] };
   assert.equal(wordsOf(need, 0), "周五我可以去，几点集合？");
   assert.equal(wordsOf(need, 2), undefined, "an option that sends nothing");
   assert.equal(wordsOf(need, "own", "我下午三点到"), "我下午三点到");

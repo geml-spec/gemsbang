@@ -25,13 +25,13 @@ test("reminders by mail (S8, Q8): a person on the web — no device of theirs ru
   const g = ok(r.createGroup(john, { as: lily.id, name: "三年二班家长" })).venue;
   ok(r.addMember(john, g.owner, g.id, { as: lily.id, avatar: mom.id }));
   ok(r.say(john, g.owner, g.id, { as: lily.id, text: "@陈晨妈妈 周五家长会你去吗？" }));
-  assert.deepEqual(mails.map((m) => [m.to, m.subject]), [["chen@example.com", "三年二班家长里，Lily 爸爸 @ 了你"]]);
-  assert.equal(mails[0].text, "「@陈晨妈妈 周五家长会你去吗？」\n\n打开这个群：https://gemsbang.test/g/" + g.id + "\n\n同一个群几个小时最多提醒你一封。");
+  assert.deepEqual(mails.map((m) => [m.to, m.subject]), [["chen@example.com", "Lily 爸爸 在「三年二班家长」中 @ 了你"]]);
+  assert.equal(mails[0].text, "「@陈晨妈妈 周五家长会你去吗？」\n\n打开群聊：https://gemsbang.test/g/" + g.id + "\n\n同一群聊几小时内最多提醒一次。");
   ok(r.say(john, g.owner, g.id, { as: lily.id, text: "@陈晨妈妈 在吗" }));
   assert.equal(mails.length, 1, "one a group in three hours");
   const hers = ok(r.say(chen, g.owner, g.id, { as: mom.id, text: "@Lily 爸爸 我去" })).message;
   assert.equal(mails.length, 1, "Lily 爸爸's person has the plugin: the pane says it; nor is she mailed for her own line");
   offset += 3 * 3_600_000;
   ok(r.say(john, g.owner, g.id, { as: lily.id, text: "好的", replyTo: hers.id }));
-  assert.deepEqual(mails.slice(1).map((m) => m.subject), ["三年二班家长里，Lily 爸爸回了你"], "three hours on, a reply to her line");
+  assert.deepEqual(mails.slice(1).map((m) => m.subject), ["Lily 爸爸 在「三年二班家长」中回复了你"], "three hours on, a reply to her line");
 });

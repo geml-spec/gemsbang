@@ -97,7 +97,7 @@ test("deadlines as the object's alarm (architecture §2.3): a card with a deadli
   const agent = (await call("POST", `/avatars/${john.avatar.id}/token`, { token: john.token })).body.token;
   assert.equal(alarm(), null);
   const expires = new Date(Date.now() + 3_600_000).toISOString().replace(/\.\d{3}Z$/, "Z");
-  const asked = await call("POST", "/needs", { token: agent, body: { venue: `${g.owner}/${g.id}`, kind: "promise", summary: "周五前给稿子反馈", options: [{ label: "好" }], expires } });
+  const asked = await call("POST", "/needs", { token: agent, body: { venue: `${g.owner}/${g.id}`, kind: "promise", summary: "周五前给稿子反馈", options: [{ label: "确定" }], expires } });
   assert.equal(asked.status, 201, JSON.stringify(asked.body));
   assert.equal(alarm(), Date.parse(expires));
   jump(2 * 3_600_000);

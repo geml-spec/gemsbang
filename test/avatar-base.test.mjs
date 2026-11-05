@@ -31,8 +31,8 @@ test("底子 (S27, design §8.2): the person keeps entries, each given to some o
   const kid = ok(r.addBase(john.by, { label: "家人", text: "Lily，8 岁，三年二班", for: [lily.id] })).item;
   assert.deepEqual([kid.label, kid.text, kid.for, kid.state, kid.by], ["家人", "Lily，8 岁，三年二班", [lily.id], "kept", "person"]);
   ok(r.addBase(john.by, { label: "时区", text: "上海", for: [lily.id, work.id] }));
-  bad(r.addBase(john.by, { text: "x", for: [] }), 400, "要给你的至少一个身份");
-  bad(r.addBase(wang.by, { text: "x", for: [lily.id] }), 400, "要给你的至少一个身份");
+  bad(r.addBase(john.by, { text: "x", for: [] }), 400, "至少适用于一个身份");
+  bad(r.addBase(wang.by, { text: "x", for: [lily.id] }), 400, "至少适用于一个身份");
   bad(r.addBase(john.by, { text: " ", for: [lily.id] }), 400);
   assert.deepEqual(ok(r.baseFor(lilyAgent)).base.map((x) => x.text), ["Lily，8 岁，三年二班", "上海"], "Lily 爸爸's agent: both");
   assert.deepEqual(ok(r.baseFor(workAgent)).base.map((x) => x.text), ["上海"], "the work avatar's: only what is given to it");
@@ -45,7 +45,7 @@ test("底子 (S27, design §8.2): the person keeps entries, each given to some o
   bad(r.setBase(lilyAgent, nut.id, { keep: true }), 403);
   ok(r.setBase(john.by, nut.id, { keep: true }));
   assert.deepEqual(ok(r.baseFor(lilyAgent)).base.map((x) => x.text), ["Lily，8 岁，三年二班", "上海", "Lily 对花生过敏"], "记下: kept, and read");
-  bad(r.setBase(john.by, nut.id, { keep: false }), 409, "这一条已经记下了");
+  bad(r.setBase(john.by, nut.id, { keep: false }), 409, "该条已保存");
   const later = ok(r.addBase(workAgent, { text: "周三下午不开会" })).item;
   ok(r.setBase(john.by, later.id, { keep: false }));
   assert.equal(r.baseOfPerson(john.person).some((x) => x.id === later.id), false, "不记: gone");
@@ -57,7 +57,7 @@ test("底子 (S27, design §8.2): the person keeps entries, each given to some o
   ok(r.setBase(john.by, kid.id, { drop: true }));
   assert.deepEqual(ok(r.baseFor(workAgent)).base.map((x) => x.text), ["上海"]);
   bad(r.setBase(john.by, kid.id, { drop: true }), 404);
-  bad(r.setBase(wang.by, nut.id, { drop: true }), 404, "没有这一条");
+  bad(r.setBase(wang.by, nut.id, { drop: true }), 404, "未找到该条");
 });
 
 test("底子's pure part: entries folded from their blocks in order; an avatar's share; a line typed as 「家人：Lily，8 岁」 split at its first colon", () => {

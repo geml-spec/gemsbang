@@ -49,28 +49,28 @@ test("a group's link (spec §6.1): a member gets the current one, made the first
   assert.deepEqual([liSees.code, liSees.path], [first.code, `/i/${first.code}?by=${liA.id}`], "one current link; the path says who passed it on");
   assert.equal(ok(r.linkInfo(first.code)).group.name, "前端周会");
   r.advance(7 * 86_400_000);
-  bad(r.linkInfo(first.code), 410, "这个链接已经失效，找拉你的人要个新的");
+  bad(r.linkInfo(first.code), 410, "该链接已失效，请向邀请人索取新链接");
   const second = ok(r.linkFor(li.by, g.owner, g.id, { as: liA.id })).link;
   assert.notEqual(second.code, first.code, "past its day, the next ask makes a new one");
-  bad(r.rotateLink(li.by, g.owner, g.id, { as: liA.id }), 403, "只有群主能换链接、改进群的规矩");
+  bad(r.rotateLink(li.by, g.owner, g.id, { as: liA.id }), 403, "只有群主可以重置链接和修改入群规则");
   const third = ok(r.rotateLink(john.by, g.owner, g.id, { as: johnA.id })).link;
   bad(r.linkInfo(second.code), 410);
   assert.equal(ok(r.linkInfo(third.code)).group.id, g.id);
-  bad(r.linkInfo("abcdefgh"), 404, "没有这个链接");
+  bad(r.linkInfo("abcdefgh"), 404, "未找到该链接");
   bad(r.linkInfo("NOT A CODE"), 404);
   const wang = login(r, "13700137000");
   const wangA = ok(r.growAvatar(wang.by, { name: "王五" })).avatar;
-  bad(r.linkFor(wang.by, g.owner, g.id, { as: wangA.id }), 403, "不在这个群里");
+  bad(r.linkFor(wang.by, g.owner, g.id, { as: wangA.id }), 403, "不在该群聊中");
   const dm = ok(r.openDm(john.by, { as: johnA.id, with: liA.id })).venue;
-  bad(r.linkFor(john.by, dm.owner, dm.id, { as: johnA.id }), 400, "两个人的私聊没有链接");
+  bad(r.linkFor(john.by, dm.owner, dm.id, { as: johnA.id }), 400, "私聊没有邀请链接");
 });
 
 test("link rules (spec §6.1): only the owner turns forwarding off or the approval on; with forwarding off members get no link and the owner still does; a bad rule is refused; the rules are in the group for its members to see", () => {
   const { r, john, li, johnA, liA, g } = group();
-  bad(r.setLinkRules(li.by, g.owner, g.id, { as: liA.id, forward: false }), 403, "只有群主能换链接、改进群的规矩");
+  bad(r.setLinkRules(li.by, g.owner, g.id, { as: liA.id, forward: false }), 403, "只有群主可以重置链接和修改入群规则");
   bad(r.setLinkRules(john.by, g.owner, g.id, { as: johnA.id, forward: "no" }), 400, "forward 和 approve 要是 true 或 false");
   assert.deepEqual(ok(r.setLinkRules(john.by, g.owner, g.id, { as: johnA.id, forward: false })).rules, { forward: false, approve: false });
-  bad(r.linkFor(li.by, g.owner, g.id, { as: liA.id }), 403, "只有群主能转这个群");
+  bad(r.linkFor(li.by, g.owner, g.id, { as: liA.id }), 403, "只有群主可以分享该群聊");
   assert.equal(ok(r.linkFor(john.by, g.owner, g.id, { as: johnA.id })).link.forward, false);
   assert.deepEqual(ok(r.setLinkRules(john.by, g.owner, g.id, { as: johnA.id, approve: true })).rules, { forward: false, approve: true });
   assert.deepEqual(r.linkRulesOf(g.owner, g.id), { forward: false, approve: true });

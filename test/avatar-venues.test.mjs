@@ -37,13 +37,13 @@ test("groups (spec §6, §7.2): made by an avatar, its owner; the owner pulls av
   const lily = ok(r.growAvatar(john.by, { name: "Lily 爸爸" })).avatar;
   const liA = ok(r.growAvatar(li.by, { name: "李四" })).avatar;
   const wangA = ok(r.growAvatar(wang.by, { name: "王五" })).avatar;
-  bad(r.createGroup(john.by, { name: "x" }), 400, "要说明以哪个身份");
+  bad(r.createGroup(john.by, { name: "x" }), 400, "请指定身份");
   bad(r.createGroup(john.by, { as: liA.id, name: "x" }), 403, "这不是你的身份");
-  bad(r.createGroup(john.by, { as: johnWork.id, name: " " }), 400, "群要有个名字");
+  bad(r.createGroup(john.by, { as: johnWork.id, name: " " }), 400, "请填写群聊名称");
   const g = ok(r.createGroup(john.by, { as: johnWork.id, name: "设置页改版" })).venue;
   assert.match(g.id, /^g-[0-9a-f]{10}$/);
   assert.deepEqual([g.owner, g.kind, g.name, g.members.map((m) => m.name)], [johnWork.id, "group", "设置页改版", ["John"]]);
-  bad(r.addMember(li.by, g.owner, g.id, { as: liA.id, avatar: liA.id }), 403, "只有群主能拉人");
+  bad(r.addMember(li.by, g.owner, g.id, { as: liA.id, avatar: liA.id }), 403, "只有群主可以邀请成员");
   ok(r.addMember(john.by, g.owner, g.id, { as: johnWork.id, avatar: liA.id }));
   const liToken = r.verify(ok(r.issueAvatar(li.by, liA.id)).token);
   const said = ok(r.say(john.by, g.owner, g.id, { as: johnWork.id, text: "稿子在这\r\n周五前要定  ", id: "m-1" }));
@@ -51,12 +51,12 @@ test("groups (spec §6, §7.2): made by an avatar, its owner; the owner pulls av
   assert.equal(ok(r.say(john.by, g.owner, g.id, { as: johnWork.id, text: "again", id: "m-1" })).existed, true);
   const agent = ok(r.say(liToken, g.owner, g.id, { text: "收到，周五前给反馈", replyTo: "m-1" }));
   assert.deepEqual([agent.message.id, agent.message.speaker, agent.message.by, agent.message.replyTo], ["msg-1", `avatar:${liA.id}`, "agent", "m-1"]);
-  bad(r.say(wang.by, g.owner, g.id, { as: wangA.id, text: "hi" }), 403, "不在这个群里");
+  bad(r.say(wang.by, g.owner, g.id, { as: wangA.id, text: "hi" }), 403, "不在该群聊中");
   bad(r.read(wang.by, g.owner, `venues/${g.id}.geml`), 403);
   bad(r.say(john.by, g.owner, g.id, { as: johnWork.id, text: "x", id: "member-9" }), 400, "消息 id 不合法");
-  bad(r.say(john.by, g.owner, g.id, { as: johnWork.id, text: "  " }), 400, "说点什么");
-  bad(r.say(john.by, g.owner, g.id, { as: johnWork.id, text: "长".repeat(4001) }), 400, "一条最多 4000 个字");
-  bad(r.say(john.by, g.owner, g.id, { as: johnWork.id, text: "x", replyTo: "m-404" }), 400, "回复的那条不在这个群里");
+  bad(r.say(john.by, g.owner, g.id, { as: johnWork.id, text: "  " }), 400, "消息不能为空");
+  bad(r.say(john.by, g.owner, g.id, { as: johnWork.id, text: "长".repeat(4001) }), 400, "每条消息最多 4000 字");
+  bad(r.say(john.by, g.owner, g.id, { as: johnWork.id, text: "x", replyTo: "m-404" }), 400, "被回复的消息不在该群聊中");
   const d = readDoc(r.root, g.owner, `venues/${g.id}.geml`);
   assert.deepEqual(d.blocks.map((b) => b.id), ["venue", "member-1", "member-2", "m-1", "msg-1"]);
   assert.deepEqual(verifyChain(d.blocks), []);
@@ -103,7 +103,7 @@ test("two-person talk (spec §6.6): opened from a group the two share, one per p
   const w = ok(r.growAvatar(wang.by, { name: "王五" })).avatar;
   const g = ok(r.createGroup(john.by, { as: j.id, name: "设置页改版" })).venue;
   ok(r.addMember(john.by, g.owner, g.id, { as: j.id, avatar: l.id }));
-  bad(r.openDm(john.by, { as: j.id, with: w.id }), 403, "要先在同一个群里");
+  bad(r.openDm(john.by, { as: j.id, with: w.id }), 403, "需要先在同一个群聊中");
   bad(r.openDm(john.by, { as: j.id, with: j.id }), 404);
   const dm = ok(r.openDm(john.by, { as: j.id, with: l.id })).venue;
   assert.match(dm.id, /^d-[0-9a-f]{10}$/);
@@ -112,7 +112,7 @@ test("two-person talk (spec §6.6): opened from a group the two share, one per p
   assert.deepEqual([back.owner, back.id, back.name], [dm.owner, dm.id, "John"]);
   ok(r.say(li.by, dm.owner, dm.id, { as: l.id, text: "周五前能给反馈吗？" }));
   assert.deepEqual(r.venuesOf(john.person).map((v) => [v.kind, v.name]), [["group", "设置页改版"], ["dm", "李四"]]);
-  bad(r.addMember(john.by, dm.owner, dm.id, { as: j.id, avatar: w.id }), 400, "两个人的私聊不能加人");
+  bad(r.addMember(john.by, dm.owner, dm.id, { as: j.id, avatar: w.id }), 400, "私聊不能添加成员");
 });
 
 test("pushes: every block the relay appends is heard, once; a resend is not", () => {

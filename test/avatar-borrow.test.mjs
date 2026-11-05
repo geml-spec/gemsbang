@@ -50,6 +50,6 @@ test("the facts the host saw: checked as a body sends them, said as one line in 
   assert.equal(factsOf([{ label: "", ok: true }]), undefined);
   assert.equal(factsOf("npm test"), undefined);
   assert.equal(factsOf(Array.from({ length: 21 }, () => ({ label: "x", ok: true }))), undefined);
-  assert.equal(factsLine([{ label: "npm test", ok: true }, { label: "npm run build", ok: false }], "zh"), "已核实：npm test 通过 · npm run build 没通过");
+  assert.equal(factsLine([{ label: "npm test", ok: true }, { label: "npm run build", ok: false }], "zh"), "已核实：npm test 通过 · npm run build 未通过");
   assert.equal(factsLine([{ label: "npm test", ok: true }], "en"), "Verified: npm test passed");
 });

@@ -34,7 +34,7 @@ function world(o) {
 }
 const said = (r, g, by) => ok(r.read(by, g.owner, `venues/${g.id}.geml`)).blocks.map((b) => b.id.replace(/-\d+$/, ""));
 
-test("退出群 (S19): a member leaves — out of the group and their own list, their 自动回 there gone, the group says so — and their past lines keep their name; a two-person chat is not left", () => {
+test("退出群聊 (S19): a member leaves — out of the group and their own list, their 自动回复 there gone, the group says so — and their past lines keep their name; a two-person chat is not left", () => {
   const { r, john, li, j, l, g } = world();
   ok(r.setAuto(li.by, l.id, { venue: `${g.owner}/${g.id}`, on: true }));
   ok(r.say(li.by, g.owner, g.id, { as: l.id, text: "我先走了" }));
@@ -43,17 +43,17 @@ test("退出群 (S19): a member leaves — out of the group and their own list, 
   const view = r.venueView(g.owner, g.id, j.id);
   assert.deepEqual([view.members.map((m) => m.name), view.former.map((m) => m.name), view.keeper], [["John", "张三"], ["李四"], j.id]);
   assert.deepEqual(r.joinedOf(l.id), [], "gone from their list");
-  assert.deepEqual(r.autoOf(l.id), [], "their 自动回 there with it");
+  assert.deepEqual(r.autoOf(l.id), [], "their 自动回复 there with it");
   assert.equal(said(r, g, john.by).at(-1), "leave", "the group says so");
   bad(r.read(li.by, g.owner, `venues/${g.id}.geml`), 403);
-  bad(r.leaveVenue(li.by, g.owner, g.id, { as: l.id }), 403, "不在这个群里");
+  bad(r.leaveVenue(li.by, g.owner, g.id, { as: l.id }), 403, "不在该群聊中");
   const dm = ok(r.openDm(john.by, { as: j.id, with: r.venueView(g.owner, g.id, j.id).members[1].id })).venue;
-  bad(r.leaveVenue(john.by, dm.owner, dm.id, { as: j.id }), 400, "两个人的聊天退不了");
+  bad(r.leaveVenue(john.by, dm.owner, dm.id, { as: j.id }), 400, "私聊不能退出");
 });
 
 test("the 群主 leaves (S19, Q13②): not before naming someone in the group; then that one is the 群主 — adds members, sets the link's rules, gets the join requests — and the group says who took it over", () => {
   const { r, john, li, zhang, j, l, z, g } = world();
-  bad(r.leaveVenue(john.by, g.owner, g.id, { as: j.id }), 400, "你是群主，先选一个群里的人接手");
+  bad(r.leaveVenue(john.by, g.owner, g.id, { as: j.id }), 400, "你是群主，请先选择新群主");
   bad(r.leaveVenue(john.by, g.owner, g.id, { as: j.id, heir: "a-ffffffffff" }), 400);
   ok(r.leaveVenue(john.by, g.owner, g.id, { as: j.id, heir: l.id }));
   const view = r.venueView(g.owner, g.id, l.id);
@@ -67,7 +67,7 @@ test("the 群主 leaves (S19, Q13②): not before naming someone in the group; t
   const zhou = login(r, "13500135000");
   assert.ok(ok(r.joinByLink(zhou.by, code, { name: "周" })).pending, "waits for the 群主");
   const cards = r.needsOf(li.person);
-  assert.deepEqual(cards.map((n) => [n.kind, n.summary]), [["promise", "「周」想进「设置页改版」"]], "the new 群主's 答应事情");
+  assert.deepEqual(cards.map((n) => [n.kind, n.summary]), [["promise", "「周」申请加入「设置页改版」"]], "the new 群主's 承诺");
   ok(r.answerNeed(li.by, l.id, cards[0].id, { choice: 0 }));
   assert.deepEqual(r.venueView(g.owner, g.id, l.id).members.map((x) => x.name), ["李四", "张三", "乐乐妈妈", "周"], "let in where the group is kept");
   assert.equal(r.needsOf(john.person).length, 0, "nothing for the one who left");
@@ -83,7 +83,7 @@ test("the last one leaves (S19, P7c): the group is gone with its chat — no one
     assert.equal(last.gone, true, store);
     assert.equal(r.venueView(g.owner, g.id), undefined);
     assert.deepEqual(r.joinedOf(j.id), []);
-    bad(r.joinByLink(login(r, "13400134000").by, code, { name: "新人" }), 404, "没有这个链接");
+    bad(r.joinByLink(login(r, "13400134000").by, code, { name: "新人" }), 404, "未找到该链接");
     if (store === "files") assert.equal(existsSync(join(r.root, g.owner, "venues", `${g.id}.geml`)), false, "the file itself gone");
   }
 });

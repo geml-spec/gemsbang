@@ -150,7 +150,7 @@ const TOOLS = [
   },
   {
     name: 'im_remember',
-    description: 'Keep something about your person that will help later — family, time zone, preferences — in their notes (底子), as the avatar this session speaks for, when someone in a chat told it. It waits in their pane until they press Keep; until then do not take it as so. Never for what they would not want written down.',
+    description: 'Keep something about your person that will help later — family, time zone, preferences — in their personal information (个人信息), as the avatar this session speaks for, when someone in a chat told it. It waits in their pane until they press Keep; until then do not take it as so. Never for what they would not want written down.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -222,7 +222,7 @@ async function findNode($: EngineInterface): Promise<{ node: string } | { proble
     if (m >= 22) return { node: bin }
     seen = seen === undefined ? m : Math.max(seen, m)
   }
-  return { problem: seen !== undefined ? `GemsBang：Node ${seen} 太旧，需要 Node ≥ 22` : 'GemsBang：找不到 node — 请安装 Node ≥ 22' }
+  return { problem: seen !== undefined ? `GemsBang：Node ${seen} 版本过低，需要 Node ≥ 22` : 'GemsBang：未找到 node — 请安装 Node ≥ 22' }
 }
 
 /** Since when the bridge has not answered, or undefined while it answers. */
@@ -304,7 +304,7 @@ async function registerOne($: EngineInterface, name: string, register: () => Pro
     await register()
   } catch (err) {
     const reason = reasonOf(err)
-    await update($, setupAtom, (was) => `${was ?? 'GemsBang：没有注册上'} ${name}（${reason}）`)
+    await update($, setupAtom, (was) => `${was ?? 'GemsBang：注册失败'} ${name}（${reason}）`)
   }
 }
 
@@ -1778,7 +1778,7 @@ export const register: Register = (on) => {
       const [view, problem, setup, now, session] = await Promise.all([readView($), read($, problemAtom), read($, setupAtom), $.clock.now(), $.session.id().catch(() => undefined)])
       band = gbBand(view, problem ?? setup, new Date(now).toISOString(), session)
     } catch (err) {
-      band = { text: `GemsBang：状态带画不出来（${reasonOf(err)}）`, tone: 'error', open: '打开', actions: [], more: 0 }
+      band = { text: `GemsBang：输入框上方的提示无法显示（${reasonOf(err)}）`, tone: 'error', open: '打开', actions: [], more: 0 }
     }
     if (band === undefined) return next(e)
     const below = await next(e).catch(() => null)
@@ -1897,5 +1897,5 @@ export const register: Register = (on) => {
     // Nowhere to draw it (a remote connection, a run with no page): said as the person reads it, never the engine's words.
     if (!opened.isPlaced && opened.reason?.startsWith('no-surface') === true) return { text: say('panel.noSurface', await langNow($)) }
     return { text: opened.isPlaced ? 'GemsBang' : `GemsBang：${opened.reason ?? ''}` }
-  }).catch(() => ({ text: 'GemsBang：命令没有完成，原因见输入框上方的状态带' }))
+  }).catch(() => ({ text: 'GemsBang：命令未完成，原因见输入框上方的提示' }))
 }

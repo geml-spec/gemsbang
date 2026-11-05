@@ -40,7 +40,7 @@ test("readDataBlocks skips blocks that are not data and reports a value that is 
 test("verifyChain: a tampered value, a broken prev, a missing hash", () => {
   const a = seal({ text: "一" }, null), b = seal({ text: "二" }, a.hash), c = seal({ text: "三" }, b.hash);
   assert.deepEqual(verifyChain([{ id: "a", value: a }, { id: "b", value: b }, { id: "c", value: c }]), []);
-  assert.deepEqual(verifyChain([{ id: "a", value: a }, { id: "b", value: { ...b, text: "改" } }]), ["#b: hash does not match"]);
+  assert.deepEqual(verifyChain([{ id: "a", value: a }, { id: "b", value: { ...b, text: "编辑" } }]), ["#b: hash does not match"]);
   assert.deepEqual(verifyChain([{ id: "a", value: a }, { id: "c", value: c }]), ["#c: prev does not name the block before it"]);
   assert.deepEqual(verifyChain([{ id: "a", value: { text: "一", prev: null } }]), ["#a: no hash"]);
   assert.deepEqual(verifyChain([]), []);

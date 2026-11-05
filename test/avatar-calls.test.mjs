@@ -20,7 +20,7 @@ const GROUP = {
 const DM = { owner: LILY.id, id: "d-000000000b", kind: "dm", name: "王老师", members: [LILY, WANG], as: LILY.id, blocks: [line("m-1", WANG, "周五春游能来当志愿者吗", "2026-11-02T07:00:00Z")] };
 const MIRROR = { at: "2026-11-02T08:00:00Z", relay: "https://im.example", person: "p-1", lang: "zh", avatars: [JOHN, LILY], venues: [GROUP, DM] };
 
-test("被叫到 (architecture §6.3): the lines that call the avatar after its own last line — an @, a two-person chat, its name, a reply to it — gathered into one call per chat; none, no call; a line let go ends the call up to it", () => {
+test("被提及 (architecture §6.3): the lines that call the avatar after its own last line — an @, a two-person chat, its name, a reply to it — gathered into one call per chat; none, no call; a line let go ends the call up to it", () => {
   const c = callOf(GROUP, { name: "John", auto: false });
   assert.deepEqual([c.lines.map((l) => [l.id, l.who, l.reason]), c.last, c.at, c.group, c.auto], [[["m-4", "李四", "mention"]], "m-4", "2026-11-02T06:11:00Z", "设置页改版", false], "the @ before its own 我看看 is answered already; 急，今天能看吗 calls nobody");
   assert.equal(callOf(GROUP, { name: "John", auto: false, since: "m-4" }), undefined, "let go up to m-4");

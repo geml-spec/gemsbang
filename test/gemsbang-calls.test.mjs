@@ -9,7 +9,7 @@ import { runGb } from "../dist/gemsbang/ops.js";
 const ok = (x) => { assert.equal(x.ok, true, x.reason); return x; };
 const codeIn = (text) => text.match(/(\d{6})/)[1];
 
-test("被叫到 in the client (architecture §6.3): a line that calls the avatar is a call in the view; 不回 lets it go; 回 hands back a round for that chat, replying to the line with its hops; its answer lands as the avatar's agent, and when it asks, a card with nothing said first; 以后这个群自动回 keeps the chat on the avatar, and the session that speaks for it gets its rounds", async () => {
+test("被提及 in the client (architecture §6.3): a line that calls the avatar is a call in the view; 不回 lets it go; 回 hands back a round for that chat, replying to the line with its hops; its answer lands as the avatar's agent, and when it asks, a card with nothing said first; 以后这个群自动回复 keeps the chat on the avatar, and the session that speaks for it gets its rounds", async () => {
   const texts = [];
   const s = await startAvatarRelay({ root: mkdtempSync(join(tmpdir(), "gemsbang-calls-relay-")), name: "relay.test", texter: (t) => { texts.push(t); } });
   try {
@@ -42,7 +42,7 @@ test("被叫到 in the client (architecture §6.3): a line that calls the avatar
 
     const m2 = say("@John 今天能看吗");
     const asked = ok(await gb("wake", { avatar: me, owner: g.owner, id: g.id, choice: "reply" }));
-    assert.deepEqual([asked.view.calls, asked.round.replyTo, asked.round.hops, asked.round.description], [[], m2.id, 0, "回「设置页改版」"]);
+    assert.deepEqual([asked.view.calls, asked.round.replyTo, asked.round.hops, asked.round.description], [[], m2.id, 0, "回复「设置页改版」"]);
     assert.match(asked.round.prompt, /^你是「John」，在「设置页改版」里。你是一个人在这个场合里的分身：他让你回这一轮/);
     assert.match(asked.round.prompt, /李四：@John 今天能看吗\n$/);
     ok(await gb("round-done", { ...asked.round, text: JSON.stringify({ reply: "今天下午看", ask: { kind: "promise", summary: "李四要你周五前给稿子反馈", draft: "可以，周五前给你" } }) }));
@@ -68,7 +68,7 @@ test("被叫到 in the client (architecture §6.3): a line that calls the avatar
     assert.equal(ok(await gb("status")).view.bodies["s-2"], me, "kept for that session from then on");
     const live = ok(await gb("status")).view;
     assert.deepEqual([live.played.includes(me), live.calls], [true, []], "a session came for its rounds: it plays John, and the chat answers on its own again");
-    assert.deepEqual(ok(await gb("auto", { avatar: me, venue, on: false })).view.avatars[0].autos, [], "撤");
+    assert.deepEqual(ok(await gb("auto", { avatar: me, venue, on: false })).view.avatars[0].autos, [], "撤销");
   } finally {
     await s.close();
   }

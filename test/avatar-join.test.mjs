@@ -59,21 +59,21 @@ test("joining from a link with a person's token (spec §6.2, §6.4, §6.5): a fi
   assert.equal(r.avatarsOf(zhou.person).length, 2);
   const wu = login(r, "13600136000");
   bad(r.joinByLink(wu.by, code2, { as: named.id }), 403, "这不是你的身份");
-  bad(r.joinByLink(wu.by, code2, { name: "  " }), 400, "名字不能是空的");
+  bad(r.joinByLink(wu.by, code2, { name: "  " }), 400, "名称不能为空");
   const third = ok(r.createGroup(john.by, { as: johnA.id, name: "周末爬山" })).venue;
   const code3 = ok(r.linkFor(john.by, third.owner, third.id, { as: johnA.id })).link.code;
   const asked = ok(r.joinByLink(mei.by, code3, { as: joined.avatar.id }));
   assert.equal(asked.avatar.id, joined.avatar.id, "the avatar named in `as`");
   ok(r.rotateLink(john.by, third.owner, third.id, { as: johnA.id }));
-  bad(r.joinByLink(wu.by, code3, { name: "吴" }), 410, "这个链接已经失效，找拉你的人要个新的");
-  bad(r.joinByLink(wu.by, "abcdefgh", {}), 404, "没有这个链接");
+  bad(r.joinByLink(wu.by, code3, { name: "吴" }), 410, "该链接已失效，请向邀请人索取新链接");
+  bad(r.joinByLink(wu.by, "abcdefgh", {}), 404, "未找到该链接");
   assert.equal(readDoc(r.root, "_relay", `links/${code}.geml`).blocks.filter((b) => b.id.startsWith("use-")).length, 2, "two came in by the first link");
 });
 
 test("an agent joins with its person's yes (spec §6.3, transport §2.5): with no token on the machine, the number and the code the person typed in the plugin's box give the avatar's token and a device token, never the person's; with the device token, the person's answer gives the avatar's token; an avatar's token cannot join anything", () => {
   const { r, g, code } = group();
   ok(r.startLogin({ phone: "13900139000", lang: "ja" }));
-  bad(r.joinWithCode(code, { phone: "13900139000", code: "000000", name: "x" }), 401, "验证码不对或过期了");
+  bad(r.joinWithCode(code, { phone: "13900139000", code: "000000", name: "x" }), 401, "验证码错误或已过期");
   const sent = codeIn(r.texts[r.texts.length - 1]);
   const first = ok(r.joinWithCode(code, { phone: "13900139000", code: sent, lang: "ja", name: "李四" }));
   assert.equal(first.avatar.name, "李四");
@@ -87,15 +87,15 @@ test("an agent joins with its person's yes (spec §6.3, transport §2.5): with n
   ok(r.say(avatarRec, g.owner, g.id, { text: "大家好" }));
   const msgs = ok(r.read(avatarRec, g.owner, `venues/${g.id}.geml`)).blocks.filter((b) => b.id.startsWith("msg-"));
   assert.deepEqual(msgs.map((b) => [b.value.speaker, b.value.by]), [[`avatar:${first.avatar.id}`, "agent"]]);
-  bad(r.joinWithCode(code, { phone: "13900139000", code: sent }), 401, "验证码不对或过期了"); // a code is spent once
+  bad(r.joinWithCode(code, { phone: "13900139000", code: sent }), 401, "验证码错误或已过期"); // a code is spent once
   const owner = login(r, "13500135000");
   const ownerA = ok(r.growAvatar(owner.by, { name: "班主任" })).avatar;
   const second = ok(r.createGroup(owner.by, { as: ownerA.id, name: "班级通知" })).venue;
   const code2 = ok(r.linkFor(owner.by, second.owner, second.id, { as: ownerA.id })).link.code;
   const byDevice = ok(r.joinByLink(deviceRec, code2, { as: first.avatar.id }));
   assert.equal(r.verify(byDevice.token).speaker, `avatar:${first.avatar.id}`, "the device's join brings the avatar's token");
-  bad(r.joinByLink(avatarRec, code2, {}), 403, "进群要本人点头");
-  bad(r.joinWithCode("abcdefgh", { phone: "13900139000", code: "123456" }), 404, "没有这个链接"); // the link is checked before a code is spent
+  bad(r.joinByLink(avatarRec, code2, {}), 403, "加入群聊需本人确认");
+  bad(r.joinWithCode("abcdefgh", { phone: "13900139000", code: "123456" }), 404, "未找到该链接"); // the link is checked before a code is spent
 });
 
 test("the owner's approval (spec §6.1): with it on, a newcomer's avatar grows and waits in the owner's requests; asking twice is one request; only the owner answers, once; a yes puts the avatar in, a no leaves it out; members never see the requests", () => {
@@ -109,11 +109,11 @@ test("the owner's approval (spec §6.1): with it on, a newcomer's avatar grows a
   const wu = login(r, "13700137000");
   const wuWaits = ok(r.joinByLink(wu.by, code, { name: "吴" }));
   assert.deepEqual(r.requestsOf(g.owner).map((q) => [q.id, q.avatar.name]), [["request-1", "乐乐 妈妈"], ["request-2", "吴"]]);
-  bad(r.answerRequest(mei.by, g.owner, "request-1", { as: waiting.avatar.id, yes: true }), 403, "只有群主能换链接、改进群的规矩");
+  bad(r.answerRequest(mei.by, g.owner, "request-1", { as: waiting.avatar.id, yes: true }), 403, "只有群主可以重置链接和修改入群规则");
   bad(r.answerRequest(john.by, g.owner, "request-1", { as: johnA.id, yes: "ok" }), 400, "yes 要是 true 或 false");
-  bad(r.answerRequest(john.by, g.owner, "request-9", { as: johnA.id, yes: true }), 404, "没有这条进群申请");
+  bad(r.answerRequest(john.by, g.owner, "request-9", { as: johnA.id, yes: true }), 404, "未找到该入群申请");
   assert.equal(ok(r.answerRequest(john.by, g.owner, "request-1", { as: johnA.id, yes: true })).joined, true);
-  bad(r.answerRequest(john.by, g.owner, "request-1", { as: johnA.id, yes: false }), 409, "这条进群申请已经答过了");
+  bad(r.answerRequest(john.by, g.owner, "request-1", { as: johnA.id, yes: false }), 409, "该入群申请已处理");
   assert.equal(ok(r.answerRequest(john.by, g.owner, "request-2", { as: johnA.id, yes: false })).joined, false);
   assert.deepEqual(r.venueView(g.owner, g.id).members.map((m) => m.name), ["John", "乐乐 妈妈"]);
   assert.equal(r.venuesOf(wu.person).length, 0, "the no left 吴 out");
@@ -128,9 +128,9 @@ test("guessing a code (spec §6.2): five wrong codes for a number in ten minutes
   ok(r.startLogin({ phone: "13900139000" }));
   const right = codeIn(r.texts[0]);
   const wrong = right === "000000" ? "111111" : "000000";
-  for (let i = 0; i < 4; i++) bad(r.finishLogin({ phone: "13900139000", code: wrong }), 401, "验证码不对或过期了");
-  bad(r.finishLogin({ phone: "13900139000", code: wrong }), 429, "验证码输错太多次了，过十分钟再试");
-  bad(r.finishLogin({ phone: "13900139000", code: right }), 429, "验证码输错太多次了，过十分钟再试");
+  for (let i = 0; i < 4; i++) bad(r.finishLogin({ phone: "13900139000", code: wrong }), 401, "验证码错误或已过期");
+  bad(r.finishLogin({ phone: "13900139000", code: wrong }), 429, "验证码错误次数过多，请 10 分钟后再试");
+  bad(r.finishLogin({ phone: "13900139000", code: right }), 429, "验证码错误次数过多，请 10 分钟后再试");
   ok(r.startLogin({ phone: "13700137000" }));
   ok(r.finishLogin({ phone: "13700137000", code: codeIn(r.texts[1]) }));
   r.advance(10 * 60_000);

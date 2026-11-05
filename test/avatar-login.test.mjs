@@ -28,23 +28,23 @@ function allText(dir) {
 
 test("login (spec §6.2): a code texted to the number, six digits, ten minutes, once; the wrong one, a short one, another number's; three to a number in ten minutes, ten to a network in an hour; the first login is a new person; the code is texted in the language asked in; a refusal carries its code; the number is kept only as a salted hash", () => {
   const r = relay();
-  assert.equal(bad(r.startLogin({ phone: "hello" }), 400, "要一个手机号").code, "phone.required");
+  assert.equal(bad(r.startLogin({ phone: "hello" }), 400, "请填写手机号").code, "phone.required");
   const started = ok(r.startLogin({ phone: "138 0013 8000" }, "10.0.0.1"));
   assert.deepEqual([started.known, started.tail], [false, "8000"]);
   assert.equal(r.texts[0].to, "+8613800138000");
   assert.match(r.texts[0].text, /^GemsBang 验证码 \d{6}，10 分钟内有效。/);
   const code = codeIn(r.texts[0]);
-  assert.equal(bad(r.finishLogin({ phone: "13800138000", code: "12" }), 400, "验证码是六位数字").code, "code.short");
-  bad(r.finishLogin({ phone: "13800138000", code: code === "000000" ? "000001" : "000000" }), 401, "验证码不对或过期了");
-  bad(r.finishLogin({ phone: "13900139000", code }), 401, "验证码不对或过期了");
+  assert.equal(bad(r.finishLogin({ phone: "13800138000", code: "12" }), 400, "验证码为 6 位数字").code, "code.short");
+  bad(r.finishLogin({ phone: "13800138000", code: code === "000000" ? "000001" : "000000" }), 401, "验证码错误或已过期");
+  bad(r.finishLogin({ phone: "13900139000", code }), 401, "验证码错误或已过期");
   const done = ok(r.finishLogin({ phone: "+86 138-0013-8000", code }));
   assert.match(done.person, /^p-[0-9a-f]{10}$/);
   assert.equal(done.new, true);
   assert.deepEqual([r.verify(done.token).speaker, r.verify(done.token).scope], [`person:${done.person}`, "person"]);
-  bad(r.finishLogin({ phone: "13800138000", code }), 401, "验证码不对或过期了");
+  bad(r.finishLogin({ phone: "13800138000", code }), 401, "验证码错误或已过期");
   ok(r.startLogin({ phone: "13800138000" }));
   assert.equal(r.startLogin({ phone: "13800138000" }).ok, true);
-  bad(r.startLogin({ phone: "13800138000" }), 429, "验证码发得太频繁，过十分钟再试");
+  bad(r.startLogin({ phone: "13800138000" }), 429, "验证码发送过于频繁，请 10 分钟后再试");
   r.advance(10 * 60_000);
   const again = ok(r.startLogin({ phone: "13800138000" }));
   assert.equal(again.known, true);
@@ -53,7 +53,7 @@ test("login (spec §6.2): a code texted to the number, six digits, ten minutes, 
   ok(r.startLogin({ phone: "13700137000" }));
   const stale = codeIn(r.texts[r.texts.length - 1]);
   r.advance(10 * 60_000);
-  bad(r.finishLogin({ phone: "13700137000", code: stale }), 401, "验证码不对或过期了");
+  bad(r.finishLogin({ phone: "13700137000", code: stale }), 401, "验证码错误或已过期");
   const net = relay();
   for (let i = 0; i < 10; i++) ok(net.startLogin({ phone: `+1415555${String(1000 + i)}` }, "10.9.9.9"));
   bad(net.startLogin({ phone: "+14155552000" }, "10.9.9.9"), 429);

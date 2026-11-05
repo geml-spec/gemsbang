@@ -59,7 +59,7 @@ test("a chat's line goes into every member's box as they may see it — `by` lef
   ok(r.rename(li.by, li.avatar.id, { name: "李四（前端）" }));
   assert.deepEqual(box(r, john, johnAt).slice(-1), [`avatar.geml#name-1`], "a member's new name reaches everyone in a chat with it");
   const liNow = ok(r.updatesState(li.by)).pts, johnNow = ok(r.updatesState(john.by)).pts;
-  ok(r.ask(agent, { venue: `${g.owner}/${g.id}`, kind: "promise", summary: "周五前给稿子反馈", options: [{ label: "好" }] }));
+  ok(r.ask(agent, { venue: `${g.owner}/${g.id}`, kind: "promise", summary: "周五前给稿子反馈", options: [{ label: "确定" }] }));
   assert.deepEqual([box(r, li, liNow).map((x) => x.split("#")[0]), box(r, john, johnNow)], [["needs.geml"], []], "a card is its person's alone");
   assert.equal(box(r, wang, wangAt).length, 0);
 });

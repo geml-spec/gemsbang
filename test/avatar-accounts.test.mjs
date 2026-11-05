@@ -39,8 +39,8 @@ test("avatars (spec §6.4, §6.5): one grows with the name given, else a random 
   assert.equal(work.name, "云朵 10", "the default name is a suggestion, never used unasked");
   ok(r.rename(john.by, work.id, { name: "John" }));
   const lily = ok(r.growAvatar(john.by, { name: "Lily 爸爸" })).avatar;
-  assert.equal(bad(r.growAvatar(john.by, { name: "" }), 400, "名字不能是空的").code, "name.empty");
-  assert.deepEqual(bad(r.growAvatar(john.by, { name: "长".repeat(25) }), 400, "名字最多 24 个字").params, { max: 24 });
+  assert.equal(bad(r.growAvatar(john.by, { name: "" }), 400, "名称不能为空").code, "name.empty");
+  assert.deepEqual(bad(r.growAvatar(john.by, { name: "长".repeat(25) }), 400, "名称最多 24 字").params, { max: 24 });
   ok(r.setDefaultName(john.by, { name: null }));
   assert.equal(r.defaultNameOf(john.person), undefined);
   assert.deepEqual(r.avatarsOf(john.person).map((a) => a.name), ["云朵 10", "John", "Lily 爸爸"]);
@@ -50,13 +50,13 @@ test("avatars (spec §6.4, §6.5): one grows with the name given, else a random 
   assert.equal(r.languageOf(john.person), "zh");
   ok(r.setLanguage(john.by, { lang: "en" }));
   assert.equal(ok(r.growAvatar(john.by, {})).avatar.name, "Cloud 10", "a random name in the person's language");
-  assert.equal(bad(r.setLanguage(john.by, { lang: "fr" }), 400, "不支持这种语言").code, "lang.unknown");
+  assert.equal(bad(r.setLanguage(john.by, { lang: "fr" }), 400, "不支持该语言").code, "lang.unknown");
   ok(r.rename(john.by, first.id, { name: "陈太太" }));
   assert.deepEqual(r.avatarsOf(john.person).map((a) => a.name), ["陈太太", "John", "Lily 爸爸", "Cloud 10"]);
   const zhang = login(r, "13900139000");
   bad(r.rename(zhang.by, first.id, { name: "x" }), 403, "这不是你的身份");
   const lilyToken = r.verify(ok(r.issueAvatar(john.by, lily.id)).token);
-  bad(r.growAvatar(lilyToken, {}), 403, "只有本人能这么做");
+  bad(r.growAvatar(lilyToken, {}), 403, "仅本人可执行此操作");
   bad(r.rename(lilyToken, lily.id, { name: "x" }), 403);
 });
 

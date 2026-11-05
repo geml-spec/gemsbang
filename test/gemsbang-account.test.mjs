@@ -35,7 +35,7 @@ test("signing in on a machine (architecture §3.2): an email and its code, no se
     assert.deepEqual([before.loggedIn, before.relay], [false, s.url]);
     bad(await mac.gb("login-start", { email: "john" }), "email.bad");
     const sent = ok(await mac.gb("login-start", { email: "John@example.com" }));
-    assert.equal(sent.text, "验证码已发到 j***@example.com，发件人是 gemsbang.com。10 分钟内有效");
+    assert.equal(sent.text, "验证码已发送至 j***@example.com，发件人 gemsbang.com，10 分钟内有效");
     const inside = ok(await mac.gb("login-verify", { email: "John@example.com", code: code() })).view;
     assert.deepEqual([inside.loggedIn, inside.avatars], [true, []]);
     const named = ok(await mac.gb("first-avatar", { name: "John", session: "s-1" })).view;
@@ -53,7 +53,7 @@ test("the beta before mail (2026-11-04): an email the service gives the code bac
     assert.deepEqual([inside.loggedIn, mail.length], [true, 0]);
     assert.equal(ok(await mac.gb("method-start", { email: "john@work.example" })).account.methods.length, 2);
     const lily = machine();
-    assert.match(ok(await lily.gb("login-start", { email: "lily@example.com" })).text, /^验证码已发到 l\*\*\*@example\.com/);
+    assert.match(ok(await lily.gb("login-start", { email: "lily@example.com" })).text, /^验证码已发送至 l\*\*\*@example\.com/);
     assert.equal(ok(await lily.gb("status")).view.loggedIn, false);
   } finally { await s.close(); }
 });
@@ -82,7 +82,7 @@ test("through another account from a machine (S28, S32): nobody signed in, the v
     assert.deepEqual((await mac.gb("sso-wait", { seen: "none", timeout: 0 })).sso, { state: "opened", kind: "github" }, "the pane learns the browser opened it");
     const h = link.searchParams.get("h");
     const waiting = mac.gb("sso-wait", { seen: "opened", timeout: 5 });
-    assert.match(await (await fetch(`${s.url}/login/callback/github?code=c1&state=${h}`)).text(), /登好了/);
+    assert.match(await (await fetch(`${s.url}/login/callback/github?code=c1&state=${h}`)).text(), /登录成功/);
     const inside = ok(await waiting);
     assert.deepEqual([inside.sso.state, inside.view.loggedIn, inside.view.avatars], ["done", true, []]);
     assert.equal(readClient(mac.home).sso, undefined, "the secret goes once used");
@@ -90,7 +90,7 @@ test("through another account from a machine (S28, S32): nobody signed in, the v
     assert.deepEqual(added.links.map((l) => l.kind), ["github"]);
     const addLink = new URL(added.links[0].url);
     await fetch(addLink, { headers: { accept: "text/html" } });
-    assert.match(await (await fetch(`${s.url}/login/callback/github?code=c2&state=${addLink.searchParams.get("h")}`)).text(), /加好了/);
+    assert.match(await (await fetch(`${s.url}/login/callback/github?code=c2&state=${addLink.searchParams.get("h")}`)).text(), /已添加/);
     const account = ok(await mac.gb("sso-wait", { add: true, seen: "opened", timeout: 0 }));
     assert.deepEqual([account.sso.state, account.account.methods.map((m) => [m.kind, m.shown])], ["added", [["github", "@smith"], ["github", "@john"]]]);
     const lily = machine();

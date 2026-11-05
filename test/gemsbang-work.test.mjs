@@ -21,7 +21,7 @@ function repo() {
   return dir;
 }
 
-test("任务 in the client (spec §7.4, §7.5; once called 借电脑): each avatar's repository on this machine; a borrow card shows it; 现在干 makes a job; a session in another repository does not take it and the person is told; in the named one, a worktree of its own and the envelope; done, the words and the facts back in the chat; 排着, then now", async () => {
+test("任务 in the client (spec §7.4, §7.5; once called 借电脑): each avatar's repository on this machine; a borrow card shows it; 立即执行 makes a job; a session in another repository does not take it and the person is told; in the named one, a worktree of its own and the envelope; done, the words and the facts back in the chat; 排着, then now", async () => {
   const texts = [];
   const s = await startAvatarRelay({ root: mkdtempSync(join(tmpdir(), "gemsbang-work-relay-")), name: "relay.test", texter: (t) => { texts.push(t); } });
   try {
@@ -42,7 +42,7 @@ test("任务 in the client (spec §7.4, §7.5; once called 借电脑): each avat
     const app = repo(), other = repo();
     assert.equal((await gb("repo", { avatar: g.as.id, path: "app" })).code, "repo.notAbsolute");
     const plain = mkdtempSync(join(tmpdir(), "gemsbang-plain-"));
-    assert.equal((await gb("repo", { avatar: g.as.id, path: plain })).reason, `${plain} 不在一个 git 仓库里`);
+    assert.equal((await gb("repo", { avatar: g.as.id, path: plain })).reason, `${plain} 不在 git 仓库中`);
     assert.equal(ok(await gb("repo", { avatar: g.as.id, path: join(app, "src") })).view.avatars[0].repo, app, "the top of the repository");
     const borrow = async (text, choice) => {
       const line = ok(r.say(li, g.owner, g.id, { as: liA.id, text })).message;
@@ -57,7 +57,7 @@ test("任务 in the client (spec §7.4, §7.5; once called 借电脑): each avat
     ok(await gb("bind", { session: "s-2", avatar: "a-ffffffffff" }));
     assert.equal((await gb("work-take", { session: "s-2", avatar: g.as.id, work: first.id, root: app })).code, "body.none", "an open session plays it: only that one takes it");
     const wrong = await gb("work-take", { session: "s-1", avatar: g.as.id, work: first.id, root: join(other, "src") });
-    assert.equal(wrong.reason, `这个会话在 ${other}，「John」指定的仓库是 ${app}，对不上，这件活没动：改：设置页的缓存写错了`);
+    assert.equal(wrong.reason, `本会话位于 ${other}，与「John」指定的工作仓库 ${app} 不一致，任务未执行：改：设置页的缓存写错了`);
     const after = ok(await gb("status")).view;
     assert.deepEqual([after.work[0].state, after.needs.map((n) => n.kind)], ["failed", ["error"]]);
     const second = await borrow("登录页也坏了", 0);
@@ -79,7 +79,7 @@ test("任务 in the client (spec §7.4, §7.5; once called 借电脑): each avat
   }
 });
 
-test("不用问 in the client (S23): a task allowed for the one who asked is listed with their name and the chat's; 撤 takes it back, and the next task from them asks the person again", async () => {
+test("无需确认 in the client (S23): a task allowed for the one who asked is listed with their name and the chat's; 撤 takes it back, and the next task from them asks the person again", async () => {
   const texts = [];
   const s = await startAvatarRelay({ root: mkdtempSync(join(tmpdir(), "gemsbang-allows-relay-")), name: "relay.test", texter: (t) => { texts.push(t); } });
   try {
@@ -106,7 +106,7 @@ test("不用问 in the client (S23): a task allowed for the one who asked is lis
     ok(await gb("answer", { avatar: me, need: card.id, choice: 0, allowPerson: true }));
     assert.deepEqual(ok(await gb("allows", { avatar: me })).allows, [{ key: `person:${liA.id}`, person: liA.id, venue: { owner: g.owner, id: g.id }, who: "李四", group: "设置页改版" }]);
     assert.deepEqual(await ask("登录页也坏了"), [], "allowed: no card");
-    assert.deepEqual(ok(await gb("allows", { avatar: me, allow: `person:${liA.id}` })).allows, [], "撤");
+    assert.deepEqual(ok(await gb("allows", { avatar: me, allow: `person:${liA.id}` })).allows, [], "撤销");
     assert.equal((await ask("首页也看看")).length, 1, "taken back: the person is asked again");
     assert.equal((await gb("allows", { avatar: "a-ffffffffff" })).ok, false, "not the person's avatar");
   } finally {

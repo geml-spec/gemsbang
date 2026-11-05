@@ -11,7 +11,7 @@ import type { Engine } from 'claude-code/testing'
 const ROOT = '/work/app'
 const SESSION = 'sess-preview'
 const RELAY = 'https://gemsbang.com'
-const PANE = { title: 'Gemsbang', isFocused: true, bodyColumns: 56, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 60 }, view: {} }
+const PANE = { title: 'GemsBang', isFocused: true, bodyColumns: 56, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 60 }, view: {} }
 
 // GbInbox: John and his second avatar, Lily 爸爸.
 const JOHN = { id: 'a-0000000001', name: 'John', color: '#2563eb', initial: 'J', venues: ['设置页改版', '前端周会'], mark: true, muted: false, autos: [] }
@@ -71,7 +71,7 @@ const ACCOUNT = { methods: [{ id: 'email-1', kind: 'email', shown: 'test@example
   { id: 'token-b', name: '网页 · Safari', at: at(13, 14, 1), current: false, avatars: [] },
 ] }
 // P4's link, as the client hands it.
-const LINK = { code: 'k7pqm3', url: `${RELAY}/i/k7pqm3`, line: `读 ${RELAY}/i/k7pqm3.md ，照着做：用我的身份进「设置页改版」。`, days: 7, forward: true, approve: true, isOwner: true, group: '设置页改版' }
+const LINK = { code: 'k7pqm3', url: `${RELAY}/i/k7pqm3`, line: `请阅读 ${RELAY}/i/k7pqm3.md 并按说明操作：以我的身份加入「设置页改版」。`, days: 7, forward: true, approve: true, isOwner: true, group: '设置页改版' }
 
 // GbContacts: whom John and Lily 爸爸 know, a name card, the two-person chat's 聊天信息 (S34–S36).
 const TEACHER = 'a-00000000t1'

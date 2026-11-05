@@ -14,7 +14,7 @@ test("the bridge (transport §4): one client call by name at GEMSBANG_HOME, to t
     const first = await answer({ v: 1, call: "status" });
     assert.deepEqual([first.ok, first.gb.ok, first.gb.view.loggedIn, first.gb.view.relay], [true, true, false, s.url], "no server to fill in");
     const refused = await answer({ v: 1, call: "login-start", args: { email: "john" } });
-    assert.deepEqual([refused.ok, refused.gb.ok, refused.gb.code, refused.gb.reason], [true, false, "email.bad", "邮箱格式不对"]);
+    assert.deepEqual([refused.ok, refused.gb.ok, refused.gb.code, refused.gb.reason], [true, false, "email.bad", "邮箱格式不正确"]);
     const sent = await answer({ v: 1, call: "login-start", args: { phone: "13800138000" } });
     assert.deepEqual([sent.gb.ok, sent.gb.info.tail], [true, "8000"]);
   } finally {

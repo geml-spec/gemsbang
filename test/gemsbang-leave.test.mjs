@@ -9,7 +9,7 @@ import { runGb } from "../dist/gemsbang/ops.js";
 const ok = (x) => { assert.equal(x.ok, true, x.reason); return x; };
 const codeIn = (text) => /(\d{6})/.exec(text)[1];
 
-test("退出群 in the client (S19): the 群主 hands the group to someone in it and leaves — it is gone from their list and their muting with it, and the others see who left and who keeps it; the last one leaves a group, and it is gone", async () => {
+test("退出群聊 in the client (S19): the 群主 hands the group to someone in it and leaves — it is gone from their list and their muting with it, and the others see who left and who keeps it; the last one leaves a group, and it is gone", async () => {
   const texts = [];
   const s = await startAvatarRelay({ root: mkdtempSync(join(tmpdir(), "gemsbang-leave-relay-")), name: "relay.test", texter: (t) => { texts.push(t); } });
   try {
@@ -26,7 +26,7 @@ test("退出群 in the client (S19): the 群主 hands the group to someone in it
     const liA = ok(r.growAvatar(li, { name: "李四" })).avatar;
     ok(r.addMember(r.verify(JSON.parse(readFileSync(join(home, "client.json"), "utf8")).token), g.owner, g.id, { as: g.as.id, avatar: liA.id }));
     ok(await gb("mute", { venue: `${g.owner}/${g.id}` }));
-    assert.equal((await gb("leave", { owner: g.owner, id: g.id })).reason, "你是群主，先选一个群里的人接手");
+    assert.equal((await gb("leave", { owner: g.owner, id: g.id })).reason, "你是群主，请先选择新群主");
     const view = ok(await gb("leave", { owner: g.owner, id: g.id, heir: liA.id })).view;
     assert.deepEqual([view.rows.map((x) => x.name), view.muted.venues], [[], []], "gone from the list, its muting with it");
     const theirs = r.venueView(g.owner, g.id, liA.id);

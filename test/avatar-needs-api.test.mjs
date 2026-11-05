@@ -26,7 +26,7 @@ test("需要你 over HTTP (spec §7.3): an avatar's token asks; the person lists
   const agent = call("POST", `/avatars/${lily}/token`, { token: john }).body.token;
   assert.deepEqual(call("POST", "/me/push", { token: john, body: { channel: "file" } }).body, { channels: ["file"], offered: ["file"] });
   assert.deepEqual(call("GET", "/me", { token: john }).body.push, ["file"]);
-  const asked = call("POST", "/needs", { token: agent, body: { venue: `${g.owner}/${g.id}`, kind: "pay", summary: "春游车费 30 元", draft: "车费我转了", options: [{ label: "付", text: "车费我转了" }, { label: "不付" }] } });
+  const asked = call("POST", "/needs", { token: agent, body: { venue: `${g.owner}/${g.id}`, kind: "pay", summary: "春游车费 30 元", draft: "车费我转了", options: [{ label: "付款", text: "车费我转了" }, { label: "不付款" }] } });
   assert.equal(asked.status, 201);
   assert.equal(cardsByFile(root).length, 1);
   assert.deepEqual(call("GET", "/needs", { token: agent }).body.map((n) => n.summary), ["春游车费 30 元"]);
@@ -34,7 +34,7 @@ test("需要你 over HTTP (spec §7.3): an avatar's token asks; the person lists
   assert.deepEqual(mine.map((n) => [n.avatarName, n.group, n.kind]), [["Lily 爸爸", "三年二班家长", "pay"]]);
   const answered = call("POST", `/needs/${lily}/${mine[0].id}`, { token: john, body: { choice: 0 } });
   assert.deepEqual([answered.status, answered.body.need.state, typeof answered.body.sent], [200, "answered", "string"]);
-  assert.equal(call("POST", `/needs/${lily}/${mine[0].id}`, { token: john, body: { choice: 0 } }).body.reason, "这件事已经答过了");
+  assert.equal(call("POST", `/needs/${lily}/${mine[0].id}`, { token: john, body: { choice: 0 } }).body.reason, "该事项已处理");
   assert.deepEqual(call("GET", "/needs", { token: john }).body, []);
   assert.equal(call("POST", `/avatars/${lily}/placeholder`, { token: john, body: { text: "我看一下" } }).status, 404, "no waiting line to set");
   assert.equal(call("POST", "/needs", { token: john, body: { kind: "pay", summary: "x" } }).body.error, "as.required");

@@ -14,6 +14,6 @@ test("phone (spec §6.2): a mainland number gets +86, an international one keeps
   assert.notEqual(h, hashPhone("+8613800138000", "salt-b"));
   assert.ok(!h.includes("13800138000"));
   assert.equal(tailOf("+8613800138000"), "8000");
-  assert.equal(codeText("123456"), "GemsBang 验证码 123456，10 分钟内有效。不是你在登录的话，不用管。");
+  assert.equal(codeText("123456"), "GemsBang 验证码 123456，10 分钟内有效。如非本人操作，请忽略。");
   assert.match(codeText("123456", "ja"), /^GemsBang 認証コード 123456/);
 });

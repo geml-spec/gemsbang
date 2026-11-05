@@ -21,7 +21,7 @@ test("需要你 in the client (spec §7.3): the session's avatar asks with im_as
     const venue = `${g.owner}/${g.id}`;
     ok(await gb("bind", { session: "s-1", avatar: g.as.id }));
     const asked = ok(await gb("tool-ask", { session: "s-1", venue, kind: "promise", summary: "王老师问周五能不能来当志愿者", draft: "周五我可以去", options: [{ label: "能去", text: "周五我可以去" }], placeholder: true }));
-    assert.equal(asked.text, "已经问了本人（答应事情），卡上写着将要发出的话；本人答了就以「Lily 爸爸」发到「三年二班家长」。在那之前别替他答。");
+    assert.equal(asked.text, "已经问了本人（承诺），卡上写着将要发出的话；本人答了就以「Lily 爸爸」发到「三年二班家长」。在那之前别替他答。");
     ok(await gb("tool-ask", { session: "s-1", venue, kind: "error", summary: "身体连不上" }));
     const view = ok(await gb("status")).view;
     assert.deepEqual(view.needs.map((n) => [n.kind, n.avatarName, n.group, n.badge.initial, n.muted]), [["error", "Lily 爸爸", "三年二班家长", "L", false], ["promise", "Lily 爸爸", "三年二班家长", "L", false]]);

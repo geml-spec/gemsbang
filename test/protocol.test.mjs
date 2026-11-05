@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { PROTOCOL_VERSION, decodeRequest, decodeResponse, encodeRequest, unreadableText } from "../dist/hosts/claude-code/protocol.js";
 
 test("requests: one JSON line, one call of the client by name with its arguments; the CLI refuses what it cannot run", () => {
-  const req = { v: 1, call: "say", args: { venue: "a-1/g-1", text: "好" } };
+  const req = { v: 1, call: "say", args: { venue: "a-1/g-1", text: "确定" } };
   assert.equal(encodeRequest(req), `${JSON.stringify(req)}\n`);
   assert.deepEqual(decodeRequest(encodeRequest(req)), req);
   assert.deepEqual(decodeRequest('{"v":1,"call":"status"}'), { v: 1, call: "status" }, "no arguments");

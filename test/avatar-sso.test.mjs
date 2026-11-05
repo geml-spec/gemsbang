@@ -79,7 +79,7 @@ test("the same email (Q19 (a), 2026-11-04): an address the account checked that 
   }
 });
 
-test("加一种登录方式 (S32): the person's client registers its hash first; the account its link opens is one more of their ways in, shown as it shows itself; an account that is someone else's is refused, and the client is told", () => {
+test("添加登录方式 (S32): the person's client registers its hash first; the account its link opens is one more of their ways in, shown as it shows itself; an account that is someone else's is refused, and the client is told", () => {
   const { r } = relay({}, { showCodeTo: ["john@example.com", "lily@example.com"] });
   const john = byEmail(r, "john@example.com"), lily = byEmail(r, "lily@example.com");
   const add = pair();
@@ -119,7 +119,7 @@ test("the four accounts (S28, S30): where each sends the browser, with the app, 
   await assert.rejects(identityOf("github", APPS.github, "nope", back, fetch), /sso\.failed/);
 });
 
-test("the browser's side (S28, sketch ③): /login/sso/<account> sends it on with the hash as the state; the account's answer at /login/callback names the person and says 登好了; a refusal says why; a check on the sign-in is held until it moves", async () => {
+test("the browser's side (S28, sketch ③): /login/sso/<account> sends it on with the hash as the state; the account's answer at /login/callback names the person and says 登录成功; a refusal says why; a check on the sign-in is held until it moves", async () => {
   const { r } = relay({ c1: { me: { id: 77, login: "smith" }, emails: [] } });
   const call = (method, path, body) => answerRequest(r, { method, url: new URL(`https://gemsbang.com${path}`), base: "https://gemsbang.com", accept: "text/html", body: async () => (body === undefined ? "" : JSON.stringify(body)) });
   const { secret, h } = pair();
@@ -131,14 +131,14 @@ test("the browser's side (S28, sketch ③): /login/sso/<account> sends it on wit
   // The pane's check, held while it stands where the client last saw it.
   const held = call("POST", "/login/sso/check", { secret, seen: "opened", timeout: 5 });
   const back = await call("GET", `/login/callback/github?code=c1&state=${h}`);
-  assert.match(back.body, /<h1>登好了<\/h1>/);
+  assert.match(back.body, /<h1>登录成功<\/h1>/);
   const checked = JSON.parse((await held).body);
   assert.deepEqual([checked.state, typeof checked.token, checked.new], ["done", "string", true]);
   const no = pair();
   await call("GET", `/login/sso/github?h=${no.h}`);
-  assert.match((await call("GET", `/login/callback/github?error=access_denied&state=${no.h}`)).body, /没有登上：那边没有同意/);
+  assert.match((await call("GET", `/login/callback/github?error=access_denied&state=${no.h}`)).body, /登录失败：未获得授权/);
   assert.equal(JSON.parse((await call("POST", "/login/sso/check", { secret: no.secret })).body).fail, "sso.denied");
-  assert.match((await call("GET", `/login/sso/github?h=${h}`)).body, /这个登录链接用过了或过期了/);
+  assert.match((await call("GET", `/login/sso/github?h=${h}`)).body, /登录链接已使用或已过期/);
   assert.deepEqual(JSON.parse((await answerRequest(r, { method: "GET", url: new URL("https://gemsbang.com/login/providers"), base: "https://gemsbang.com", body: async () => "" })).body), { providers: ["google", "github", "facebook", "wechat"] });
 });
 

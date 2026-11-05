@@ -52,7 +52,7 @@ function format(m) {
 test("a QR code (P4): 叫人's link as macOS read it; the smallest version that holds the bytes, its finders, timing and dark module where the standard puts them, the format bits level M and checked; text in Chinese as UTF-8; past 213 bytes, none", () => {
   const m = qrModules("https://gemsbang.com/i/k7pqm3");
   assert.deepEqual(shown(m), K7PQM3);
-  for (const [text, size] of [["https://gemsbang.com/i/abcd9ahe?by=a-0000000001", 33], ["读 https://gemsbang.com/i/k7pqm3.md ，照着做：用我的身份进「周末爬山」。", 41], ["x".repeat(120), 45], ["y".repeat(213), 57]]) {
+  for (const [text, size] of [["https://gemsbang.com/i/abcd9ahe?by=a-0000000001", 33], ["请阅读 https://gemsbang.com/i/k7pqm3.md 并按说明操作：以我的身份加入「周末爬山」。", 41], ["x".repeat(120), 45], ["y".repeat(213), 57]]) {
     const q = qrModules(text);
     assert.equal(q.length, size, text);
     const finder = ["#######", "#.....#", "#.###.#", "#.###.#", "#.###.#", "#.....#", "#######"];
@@ -63,8 +63,8 @@ test("a QR code (P4): 叫人's link as macOS read it; the smallest version that 
     assert.deepEqual([f.level, f.holds], [0, true], "level M, its check holding");
   }
   assert.equal(qrModules("z".repeat(214)), undefined);
-  const pic = qrSvg(m, 84, "给人的链接");
-  assert.deepEqual([pic.width, pic.height, pic.alt], [84, 84, "给人的链接"]);
+  const pic = qrSvg(m, 84, "邀请链接");
+  assert.deepEqual([pic.width, pic.height, pic.alt], [84, 84, "邀请链接"]);
   assert.match(pic.source, /viewBox="0 0 37 37"/, "four modules of quiet zone on each side");
   assert.match(pic.source, /<rect width="37" height="37" fill="#fff"\/>/, "white behind it, on a dark ground too");
 });

@@ -37,7 +37,7 @@ test("底子 in the client (S27): an entry written in 我 — split at its colon
     const round = ok(await gb("wake", { avatar: lily, owner: g.owner, id: g.id, choice: "reply" })).round;
     assert.match(round.prompt, /关于本人，你能用的（底子；只在聊到这件事时用，不主动说出来；.*）：\n- 家人：Lily，8 岁，三年二班\n- 时区：上海\n/);
     // im_remember: waiting in 我, given to the session's avatar alone, with who said it.
-    assert.match(ok(await gb("tool-remember", { session: "s-1", label: "家人", text: "Lily 对花生过敏", who: "王老师" })).text, /^已经记成待本人点头：「家人：Lily 对花生过敏」/);
+    assert.match(ok(await gb("tool-remember", { session: "s-1", label: "家人", text: "Lily 对花生过敏", who: "王老师" })).text, /^已记为待本人确认：「家人：Lily 对花生过敏」/);
     view = ok(await gb("status")).view;
     const nut = view.base.find((x) => x.text === "Lily 对花生过敏");
     assert.deepEqual([nut.state, nut.for, nut.by, nut.who], ["pending", [lily], lily, "王老师"]);
@@ -50,7 +50,7 @@ test("底子 in the client (S27): an entry written in 我 — split at its colon
     view = ok(await gb("base-set", { item: later.id, keep: false })).view;
     assert.deepEqual(view.base.map((x) => [x.text, x.state]), [["Lily，8 岁，三年二班", "kept"], ["上海", "kept"], ["Lily 对花生过敏", "kept"]]);
     const read = ok(await gb("tool-read", { session: "s-1" })).text;
-    assert.match(read, /\n\n关于本人，你能用的（底子.*）：\n- 家人：Lily，8 岁，三年二班\n- 时区：上海\n- 家人：Lily 对花生过敏$/);
+    assert.match(read, /\n\n关于本人，你能用的（个人信息.*）：\n- 家人：Lily，8 岁，三年二班\n- 时区：上海\n- 家人：Lily 对花生过敏$/);
     ok(await gb("bind", { session: "s-2", avatar: work.as.id }));
     assert.match(ok(await gb("tool-read", { session: "s-2" })).text, /：\n- 时区：上海$/, "John's agent: only what is given to John");
     assert.equal((await gb("base-add", { text: "x", for: [] })).ok, false);
