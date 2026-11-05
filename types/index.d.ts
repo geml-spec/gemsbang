@@ -47,6 +47,12 @@ declare module 'claude-code' {
       addLinks: GemsbangJson
       /** The name card open (S35): whose, as which of the person's avatars knows them, and the page its ‹ goes back to. */
       contact: GemsbangJson
+      /** 邀请 (S37): the avatar whose own link the page shows; null, the one last spoken as. */
+      inviteAs: string | null
+      /** 发起群聊 (S38): the contacts ticked, by id. */
+      groupPick: string[]
+      /** 发起群聊 (S38): the name typed so far, for 创建（N 人）; never drawn. */
+      groupName: string
       /** The card of 我 whose 改 is open, by its row's key; null when none is (one at a time). */
       editing: string | null
       /** 叫人's 换一个链接 asked, not yet answered (P4c); the page 叫人 was opened from, where its ‹ goes back to. */

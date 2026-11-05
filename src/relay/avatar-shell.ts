@@ -14,7 +14,7 @@
 // the Workers' types: a shell reads its own wire into a ShellRequest and
 // writes the answer back.
 import { JSON_TYPE, langOf, refusal, routeAvatars, type AvatarRequest, type AvatarResponse } from "./avatar-api.js";
-import { groupPage, HTML_TYPE, joinPage, loginPage, minePage, ssoEndPage, ssoGoPage } from "./avatar-pages.js";
+import { groupPage, HTML_TYPE, joinPage, loginPage, minePage, personPage, ssoEndPage, ssoGoPage } from "./avatar-pages.js";
 import { ssoHash, type AvatarRelay } from "./avatars.js";
 import { authorizeUrl, identityOf, type Identity } from "./sso.js";
 import { isSsoKind } from "../core/avatar/address.js";
@@ -33,7 +33,7 @@ export interface ShellRequest {
 }
 
 /** The pages by path, for a browser (`Accept: text/html`); a script at the same path gets the JSON. */
-const PAGES: readonly [RegExp, (lang: Lang) => string][] = [[/^\/i\/[a-z0-9]{1,16}$/, joinPage], [/^\/g\/[gd]-[0-9a-f]{10}$/, groupPage], [/^\/login$/, loginPage], [/^\/$/, minePage]];
+const PAGES: readonly [RegExp, (lang: Lang) => string][] = [[/^\/i\/[a-z0-9]{1,16}$/, joinPage], [/^\/u\/[a-z0-9]{1,16}$/, personPage], [/^\/g\/[gd]-[0-9a-f]{10}$/, groupPage], [/^\/login$/, loginPage], [/^\/$/, minePage]];
 
 /** How long a wait for updates may hold, in seconds: the `timeout` asked, at most WAIT_MAX_S; none asked, no wait. */
 const waitOf = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.min(n, WAIT_MAX_S) : 0; };

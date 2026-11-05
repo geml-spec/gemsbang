@@ -48,3 +48,13 @@ test("a wait on the box, in any shell (architecture §5.2): held while nothing i
   leave();
   assert.deepEqual((await left).json.updates, [], "the asker went away: answered empty, nothing held");
 });
+
+test("an avatar's own link in a browser (S37): /u/<code> is the page that starts the two-person chat, in the browser's language; for a script, its facts as JSON", async () => {
+  const { ask, signIn } = shell();
+  const token = await signIn("john@example.com");
+  const avatar = (await ask("POST", "/avatars", { token, body: { name: "John" } })).json.avatar.id;
+  const code = (await ask("GET", `/avatars/${avatar}/link`, { token })).json.link.code;
+  const page = await ask("GET", `/u/${code}`, { accept: "text/html", languages: "zh" });
+  assert.deepEqual([page.status, page.type.startsWith("text/html"), page.body.includes('api("GET", "/u/" + code)'), page.body.includes("与「{name}」私聊")], [200, true, true, true]);
+  assert.equal((await ask("GET", `/u/${code}`)).json.avatar.name, "John");
+});

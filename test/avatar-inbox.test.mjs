@@ -85,3 +85,38 @@ test("the avatar the person last spoke as (Q1, S21): their own newest line, else
   assert.equal(recentAvatar(m([])), "a-1", "nothing said: the first");
   assert.equal(recentAvatar(m([], [])), undefined);
 });
+
+test("a two-person chat begun from a link (S37): one line says how, to each of the two in their own words, and no one 加入了群聊; until anyone speaks it is the chat list's last line, with no speaker", () => {
+  const begun = (as, name, other) => ({ owner: LI, id: "d-000000000d", kind: "dm", name, as, members: [{ id: LI, name: "李四" }, { id: JOHN, name: "John" }], blocks: [
+    { id: "venue", value: { kind: "dm", by: `avatar:${other}`, at: "2026-11-01T07:00:00Z", via: "link" } },
+    { id: "member-1", value: { avatar: `avatar:${JOHN}`, at: "2026-11-01T07:00:00Z" } },
+    { id: "member-2", value: { avatar: `avatar:${LI}`, at: "2026-11-01T07:00:00Z" } },
+  ] });
+  const owner = begun(JOHN, "李四", LI), joiner = begun(JOHN, "李四", JOHN);
+  assert.deepEqual(itemsOf(owner).map((i) => [i.kind, i.who, i.mine]), [["began", "李四", false]], "John's link, 李四 opened it");
+  assert.deepEqual(itemsOf(joiner).map((i) => [i.kind, i.mine]), [["began", true]], "John opened 李四's link");
+  const row = (v) => inboxOf({ ...MIRROR, venues: [v] }, {}, "2026-11-01T12:00:00Z", { zoneMinutes: 480 }).rows[0].last;
+  assert.deepEqual(row(owner), { who: "", text: "李四 通过你的邀请链接发起了私聊" });
+  assert.deepEqual(row(joiner), { who: "", text: "你通过邀请链接与 李四 发起了私聊" });
+  const said = { ...owner, blocks: [...owner.blocks, msg("m-1", LI, "你好", "2026-11-01T07:01:00Z")] };
+  assert.deepEqual(row(said), { who: "李四", text: "你好" }, "once someone speaks, the last line is theirs");
+  const plain = MIRROR.venues[2];
+  assert.equal(itemsOf({ ...plain, blocks: [{ id: "venue", value: { kind: "dm", by: `avatar:${JOHN}`, at: "2026-10-31T08:00:00Z" } }, { id: "member-1", value: { avatar: `avatar:${JOHN}`, at: "2026-10-31T08:00:00Z" } }, ...plain.blocks] }).some((i) => i.kind !== "message"), false, "a chat opened from 联系人 says nothing of how");
+});
+
+test("members brought in by another (S38): a run of them by the same one is one item, who came in by themself stays 加入了群聊; until anyone speaks the chat list's last line says it, with no speaker", () => {
+  const v = { owner: JOHN, id: "g-000000000e", kind: "group", name: "John、Lily 爸爸、王五", as: LILY, members: [{ id: JOHN, name: "John" }, { id: LILY, name: "Lily 爸爸" }, { id: WANG, name: "王五" }, { id: LI, name: "李四" }], blocks: [
+    { id: "venue", value: { kind: "group", by: `avatar:${JOHN}` } },
+    { id: "member-1", value: { avatar: `avatar:${JOHN}`, by: `avatar:${JOHN}`, at: "2026-11-01T07:00:00Z" } },
+    { id: "member-2", value: { avatar: `avatar:${LILY}`, by: `avatar:${JOHN}`, via: "invite", at: "2026-11-01T07:00:01Z" } },
+    { id: "member-3", value: { avatar: `avatar:${WANG}`, by: `avatar:${JOHN}`, via: "invite", at: "2026-11-01T07:00:02Z" } },
+  ] };
+  assert.deepEqual(itemsOf(v).map((i) => [i.kind, i.kind === "invited" ? i.names : i.who]), [["joined", "John"], ["invited", ["Lily 爸爸", "王五"]]]);
+  const row = (venue) => inboxOf({ ...MIRROR, venues: [venue] }, {}, "2026-11-01T12:00:00Z", { zoneMinutes: 480 }).rows[0].last;
+  assert.deepEqual(row(v), { who: "", text: "John 邀请你、王五加入了群聊" }, "to the one brought in");
+  assert.deepEqual(row({ ...v, as: JOHN }), { who: "", text: "你邀请Lily 爸爸、王五加入了群聊" }, "to John");
+  const later = { ...v, blocks: [...v.blocks, msg("m-1", JOHN, "大家好", "2026-11-01T07:01:00Z"), { id: "member-4", value: { avatar: `avatar:${LI}`, by: `avatar:${LI}`, at: "2026-11-01T07:02:00Z" } }] };
+  assert.deepEqual(itemsOf(later).map((i) => i.kind), ["joined", "invited", "message", "joined"], "by a link: 加入了群聊, as before");
+  const letIn = { ...v, blocks: [...v.blocks, { id: "member-4", value: { avatar: `avatar:${LI}`, by: `avatar:${JOHN}`, at: "2026-11-01T07:02:00Z" } }] };
+  assert.equal(itemsOf(letIn).at(-1).kind, "joined", "let in by the 群主 on a request: 加入了群聊, not 邀请");
+});

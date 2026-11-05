@@ -21,8 +21,8 @@ import type { JsonValue } from "../core/json.js";
 import { factsOf } from "../core/avatar/borrow.js";
 import { BASE_MAX, BASE_PENDING_MAX, baseFault, baseFor, baseOf, type BaseItem } from "../core/avatar/base.js";
 import { defaultOptions, isKind, needFault, wordsOf, type Allow, type Need, type NeedKind, type NeedOption } from "../core/avatar/needs.js";
-import { DEFAULT_LINK_RULES, expiresAt, linkPath, linkStatus, LINK_CODE, makeCode, mayHandOut, withLinkRules, type LinkRules } from "../core/avatar/links.js";
-import { nameFault, randomName } from "../core/avatar/names.js";
+import { DEFAULT_LINK_RULES, expiresAt, linkPath, linkStatus, LINK_CODE, makeCode, mayHandOut, personLinkPath, withLinkRules, type LinkRules } from "../core/avatar/links.js";
+import { GROUP_NAME_MAX, nameFault, randomName } from "../core/avatar/names.js";
 import { suggestions, type Suggestion } from "../core/avatar/naming.js";
 import { pickAvatar, type Pick } from "../core/avatar/pick.js";
 import { DIFFERENCE_LIMIT, differenceOf, type Difference, type Update } from "../core/avatar/updates.js";
@@ -63,6 +63,10 @@ export interface LinkInfo { group: { id: string; name: string; count: number; me
 export interface Method { id: string; kind: AddressKind; shown: string; at: string }
 /** Where the person is signed in: the sign-in's token id, the name the device gave, when, whether it is the one asking, the avatars the agents it attached play. */
 export interface Device { id: string; name: string; at: string; current: boolean; avatars: AvatarCard[] }
+/** An avatar's own link as its person hands it out (S37): it starts a two-person chat with that avatar. */
+export interface PersonLinkView { code: string; expires: string; path: string }
+/** What an avatar's own link shows (S37): whose it is and until when; to a person, which of their avatars would talk to it and the names offered. */
+export interface PersonLinkInfo { avatar: AvatarCard; expires: string; suggestions: Suggestion[]; you?: { avatars: AvatarCard[]; pick: Pick } }
 /** In through a link: the avatar that went in, or waits for the owner; an agent's join carries the avatar's token. */
 export interface Joined { venue: VenueView; avatar: AvatarCard; already: boolean; pending?: string; token?: string }
 
@@ -109,7 +113,7 @@ const WORK_STATES: readonly WorkState[] = ["waiting", "queued", "taken", "done",
 const WORK_FAULTS = ["borrow.noRepo", "borrow.wrongRepo", "borrow.failed"];
 /** A job for the avatar's computer, from a borrow card: what it is, where it came from, where it stands. */
 export interface Work { id: string; avatar: string; need: string; summary: string; state: WorkState; at: string; since: string; venue?: { owner: string; id: string }; message?: string; from?: string; auto?: true }
-export const GROUP_NAME_MAX = 40;
+export { GROUP_NAME_MAX };
 
 export class AvatarRelay {
   /** The folder of a relay on files; none on another store. */
@@ -315,7 +319,7 @@ export class AvatarRelay {
    */
   private remind(owner: string, venue: string, line: Record<string, JsonValue>): void {
     const s = this.venueState(owner, venue);
-    if (s === undefined || s.kind !== "group") return;
+    if (s === undefined) return;
     const text = str(line["text"]) ?? "", speaker = parseWho(str(line["speaker"]) ?? "");
     const from = speaker?.kind === "avatar" ? speaker.id : undefined;
     const replyTo = str(line["replyTo"]);
@@ -324,8 +328,9 @@ export class AvatarRelay {
     for (const m of s.members) {
       if (m === from) continue;
       const name = this.card(m)?.name;
-      const mention = name !== undefined && text.includes(`@${name}`), reply = answered?.kind === "avatar" && answered.id === m;
-      if (!mention && !reply) continue;
+      // In a two-person chat every line is for the other one (S37); in a group, an @ of their name or a reply to them.
+      const dm = s.kind === "dm", mention = name !== undefined && text.includes(`@${name}`), reply = answered?.kind === "avatar" && answered.id === m;
+      if (!dm && !mention && !reply) continue;
       const person = this.ownerOf(m);
       if (person === undefined || this.ownerOf(from ?? "") === person || this.onComputer(person)) continue;
       const to = this.reachOf(person);
@@ -335,7 +340,7 @@ export class AvatarRelay {
       if (last !== undefined && Date.parse(now) - Date.parse(str(last.value["at"]) ?? "") < REMIND_GAP_MS) continue;
       this.store.append(RELAY_OWNER, remindsDoc(person), nextId("remind"), (_d, prev, id) => sealed({ id, venue: key, at: now }, prev));
       const lang = this.languageOf(person);
-      const subject = say(mention ? "remind.mention" : "remind.reply", lang, { group: s.name, who });
+      const subject = say(dm ? "remind.dm" : mention ? "remind.mention" : "remind.reply", lang, { group: s.name, who });
       try {
         const sending = this.mailer({ to, subject, text: say("remind.text", lang, { line: text, url: `${this.origin}/g/${venue}` }) });
         void Promise.resolve(sending).catch(() => { /* the operator's route failed; the pages still show it */ });
@@ -951,9 +956,10 @@ export class AvatarRelay {
   }
 
   /** The avatar into the venue: a member block in the venue, a join block in the avatar's own list of venues. */
-  private join(owner: string, venue: string, avatar: string, by: string): void {
+  /** An avatar into a venue, by `by`; `via: "invite"` when another brought it in (S38), so the chat can say who did. */
+  private join(owner: string, venue: string, avatar: string, by: string, via?: "invite"): void {
     const now = this.now();
-    const m = this.store.append(owner, venueDoc(venue), nextId("member"), (_d, prev, id) => sealed({ id, avatar: avatarSpeaker(avatar), by, at: now }, prev));
+    const m = this.store.append(owner, venueDoc(venue), nextId("member"), (_d, prev, id) => sealed({ id, avatar: avatarSpeaker(avatar), by, at: now, ...(via !== undefined ? { via } : {}) }, prev));
     this.emit(owner, venueDoc(venue), m.block);
     const j = this.store.append(avatar, "joined.geml", nextId("join"), (_d, prev, id) => sealed({ id, owner, venue, at: now }, prev));
     this.emit(avatar, "joined.geml", j.block);
@@ -1002,7 +1008,7 @@ export class AvatarRelay {
     if (a.avatar !== s.keeper) return fail(403, "group.ownerOnly");
     const who = str(obj(body)?.["avatar"]);
     if (who === undefined || this.card(who) === undefined) return fail(404, "avatar.missing");
-    if (!s.members.includes(who)) this.join(owner, venue, who, avatarSpeaker(a.avatar));
+    if (!s.members.includes(who)) this.join(owner, venue, who, avatarSpeaker(a.avatar), "invite");
     return { ok: true, venue: this.venueView(owner, venue)! };
   }
 
@@ -1015,15 +1021,27 @@ export class AvatarRelay {
     if (other === undefined || other === a.avatar || this.card(other) === undefined) return fail(404, "avatar.missing");
     const shared = this.joinedOf(a.avatar).some((v) => this.venueState(v.owner, v.venue)?.kind === "group" && this.venueState(v.owner, v.venue)?.members.includes(other) === true);
     if (!shared) return fail(403, "dm.sharedGroup");
-    const [first, second] = [a.avatar, other].sort() as [string, string];
-    const venue = `d-${createHash("sha256").update(`${first}:${second}`, "utf8").digest("hex").slice(0, 10)}`;
-    const made = appendSealed(this.store, first, venueDoc(venue), "venue", { kind: "dm", by: avatarSpeaker(a.avatar), at: this.now() });
+    const dm = this.makeDm(a.avatar, other, avatarSpeaker(a.avatar));
+    return { ok: true, venue: this.venueView(dm.owner, dm.venue, a.avatar)! };
+  }
+
+  /** Where the two-person chat of a pair is kept: under the smaller id, named from both. */
+  private dmOf(a: string, b: string): { owner: string; venue: string } {
+    const [first, second] = [a, b].sort() as [string, string];
+    return { owner: first, venue: `d-${createHash("sha256").update(`${first}:${second}`, "utf8").digest("hex").slice(0, 10)}` };
+  }
+
+  /** The pair's two-person chat, made the first time with both in it; `via: "link"` when it began from an avatar's own link (S37). */
+  private makeDm(a: string, b: string, by: string, via?: "link"): { owner: string; venue: string; existed: boolean } {
+    const { owner, venue } = this.dmOf(a, b);
+    const [first, second] = [a, b].sort() as [string, string];
+    const made = appendSealed(this.store, owner, venueDoc(venue), "venue", { kind: "dm", by, at: this.now(), ...(via !== undefined ? { via } : {}) });
     if (!made.existed) {
-      this.emit(first, venueDoc(venue), made.block);
-      this.join(first, venue, first, avatarSpeaker(a.avatar));
-      this.join(first, venue, second, avatarSpeaker(a.avatar));
+      this.emit(owner, venueDoc(venue), made.block);
+      this.join(owner, venue, first, by);
+      this.join(owner, venue, second, by);
     }
-    return { ok: true, venue: this.venueView(first, venue, a.avatar)! };
+    return { owner, venue, existed: made.existed };
   }
 
   /** A message in a venue the acting avatar is in (spec §7.2): stamped with the avatar and `by`; a client's id makes a resend a no-op. */
@@ -1309,6 +1327,133 @@ export class AvatarRelay {
     this.nameDevice(p.person, device.record.id, obj(body)?.["device"]);
     const { phone: _p, email: _e, code: _c, lang: _l, device: _d, ...rest } = obj(body) ?? {};
     const joined = this.joinByLink(device.record, code, rest);
+    return isFail(joined) ? joined : { ...joined, device: device.token };
+  }
+
+  // --- an avatar's own link (S37, Q24 ①, Q25 (a)): whoever opens it starts a two-person chat with that avatar ---
+
+  /** The avatar's current code: the last one made for it, kept beside the groups' under the relay's own `links/`. */
+  private currentPersonCode(avatar: string): string | undefined {
+    const codes = this.store.read(RELAY_OWNER, `links/${avatar}.geml`).blocks.filter((b) => /^code-\d+$/.test(b.id));
+    return str(codes[codes.length - 1]?.value["code"]);
+  }
+
+  /** A code's link when it is an avatar's own: its block names an avatar and no venue, so a group's code is never one. */
+  private personLinkOf(code: string): { code: string; avatar: string; expires: string } | undefined {
+    if (!LINK_CODE.test(code)) return undefined;
+    const v = this.store.read(RELAY_OWNER, `links/${code}.geml`).blocks.find((b) => b.id === "link")?.value;
+    const w = parseWho(str(v?.["avatar"]) ?? ""), expires = str(v?.["expires"]);
+    return w?.kind !== "avatar" || v?.["venue"] !== undefined || expires === undefined ? undefined : { code, avatar: w.id, expires };
+  }
+
+  /** A new code for the avatar, made current; the one before it stops. */
+  private newPersonLink(avatar: string, by: string): { code: string; expires: string } {
+    const now = this.now(), expires = expiresAt(now);
+    for (;;) {
+      const code = makeCode(randomBytes(8));
+      if (appendSealed(this.store, RELAY_OWNER, `links/${code}.geml`, "link", { avatar: avatarSpeaker(avatar), by, at: now, expires }).existed) continue;
+      this.store.append(RELAY_OWNER, `links/${avatar}.geml`, nextId("code"), (_d, prev, id) => sealed({ id, code, at: now }, prev));
+      return { code, expires };
+    }
+  }
+
+  /** Who may hand the avatar's link out or reset it: its person, or its own agent. */
+  private ownAvatar(by: TokenRecord, avatar: string): { by: string } | Fail {
+    if (by.scope === "avatar") {
+      const w = parseWho(by.speaker);
+      return w?.kind === "avatar" && w.id === avatar ? { by: avatarSpeaker(avatar) } : fail(403, "token.ownAvatar");
+    }
+    const refused = this.onlyOwner(by, avatar);
+    return refused ?? { by: avatarSpeaker(avatar) };
+  }
+
+  /** The avatar's own link (S37): its current one, or a new one when there is none or it is past its day. */
+  personLinkFor(by: TokenRecord, avatar: string): Result<{ link: PersonLinkView }> {
+    if (this.card(avatar) === undefined) return fail(404, "avatar.missing");
+    const own = this.ownAvatar(by, avatar);
+    if (isFail(own)) return own;
+    const current = this.personLinkOf(this.currentPersonCode(avatar) ?? "");
+    const link = current !== undefined && linkStatus(current, current.code, this.now()) === "ok" ? current : this.newPersonLink(avatar, own.by);
+    return { ok: true, link: { code: link.code, expires: link.expires, path: personLinkPath(link.code) } };
+  }
+
+  /** A new link in place of the avatar's current one: the old one stops at once. */
+  rotatePersonLink(by: TokenRecord, avatar: string): Result<{ link: PersonLinkView }> {
+    if (this.card(avatar) === undefined) return fail(404, "avatar.missing");
+    const own = this.ownAvatar(by, avatar);
+    if (isFail(own)) return own;
+    const link = this.newPersonLink(avatar, own.by);
+    return { ok: true, link: { code: link.code, expires: link.expires, path: personLinkPath(link.code) } };
+  }
+
+  /** The avatar's link, good: the avatar it opens; missing, gone or stopped, the refusal. */
+  private goodPersonLink(code: string): { code: string; avatar: string; expires: string } | Fail {
+    const link = this.personLinkOf(code);
+    if (link === undefined || this.card(link.avatar) === undefined) return fail(404, "link.missing");
+    return linkStatus(link, this.currentPersonCode(link.avatar), this.now()) === "ok" ? link : fail(410, "link.gone");
+  }
+
+  /** Which of the person's avatars would talk to the link's: one already in a chat with it; else their only one; else theirs to pick. */
+  private personPick(person: string, target: string): Pick {
+    const mine = this.avatarsOf(person);
+    const inside = mine.find((a) => { const d = this.dmOf(a.id, target); return this.venueState(d.owner, d.venue)?.members.includes(a.id) === true; });
+    if (inside !== undefined) return { kind: "in", avatar: inside.id };
+    return mine.length === 1 ? { kind: "known", avatar: mine[0]!.id } : { kind: "choose" };
+  }
+
+  /** What the link's page shows: whose it is and until when; a person signed in also sees which of their avatars would talk, and every viewer the names offered. */
+  personLinkInfo(code: string, viewer: TokenRecord | undefined, q: { lang?: Lang } = {}): Result<PersonLinkInfo> {
+    const link = this.goodPersonLink(code);
+    if (isFail(link)) return link;
+    const card = this.card(link.avatar)!;
+    const person = viewer === undefined ? undefined : this.personOf(viewer);
+    const lang = person !== undefined ? this.languageOf(person) : (q.lang ?? DEFAULT_LANG);
+    const defaultName = person === undefined ? undefined : this.defaultNameOf(person);
+    const info: PersonLinkInfo = { avatar: card, expires: link.expires, suggestions: suggestions({ group: "", lang, ...(defaultName !== undefined ? { defaultName } : {}) }) };
+    if (person !== undefined) info.you = { avatars: this.avatarsOf(person), pick: this.personPick(person, link.avatar) };
+    return { ok: true, ...info };
+  }
+
+  /**
+   * In through an avatar's own link (S37), with the person's yes: their token, or the device token of the agent they
+   * attached. The avatar that talks is the one named in `as`; else a new one with the `name` given; else the one
+   * already in a chat with the link's, or their only one. Their own avatar's link is refused. The chat opens at once
+   * (Q25 (a)); one the pair already has is answered as it is.
+   */
+  joinByPersonLink(by: TokenRecord, code: string, body: unknown): Result<Joined> {
+    const person = this.personOf(by);
+    if (person === undefined) return fail(403, "join.needsPerson");
+    const link = this.goodPersonLink(code);
+    if (isFail(link)) return link;
+    if (this.ownerOf(link.avatar) === person) return fail(400, "link.self");
+    const o = obj(body) ?? {};
+    const pick = this.personPick(person, link.avatar);
+    let avatar: string;
+    if (o["as"] !== undefined) {
+      const as = str(o["as"]);
+      if (as === undefined || this.ownerOf(as) !== person) return fail(403, "avatar.notYours");
+      avatar = as;
+    } else if (o["name"] !== undefined || o["new"] === true || pick.kind === "choose") {
+      const grown = this.grow(person, o["name"]);
+      if (isFail(grown)) return grown;
+      avatar = grown.avatar.id;
+    } else avatar = pick.avatar;
+    const token = by.scope === "device" ? issueToken(this.store, { speaker: avatarSpeaker(avatar), scope: "avatar", by: by.id, at: this.now() }).token : undefined;
+    const dm = this.makeDm(avatar, link.avatar, avatarSpeaker(avatar), "link");
+    if (!dm.existed) this.store.append(RELAY_OWNER, `links/${code}.geml`, nextId("use"), (_d, prev, id) => sealed({ id, at: this.now() }, prev));
+    return { ok: true, venue: this.venueView(dm.owner, dm.venue, avatar)!, avatar: this.card(avatar)!, already: dm.existed, ...(token !== undefined ? { token } : {}) };
+  }
+
+  /** The agent's or the web's way in through an avatar's own link with no token: the address and its code first, as for a group's. */
+  joinWithPersonCode(code: string, body: unknown): Result<Joined & { device: string }> {
+    const link = this.goodPersonLink(code);
+    if (isFail(link)) return link;
+    const p = this.checkCode(body);
+    if (isFail(p)) return p;
+    const device = issueToken(this.store, { speaker: `person:${p.person}`, scope: "device", by: "login", at: this.now() });
+    this.nameDevice(p.person, device.record.id, obj(body)?.["device"]);
+    const { phone: _p, email: _e, code: _c, lang: _l, device: _d, ...rest } = obj(body) ?? {};
+    const joined = this.joinByPersonLink(device.record, code, rest);
     return isFail(joined) ? joined : { ...joined, device: device.token };
   }
 

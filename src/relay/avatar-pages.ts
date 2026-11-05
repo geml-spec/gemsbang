@@ -167,6 +167,47 @@ const JOIN_JS = `
   load();
 `;
 
+/** An avatar's own link (S37): whose it is, then the email and its code, then which avatar talks, then 发起私聊; one already in a chat with it goes straight there. */
+const PERSON_JS = `
+  var code = location.pathname.split("/")[2];
+  var main = document.getElementById("app");
+  function load() { api("GET", "/u/" + code).then(function (r) { clear(main); if (r.status !== 200) { main.appendChild(el("section", "", [el("p", "", [r.data.reason])])); return; } render(r.data); }); }
+  function render(info) {
+    var top = el("section", "", [el("h1", "", [say("page.dm.title", { name: info.avatar.name })]), el("div", "chips", [chip(info.avatar.name)]), el("div", "dim", [say("page.dm.note", { name: info.avatar.name })])]);
+    main.appendChild(top);
+    var step = el("section");
+    main.appendChild(step);
+    var note = el("div", "note");
+    function join(body) {
+      api("POST", "/u/" + code + "/join", body).then(function (r) {
+        if (r.status >= 300) { note.textContent = r.data.reason; step.appendChild(note); return; }
+        location.href = "/g/" + r.data.venue.id;
+      });
+    }
+    if (!info.you) { loginBox(step, load); return; }
+    if (info.you.pick.kind === "in") { join({ as: info.you.pick.avatar }); return; }
+    var choice = info.you.pick.kind === "known" ? info.you.pick.avatar : (info.you.avatars[0] ? info.you.avatars[0].id : "new");
+    var naming = el("div");
+    if (info.you.avatars.length > 0) {
+      step.appendChild(el("h2", "", [say("page.dm.as")]));
+      info.you.avatars.concat([{ id: "new", name: say("page.join.new") }]).forEach(function (a) {
+        var radio = el("input"); radio.type = "radio"; radio.name = "as"; radio.value = a.id; radio.checked = a.id === choice;
+        radio.onchange = function () { choice = a.id; naming.style.display = choice === "new" ? "" : "none"; };
+        step.appendChild(el("label", "pick", [radio, a.id === "new" ? a.name : chip(a.name)]));
+      });
+    }
+    naming.style.display = choice === "new" ? "" : "none";
+    naming.appendChild(el("h2", "", [say("page.name.title")]));
+    var own = el("input"); own.type = "text"; own.placeholder = say("page.name.own"); own.maxLength = 24;
+    naming.appendChild(el("div", "row", [own]));
+    step.appendChild(naming);
+    var go = el("button", "primary", [say("page.dm.go")]);
+    step.appendChild(el("div", "row", [go])); step.appendChild(note);
+    go.onclick = function () { if (choice !== "new") join({ as: choice }); else if (own.value.trim()) join({ name: own.value.trim() }); else join({ new: true }); };
+  }
+  load();
+`;
+
 /** The group (spec §7.2): who you are here, what was said, the box to say something as your avatar, 把群转给别人, 有事时提醒我. */
 const GROUP_JS = `
   var id = location.pathname.split("/")[2];
@@ -224,7 +265,8 @@ const GROUP_JS = `
     var leave = el("button", "danger", [say("panel.leave")]); leave.type = "button";
     var asking = el("div");
     leave.onclick = function () { clear(asking); asking.appendChild(leaveBox(data)); };
-    main.appendChild(el("section", "", [form, el("div", "row", [share, leave]), asking, note]));
+    // A two-person chat has no link to share and cannot be left (S36).
+    main.appendChild(el("section", "", [form, el("div", "row", data.venue.kind === "dm" ? [] : [share, leave]), asking, note]));
     window.scrollTo(0, document.body.scrollHeight);
   }
   function leaveBox(data) {
@@ -303,7 +345,7 @@ const MINE_JS = `
       clear(main);
       if (r.status !== 200) { var s = el("section", "", [el("h1", "", [say("page.mine.title")])]); main.appendChild(s); loginBox(s, load); return; }
       var list = el("section", "", [el("h2", "", [say("page.mine.title")])]);
-      var groups = r.data.filter(function (v) { return v.kind === "group"; }).sort(function (a, b) { return (b.last ? b.last.at : "") < (a.last ? a.last.at : "") ? -1 : 1; });
+      var groups = r.data.filter(function (v) { return v.kind === "group" || v.kind === "dm"; }).sort(function (a, b) { return (b.last ? b.last.at : "") < (a.last ? a.last.at : "") ? -1 : 1; });
       if (groups.length === 0) list.appendChild(el("div", "dim", [say("page.mine.none")]));
       groups.forEach(function (v) {
         var a = el("a", "chat", [face(v.name), el("span", "tx", [el("span", "n", [v.name, el("span", "tm", [v.last ? when(v.last.at) : ""])]), el("span", "p", [v.last ? v.last.who + "：" + v.last.text : say("page.group.empty")])])]);
@@ -366,5 +408,6 @@ export const ssoEndPage = (outcome: "in" | "added" | { fail: string }, lang: Lan
 
 export const joinPage = (lang: Lang): string => page("GemsBang", JOIN_JS, lang);
 export const groupPage = (lang: Lang): string => page("GemsBang", GROUP_JS, lang);
+export const personPage = (lang: Lang): string => page("GemsBang", PERSON_JS, lang);
 export const loginPage = (lang: Lang): string => page(say("page.login.title", lang), LOGIN_JS, lang);
 export const minePage = (lang: Lang): string => page(say("page.mine.title", lang), MINE_JS, lang);

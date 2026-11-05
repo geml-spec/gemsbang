@@ -51,7 +51,7 @@ test("a person joins from a WeChat link (spec §6.2): the browser gets the join 
     assert.equal(signIn.includes("page.phone"), false);
     // 我的群聊 (S8, P12b): where a person on the web comes back to; signing in lands there; a group page has 退出群聊, no reminder button (they come by mail).
     const minePage = (await call("GET", "/", { accept: "text/html", languages: "zh" })).body;
-    assert.match(minePage, /<title>我的群聊<\/title>/);
+    assert.match(minePage, /<title>我的聊天<\/title>/);
     assert.match(minePage, /api\("GET", "\/venues"\)/);
     assert.match(signIn, /location.href = next && next.charAt\(0\) === "\/" && next.charAt\(1\) !== "\/" \? next : "\/"/, "signed in: back to 我的群聊");
     const group = (await call("GET", "/g/" + g.id, { accept: "text/html", languages: "zh" })).body;

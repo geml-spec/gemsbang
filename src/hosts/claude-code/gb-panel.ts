@@ -22,14 +22,15 @@
 // gemsbang cannot work or nobody is logged in; with nothing to say it stays,
 // how many chats have something new. Pure and Node-free.
 import { factsLine } from "../../core/avatar/borrow.js";
-import { timeLabel, type Badge, type ChatItem, type InboxRow } from "../../core/avatar/inbox.js";
+import { eventLine, timeLabel, type Badge, type ChatItem, type InboxRow } from "../../core/avatar/inbox.js";
+import { groupNameOf } from "../../core/avatar/names.js";
 import { expiresIn } from "../../core/avatar/needs.js";
 import { LANGS, say, type Lang } from "../../core/avatar/words.js";
 import type { Contact } from "../../core/avatar/contacts.js";
 import type { GbAccount, GbAllow, GbCalled, GbChat, GbLink, GbNeed, GbView, GbWork } from "../../gemsbang/ops.js";
 
 export const GB_PANE_ID = "gemsbang-board";
-export type GbPage = "inbox" | "chat" | "info" | "invite" | "avatars" | "account" | "new-group" | "join" | "contacts" | "contact";
+export type GbPage = "inbox" | "chat" | "info" | "invite" | "avatars" | "account" | "new-group" | "join" | "contacts" | "contact" | "invite-me";
 
 export type GbAction =
   | { op: "page"; page: GbPage }
@@ -38,6 +39,8 @@ export type GbAction =
   | { op: "open"; owner: string; id: string }
   /** A name card (S35): someone's avatar `id`, as the person's `as` knows it; `back`, the page its ‹ goes to (联系人, 群信息). */
   | { op: "contact"; id: string; as: string; back: GbPage }
+  /** 邀请 (S37): which of the person's avatars hands out its own link. */
+  | { op: "invite-as"; as: string }
   /** 发消息 (S35): the two-person chat of `as` with `with` — the one they have (`owner`, `id`), or a new one. */
   | { op: "dm"; as: string; with: string; owner?: string; id?: string }
   | { op: "copy"; text: string }
@@ -55,6 +58,9 @@ export type GbAction =
   | { op: "mark"; avatar: string; mark: boolean }
   | { op: "bind"; avatar: string | null }
   | { op: "group-as"; as: string }
+  /** 发起群聊 (S38): a contact ticked, or unticked; 创建（N 人）, with the name typed so far. */
+  | { op: "group-pick"; id: string }
+  | { op: "group-make" }
   /** The inbox's ＋: its two ways (建群, 用链接进群) shown under the bar, or folded again (P1b). */
   | { op: "plus" }
   /** 建群's 换: the person's avatars listed to pick another, or folded (P2c). */
@@ -143,11 +149,11 @@ export type GbRow =
   | { kind: "event"; key: string; text: string; time?: string; tone: Tone }
   /** Rows to go to or pick from, one under another (P1b's 建群 ›, P2c's John ✓): `mark` an arrow at the right, or a tick on the one picked. */
   /** `group`, a group's picture before it (共同的群, S35), and `note` its size in grey before the arrow. */
-  | { kind: "list"; key: string; mark: "arrow" | "tick"; items: { key: string; label: string; badge?: Badge; person?: true; group?: true; note?: string; on?: boolean; action: GbAction }[] }
+  | { kind: "list"; key: string; mark: "arrow" | "tick" | "check"; items: { key: string; label: string; badge?: Badge; person?: true; group?: true; note?: string; on?: boolean; action: GbAction }[] }
   /** A line around an avatar's pill (以 John 建 · 换, 用 John 进「前端周会」？): the words before and after it, then a press. */
   | { kind: "pick"; key: string; lead: string; badge: Badge; trail: string; press?: GbPress }
-  /** Nothing here yet, centred, with the ways on (P1c: 还没有聊天 with 建群 and 用链接进群; P2d: 群里还只有你 with 叫人). */
-  | { kind: "empty"; key: string; text: string; items: GbPress[] }
+  /** Nothing here yet, centred, with the ways on (S37: 暂无聊天 with 邀请; P2d: 群里暂无其他成员 with 邀请成员); `link`, a second way as a link under them (已有邀请链接？粘贴加入). */
+  | { kind: "empty"; key: string; text: string; items: GbPress[]; link?: GbPress }
   /** A call handed to the agent, while it answers: its card folded to one dim line (agent 在回…) until the answer is in the chat. */
   | { kind: "pending"; key: string; text: string }
   | { kind: "text"; key: string; text: string; tone: Tone }
@@ -162,7 +168,7 @@ export type GbRow =
   /** Which avatars a 底子 entry is given to (P8c): 给：, a pill each — ✓ given, faded not — pressed to give or not; 删 at the right. */
   | { kind: "give"; key: string; lead: string; items: { key: string; badge: Badge; on: boolean; action?: GbAction }[]; press?: GbPress }
   /** A field; the chat's box (`compose`) holds 「以 <分身> 说…」 as its hint and says 发送 beside it, for a surface that takes pictures. */
-  | { kind: "input"; key: string; field: GbField; placeholder: string; target?: string; label?: string; submitLabel?: string; value?: string; compose?: { as: Badge; placeholder: string; submitLabel: string } }
+  | { kind: "input"; key: string; field: GbField; placeholder: string; target?: string; label?: string; submitLabel?: string; value?: string; compose?: { as: Badge; placeholder: string; submitLabel: string }; draft?: true }
   | { kind: "select"; key: string; label: string; options: { value: string; label: string }[]; value: string }
   /** Presses side by side; `center`, under a name card's centred head (S35). */
   | { kind: "buttons"; key: string; items: GbPress[]; center?: true }
@@ -228,6 +234,10 @@ export interface PaneState {
   addLinks?: readonly { kind: string; url: string }[] | null;
   /** The name card open (S35): whose, as which of the person's avatars knows them, and the page its ‹ goes back to. */
   contact?: { id: string; as: string; back: GbPage } | null;
+  /** 邀请 (S37): the avatar whose own link is shown, picked or the one last spoken as. */
+  inviteAs?: string | null;
+  /** The contacts ticked on 发起群聊 (S38), by id. */
+  groupPick?: readonly string[];
 }
 
 /** What the person typed in 邮箱或手机号 (S29), as the service takes it: an email has an @, anything else is a number. */
@@ -239,6 +249,8 @@ const signInLinks = (key: string, links: readonly { kind: string; url: string }[
 export interface JoinView {
   url: string; group: string; count: number; owner?: string; pick: { kind: string; avatar?: string }; suggestions: { text: string; blank?: boolean }[];
   switching?: boolean; naming?: boolean; blank?: string | null;
+  /** An avatar's own link (S37, S39): `group` is that avatar's name, and joining starts a two-person chat with it. */
+  person?: true;
 }
 
 const text = (key: string, s: string, tone: Tone = "dim"): GbRow => ({ kind: "text", key, text: s, tone });
@@ -437,16 +449,16 @@ function waitOf(v: GbView, r: InboxRow): { flag?: string; waits: boolean } {
   return call.kind === "group" ? { flag: say("panel.flag.call", l), waits: true } : { waits: true };
 }
 
-/** ＋ (P1b, Q4): its two ways under the head, as WeChat's ＋ opens; pressed again, folded. */
+/** ＋ (P1b, Q4, S37): 邀请, 发起群聊, 通过链接加入 under the head, as WeChat's ＋ opens; pressed again, folded. */
 const plusWays = (l: Lang): GbRow => ({ kind: "list", key: "plus-ways", mark: "arrow", items: [
+  { key: "go-invite-me", label: say("panel.invitePerson", l), action: { op: "page", page: "invite-me" } },
   { key: "go-new-group", label: say("panel.newGroup", l), action: { op: "page", page: "new-group" } },
   { key: "go-join", label: say("panel.joinLink", l), action: { op: "page", page: "join" } },
 ] });
-/** Nothing here yet (P1c): the two ways ＋ holds, laid out in the middle. */
+/** Nothing here yet (S37, sketch ①a): someone invited first, and a link someone sent pasted as the second way. */
 const emptyWays = (key: string, words: string, l: Lang): GbRow => ({ kind: "empty", key, text: words, items: [
-  { key: `${key}-new-group`, label: say("panel.newGroup", l), primary: true, action: { op: "page", page: "new-group" } },
-  { key: `${key}-join`, label: say("panel.joinLink", l), action: { op: "page", page: "join" } },
-] });
+  { key: `${key}-invite-me`, label: say("panel.invitePerson", l), primary: true, action: { op: "page", page: "invite-me" } },
+], link: { key: `${key}-join`, label: say("panel.pasteHint", l), action: { op: "page", page: "join" } } });
 
 /** The inbox (spec §7.1, S11): WeChat's — the chats alone, the ones that need the person first. */
 function inboxRows(v: GbView, s: PaneState): GbRow[] {
@@ -462,7 +474,7 @@ function inboxRows(v: GbView, s: PaneState): GbRow[] {
   for (const n of v.needs) if (n.state === "open" && n.venue === undefined && !n.muted) rows.push(needRow(n, l, s));
   // No chat yet (P1c): the two ways ＋ holds, laid out in the middle; ＋ stays where it is.
   if (v.rows.length === 0) {
-    rows.push(emptyWays("empty", say("panel.empty", l), l));
+    rows.push(emptyWays("empty", say("panel.emptyInvite", l), l));
     return [...rows, tabsRow(v, "inbox")];
   }
   // The chats that need the person first, newest first among them; then the rest, the muted in their place (S17).
@@ -581,10 +593,12 @@ function chatRows(v: GbView, s: PaneState, c: GbChat): GbRow[] {
   if (c.earlier > 0) rows.push({ kind: "event", key: "earlier", text: say("panel.earlier", l, { count: c.earlier }), tone: "dim" });
   // A group made a moment ago (P2d): only the person, and 叫人 first; a quiet chat with others, that nobody spoke.
   if (c.kind === "group" && c.count <= 1 && c.items.every((i) => i.kind !== "message")) rows.push({ kind: "empty", key: "alone", text: say("panel.alone", l), items: [{ key: "alone-invite", label: say("panel.invite", l), primary: true, action: { op: "page", page: "invite" } }] });
-  else if (c.items.every((i) => i.kind !== "message")) rows.push(text("quiet", say("page.group.empty", l)));
+  // Nobody spoke yet; a chat that says how it began, or who was brought in, says that instead (S37, S38).
+  else if (c.items.every((i) => i.kind !== "message" && i.kind !== "began" && i.kind !== "invited")) rows.push(text("quiet", say("page.group.empty", l)));
   let last: string | undefined;
   for (const i of c.items) {
     if (i.kind === "joined") rows.push({ kind: "event", key: `joined-${i.id}`, text: say("page.group.joined", l, { name: i.who }), time: hhmm(i.at, zone), tone: "dim" });
+    else if (i.kind === "began" || i.kind === "invited") rows.push({ kind: "event", key: `${i.kind}-${i.id}`, text: eventLine(i, c.name, c.as?.id, l), time: hhmm(i.at, zone), tone: "dim" });
     else if (i.kind === "note") rows.push({ kind: "event", key: `note-${i.id}`, text: say("page.group.hops", l), tone: "dim" });
     // Someone left, as who came in is said (S19, Q13①); the 群主 who left, with who took it over (P7c).
     else if (i.kind === "left") rows.push({ kind: "event", key: `left-${i.id}`, text: i.heir !== undefined ? say("page.group.leftHeir", l, { name: i.who, heir: i.heir }) : say("page.group.left", l, { name: i.who }), time: hhmm(i.at, zone), tone: "dim" });
@@ -705,6 +719,39 @@ function inviteRows(v: GbView, s: PaneState, c: GbChat, k: GbLink | null): GbRow
   rows.push({ kind: "share", key: "share-line", label: say("panel.invite.forAgents", l), text: k.line, copy: say("panel.invite.copyLine", l) });
   rows.push({ kind: "tip", key: "select", text: say("panel.invite.select", l, { key: s.copyKey ?? "⌘C" }), pictures: true });
   rows.push({ kind: "line", key: "valid", text: say("panel.invite.valid", l, { days: k.days }), ...(k.isOwner ? { press: { key: "rotate-ask", label: say("panel.invite.rotateLink", l), action: { op: "rotate-ask", open: true } } } : {}) });
+  return rows;
+}
+
+/** Which of the person's avatars 邀请 shows the link of: the one picked, else the one last spoken as, else the first. */
+const inviteAsOf = (v: GbView, picked: string | null | undefined): string | undefined =>
+  [picked, v.recent, v.avatars[0]?.id].find((x): x is string => typeof x === "string" && v.avatars.some((a) => a.id === x));
+
+/**
+ * 邀请 (S37, sketch ①b): an avatar's own link — 以 John 邀请 · 更换 with two avatars or more — as words to select with
+ * its QR code, the line for an agent, how long it works and 重置链接, asked first; whoever opens it is in a two-person
+ * chat with that avatar.
+ */
+function inviteMeRows(v: GbView, s: PaneState): GbRow[] {
+  const l = v.lang;
+  const as = inviteAsOf(v, s.inviteAs);
+  const a = v.avatars.find((x) => x.id === as);
+  const back: GbPage = s.inviteBack === "contacts" ? "contacts" : "inbox";
+  const rows: GbRow[] = [{ kind: "head", key: "head-invite-me", title: say("panel.invitePerson", l), back: { op: "page", page: back }, backLabel: say(back === "contacts" ? "panel.tab.contacts" : "panel.inbox", l), actions: [] }];
+  if (a === undefined) return rows;
+  if (v.avatars.length >= 2) {
+    if (s.asOpen === true) rows.push({ kind: "list", key: "invite-as-list", mark: "tick", items: v.avatars.map((x) => ({ key: `invite-as-${x.id}`, label: x.name, badge: x, on: x.id === a.id, action: { op: "invite-as", as: x.id } as GbAction })) });
+    else rows.push(pickRow("invite-as", say("panel.inviteAs", l, { name: "\u0000" }), a, { key: "invite-as-switch", label: say("panel.switch", l), action: { op: "choose", open: true } }));
+  }
+  const k = s.link !== null && s.link.kind === "person" && s.link.as === a.id ? s.link : null;
+  if (k === null) return [...rows, text("link-wait", "…")];
+  if (s.rotating === true) return [...rows, text("rotate-warn", say("panel.invite.rotateWarn", l), "plain"), { kind: "buttons", key: "rotate", items: [
+    { key: "rotate-go", label: say("panel.invite.rotateGo", l), primary: true, action: { op: "rotate" } },
+    { key: "rotate-no", label: say("panel.invite.rotateNo", l), action: { op: "rotate-ask", open: false } },
+  ] }];
+  rows.push({ kind: "share", key: "share-link", label: say("panel.inviteMe.forPeople", l, { name: a.name }), text: k.url, copy: say("panel.invite.copyLink", l), qr: true });
+  rows.push({ kind: "share", key: "share-line", label: say("panel.invite.forAgents", l), text: k.line, copy: say("panel.invite.copyLine", l) });
+  rows.push({ kind: "tip", key: "select", text: say("panel.invite.select", l, { key: s.copyKey ?? "⌘C" }), pictures: true });
+  rows.push({ kind: "line", key: "valid", text: say("panel.invite.valid", l, { days: k.days }), press: { key: "rotate-ask", label: say("panel.invite.rotateLink", l), action: { op: "rotate-ask", open: true } } });
   return rows;
 }
 
@@ -857,26 +904,50 @@ function pickRow(key: string, words: string, badge: Badge, press?: GbPress): GbR
   return { kind: "pick", key, lead: lead.trim(), badge, trail: trail.trim(), ...(press !== undefined ? { press } : {}) };
 }
 
-/** 建群 (S4, P2): its name and 建; with two avatars or more, which makes it — the one last spoken as, 换 to pick another or a new one. */
+/** The contacts 发起群聊 lists, before the rest are named in one line. */
+const PICK_ROWS = 100;
+
+/** The contacts an avatar knows that are ticked on 发起群聊 (S38). */
+export const groupPicksOf = (v: GbView, s: { groupPick?: readonly string[] | undefined }, as: string): Contact[] =>
+  as === "new" ? [] : (v.contacts ?? []).filter((c) => c.as.id === as && (s.groupPick ?? []).includes(c.id));
+
+/**
+ * 发起群聊 (S4, S38, P2, sketch ①d): with two avatars or more, which makes it — the one last spoken as, 更换 to pick another or
+ * a new one; the contacts that avatar knows, each to tick; the name, which may stay blank once someone is ticked, the names
+ * joined then; 创建（N 人）.
+ */
 function newGroupRows(v: GbView, s: PaneState): GbRow[] {
   const l = v.lang;
   const rows: GbRow[] = [{ kind: "head", key: "head-new", title: say("panel.newGroup", l), back: { op: "page", page: "inbox" }, backLabel: say("panel.inbox", l), actions: [] }];
-  rows.push({ kind: "input", key: "group", field: "group", placeholder: say("panel.groupName", l), submitLabel: say("panel.make", l) });
-  if (v.avatars.length < 2) return rows;
   const as = groupAsOf(v, s.groupAs);
   const chosen = v.avatars.find((a) => a.id === as);
-  if (s.asOpen === true) {
-    // 换 (P2c): theirs, the one picked ticked, and a new one last (Q2).
-    rows.push({ kind: "list", key: "as-list", mark: "tick", items: [
-      ...v.avatars.map((a) => ({ key: `as-${a.id}`, label: a.name, badge: a, on: a.id === as, action: { op: "group-as", as: a.id } as GbAction })),
-      { key: "as-new", label: `${say("panel.newAvatar", l)}…`, on: as === "new", action: { op: "group-as", as: "new" } },
-    ] });
-  } else if (chosen !== undefined) rows.push(pickRow("as", say("panel.makeAs", l, { name: "\u0000" }), chosen, { key: "as-switch", label: say("panel.switch", l), action: { op: "choose", open: true } }));
-  if (as === "new") {
-    // A new one's name: the default name as a suggestion, picked by nobody (Q9), or one written.
-    if (v.defaultName !== undefined) rows.push({ kind: "buttons", key: "as-suggest", items: [{ key: "as-default", label: v.defaultName, ...(s.groupAvatar === v.defaultName ? { primary: true } : {}), action: { op: "group-avatar", name: v.defaultName } }] });
-    rows.push({ kind: "input", key: "group-avatar", field: "group-avatar", placeholder: say("page.name.own", l), ...(s.groupAvatar !== undefined && s.groupAvatar !== null ? { value: s.groupAvatar } : {}) });
+  if (v.avatars.length >= 2) {
+    if (s.asOpen === true) {
+      // 更换 (P2c): theirs, the one picked ticked, and a new one last (Q2).
+      rows.push({ kind: "list", key: "as-list", mark: "tick", items: [
+        ...v.avatars.map((a) => ({ key: `as-${a.id}`, label: a.name, badge: a, on: a.id === as, action: { op: "group-as", as: a.id } as GbAction })),
+        { key: "as-new", label: `${say("panel.newAvatar", l)}…`, on: as === "new", action: { op: "group-as", as: "new" } },
+      ] });
+    } else if (chosen !== undefined) rows.push(pickRow("as", say("panel.makeAs", l, { name: "\u0000" }), chosen, { key: "as-switch", label: say("panel.switch", l), action: { op: "choose", open: true } }));
+    if (as === "new") {
+      // A new one's name: the default name as a suggestion, picked by nobody (Q9), or one written.
+      if (v.defaultName !== undefined) rows.push({ kind: "buttons", key: "as-suggest", items: [{ key: "as-default", label: v.defaultName, ...(s.groupAvatar === v.defaultName ? { primary: true } : {}), action: { op: "group-avatar", name: v.defaultName } }] });
+      rows.push({ kind: "input", key: "group-avatar", field: "group-avatar", placeholder: say("page.name.own", l), ...(s.groupAvatar !== undefined && s.groupAvatar !== null ? { value: s.groupAvatar } : {}) });
+    }
   }
+  // The contacts this avatar knows, as on 联系人 (S35's pair); a new avatar knows nobody yet.
+  const known = as === "new" ? [] : (v.contacts ?? []).filter((c) => c.as.id === as);
+  const picked = groupPicksOf(v, s, as);
+  if (known.length > 0) {
+    rows.push({ kind: "section", key: "pick-head", text: say("panel.newGroup.pick", l) });
+    rows.push({ kind: "list", key: "pick", mark: "check", items: known.slice(0, PICK_ROWS).map((c) => ({ key: `pick-${c.id}`, label: c.name, person: true as const, on: picked.includes(c), action: { op: "group-pick", id: c.id } as GbAction })) });
+    if (known.length > PICK_ROWS) rows.push(text("pick-rest", say("panel.newGroup.rest", l, { count: known.length - PICK_ROWS })));
+  }
+  const named = picked.length > 0 ? groupNameOf([chosen?.name ?? "", ...picked.map((c) => c.name)], say("call.sep", l)) : "";
+  // What is typed is kept as it is typed (`draft`), so 创建（N 人） under the field makes it with that name, as Enter does.
+  rows.push({ kind: "input", key: "group", field: "group", placeholder: named !== "" ? say("panel.groupNameOptional", l, { names: named }) : say("panel.groupName", l), submitLabel: say("panel.make", l), ...(picked.length > 0 ? { draft: true as const } : {}) });
+  if (picked.length > 0) rows.push({ kind: "buttons", key: "group-make", center: true, items: [{ key: "group-make", label: say("panel.makeN", l, { count: picked.length }), primary: true, action: { op: "group-make" } }] });
+  if (known.length > 0) rows.push(text("pick-foot", say("panel.newGroup.foot", l)));
   return rows;
 }
 
@@ -894,7 +965,7 @@ function joinRows(v: GbView, s: PaneState): GbRow[] {
     const names = [...(v.defaultName !== undefined ? [v.defaultName] : []), ...j.suggestions.filter((x) => x.blank !== true && x.text !== v.defaultName).map((x) => x.text)];
     const blanks = j.suggestions.filter((x) => x.blank === true).map((x) => x.text);
     return [
-      { kind: "head", key: "head-join-name", title: say("panel.join.nameTitle", l, { group: j.group }), back, backLabel: say("panel.inbox", l), actions: [] },
+      { kind: "head", key: "head-join-name", title: j.person === true ? say("panel.join.nameTitleDm", l, { other: j.group }) : say("panel.join.nameTitle", l, { group: j.group }), back, backLabel: say("panel.inbox", l), actions: [] },
       { kind: "buttons", key: "join-names", items: [
         ...names.map((n, i) => ({ key: `join-name-${i}`, label: n, action: { op: "join-name", name: n } as GbAction })),
         ...blanks.map((b, i) => ({ key: `join-blank-${i}`, label: b, ...(j.blank === b ? { primary: true } : {}), action: { op: "join-blank", text: j.blank === b ? null : b } as GbAction })),
@@ -904,12 +975,12 @@ function joinRows(v: GbView, s: PaneState): GbRow[] {
   }
   const rows: GbRow[] = [
     { kind: "head", key: "head-join", title: say("panel.joinLink", l), back, backLabel: say("panel.inbox", l), actions: [] },
-    text("join-about", say("panel.join.about", l, { group: j.group, count: j.count, owner: j.owner ?? "" }), "plain"),
+    text("join-about", j.person === true ? say("panel.join.aboutDm", l, { name: j.group }) : say("panel.join.about", l, { group: j.group, count: j.count, owner: j.owner ?? "" }), "plain"),
   ];
   const known = j.pick.kind === "known" && j.switching !== true ? v.avatars.find((a) => a.id === j.pick.avatar) : undefined;
   if (known !== undefined) {
     // The inviter knows one of theirs (S9): it by default, three presses the same size.
-    rows.push(pickRow("join-as", say("panel.join.as", l, { name: "\u0000", group: j.group }), known));
+    rows.push(pickRow("join-as", j.person === true ? say("panel.join.asDm", l, { name: "\u0000", other: j.group }) : say("panel.join.as", l, { name: "\u0000", group: j.group }), known));
     rows.push({ kind: "buttons", key: "join-known", items: [
       { key: "join-yes", label: say("ask.yes", l), primary: true, action: { op: "join-as", as: known.id } },
       { key: "join-switch", label: say("ask.switch", l), action: { op: "join-switch" } },
@@ -918,7 +989,7 @@ function joinRows(v: GbView, s: PaneState): GbRow[] {
     return rows;
   }
   // No shared place (S9): theirs to pick, a new one last.
-  rows.push({ kind: "section", key: "join-which", text: say("panel.join.which", l, { group: j.group }) });
+  rows.push({ kind: "section", key: "join-which", text: j.person === true ? say("panel.join.whichDm", l, { other: j.group }) : say("panel.join.which", l, { group: j.group }) });
   rows.push({ kind: "list", key: "join-list", mark: "arrow", items: [
     ...v.avatars.map((a) => ({ key: `join-as-${a.id}`, label: a.name, badge: a, action: { op: "join-as", as: a.id } as GbAction })),
     { key: "join-new", label: `${say("panel.newAvatar", l)}…`, action: { op: "join-new" } },
@@ -942,6 +1013,7 @@ export function paneRows(v: GbView, s: PaneState): GbRow[] {
   if (s.page === "join") return [...rows, ...joinRows(v, s)];
   if (s.page === "contacts") return [...rows, ...contactsRows(v, s)];
   if (s.page === "contact") return [...rows, ...contactRows(v, s)];
+  if (s.page === "invite-me") return [...rows, ...inviteMeRows(v, s)];
   return [...rows, ...inboxRows(v, s)];
 }
 
@@ -976,9 +1048,11 @@ export function gbBand(v: GbView | null, problem: string | null, now?: string, s
 /** What a field's Enter does: an action for the hooks module, or nothing for an empty field. */
 export type FieldAction = { call: string; args: Record<string, unknown> } | { local: "email"; email: string } | { local: "add-email"; email: string } | { local: "group-avatar"; name: string } | { local: "join"; url: string } | { local: "join-name"; name: string };
 
-export function fieldAction(field: GbField, typed: string, s: { chat: GbChat | null; address: string | null; adding?: string | null; groupAs: string; groupAvatar?: string; session?: string; blank?: string | null; baseFor?: string }, target?: string): FieldAction | undefined {
+export function fieldAction(field: GbField, typed: string, s: { chat: GbChat | null; address: string | null; adding?: string | null; groupAs: string; groupAvatar?: string; groupMembers?: readonly string[]; session?: string; blank?: string | null; baseFor?: string }, target?: string): FieldAction | undefined {
   const t = typed.trim();
-  if (t === "" && field !== "default-name" && field !== "repo") return undefined;
+  const members = s.groupMembers ?? [];
+  // A group with someone ticked may go unnamed: it is named by its members (S38).
+  if (t === "" && field !== "default-name" && field !== "repo" && !(field === "group" && members.length > 0)) return undefined;
   switch (field) {
     case "email": return { local: "email", email: t };
     case "code": return s.address === null ? undefined : { call: "login-verify", args: { ...addressArgs(s.address), code: t } };
@@ -987,7 +1061,7 @@ export function fieldAction(field: GbField, typed: string, s: { chat: GbChat | n
     case "add-code": return s.adding === undefined || s.adding === null ? undefined : { call: "method-verify", args: { ...addressArgs(s.adding), code: t } };
     case "say": return s.chat === null ? undefined : { call: "say", args: { owner: s.chat.owner, id: s.chat.id, text: typed } };
     // `groupAs` resolved by the caller (groupAsOf): one of theirs, or "new" with the name picked or typed.
-    case "group": return { call: "group", args: { name: t, ...(s.groupAs !== "new" && s.groupAs !== "" ? { as: s.groupAs } : s.groupAvatar !== undefined && s.groupAvatar !== "" ? { avatarName: s.groupAvatar } : {}) } };
+    case "group": return { call: "group", args: { name: t, ...(s.groupAs !== "new" && s.groupAs !== "" ? { as: s.groupAs, ...(members.length > 0 ? { members: [...members] } : {}) } : s.groupAvatar !== undefined && s.groupAvatar !== "" ? { avatarName: s.groupAvatar } : {}) } };
     case "group-avatar": return { local: "group-avatar", name: t };
     case "join": return { local: "join", url: t };
     // A blank suggestion (__ 爸爸) filled with what was typed; else the name as typed.

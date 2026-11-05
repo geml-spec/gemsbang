@@ -7,7 +7,7 @@ const LILY = { id: "a-0000000002", name: "Lily 爸爸", color: "#b5543c", initia
 const ROW = (name, as, extra = {}) => ({ owner: as.id, id: `g-${name.length}000000000`.slice(0, 12), kind: "group", name, as, last: { who: "李四", text: "hi" }, at: "2026-11-01T06:00:00Z", time: "14:00", unread: 1, ...extra });
 const VIEW = (extra = {}) => ({ relay: "https://im.example", loggedIn: true, lang: "zh", person: "p-0000000001", avatars: [JOHN, LILY], rows: [ROW("设置页改版", JOHN), ROW("三年二班家长", LILY)], unread: 2, needs: [], muted: { avatars: [], venues: [] }, notes: [], bodies: {}, ...extra });
 const STATE = (extra = {}) => ({ page: "inbox", chat: null, link: null, address: null, groupAs: "new", session: "s-1", problem: null, zoneMinutes: 480, now: "2026-11-01T12:00:00Z", ...extra });
-const words = (rows) => rows.map((r) => r.kind === "head" ? `#${r.title}${r.sub ? `(${r.sub})` : ""}${r.actions.length > 0 ? ` ${r.actions.map((a) => `[${a.label}]`).join("")}` : ""}` : r.kind === "text" || r.kind === "section" || r.kind === "event" ? r.text : r.kind === "chat" ? `[${r.row.as.initial}]${r.row.name}${r.flag ?? ""}${r.muted ? "~" : ""}` : r.kind === "input" ? `<${r.placeholder}>` : r.kind === "buttons" ? r.items.map((i) => `[${i.label}]`).join("") : r.kind === "toggle" ? `${r.on ? "☑" : "☐"}${r.label}` : r.kind === "copy" ? `{${r.text}}[${r.label}]` : r.kind === "message" ? `${r.item.who}${r.tag !== undefined ? `(${r.tag})` : ""} ${r.time}: ${r.item.text}` : r.kind === "list" ? r.items.map((i) => `${i.label}${r.mark === "tick" ? (i.on ? "✓" : "") : "›"}`).join("|") : r.kind === "pick" ? `${r.lead}{${r.badge.name}}${r.trail}${r.press !== undefined ? `[${r.press.label}]` : ""}` : r.kind === "empty" ? `(${r.text})${r.items.map((i) => `[${i.label}]`).join("")}` : r.kind === "tabs" ? `▁${r.items.map((i) => `${i.on ? "*" : ""}${i.label}${i.count ?? ""}`).join("|")}` : r.kind);
+const words = (rows) => rows.map((r) => r.kind === "head" ? `#${r.title}${r.sub ? `(${r.sub})` : ""}${r.actions.length > 0 ? ` ${r.actions.map((a) => `[${a.label}]`).join("")}` : ""}` : r.kind === "text" || r.kind === "section" || r.kind === "event" ? r.text : r.kind === "chat" ? `[${r.row.as.initial}]${r.row.name}${r.flag ?? ""}${r.muted ? "~" : ""}` : r.kind === "input" ? `<${r.placeholder}>` : r.kind === "buttons" ? r.items.map((i) => `[${i.label}]`).join("") : r.kind === "toggle" ? `${r.on ? "☑" : "☐"}${r.label}` : r.kind === "copy" ? `{${r.text}}[${r.label}]` : r.kind === "message" ? `${r.item.who}${r.tag !== undefined ? `(${r.tag})` : ""} ${r.time}: ${r.item.text}` : r.kind === "list" ? r.items.map((i) => r.mark === "check" ? `${i.on ? "☑" : "☐"}${i.label}` : `${i.label}${r.mark === "tick" ? (i.on ? "✓" : "") : "›"}`).join("|") : r.kind === "pick" ? `${r.lead}{${r.badge.name}}${r.trail}${r.press !== undefined ? `[${r.press.label}]` : ""}` : r.kind === "empty" ? `(${r.text})${r.items.map((i) => `[${i.label}]`).join("")}` : r.kind === "tabs" ? `▁${r.items.map((i) => `${i.on ? "*" : ""}${i.label}${i.count ?? ""}`).join("|")}` : r.kind);
 
 test("the sign-in (architecture §3.2, S28, S29, sketch ①–④): the other accounts the service set up as links the browser opens, boxed, then 或者 and one field for an email or a number, that Claude never sees them, the language at the foot; a browser opened, the pane waits with its link again and 取消; the address given, where its code went, 重发 and 更换邮箱 (更换手机号 for a number); a new person names their first avatar; just in, the two ways to a first chat", () => {
   assert.deepEqual(words(paneRows(VIEW({ loggedIn: false, avatars: [], rows: [] }), STATE())), ["#GemsBang(你的几个身份，替你在各个群里)", "<you@example.com 或 +63 917 123 4567，按回车发送验证码>", "邮箱、手机号和验证码仅在侧栏中填写，Claude 无法看到。", "select"], "no account set up: the field alone");
@@ -23,7 +23,7 @@ test("the sign-in (architecture §3.2, S28, S29, sketch ①–④): the other ac
   const first = paneRows(VIEW({ avatars: [], rows: [], unread: 0, synced: "2026-11-01T12:00:00Z" }), STATE());
   assert.deepEqual(words(first), ["#GemsBang", "<输入名称，按回车进入>", "这是你的第一个身份。在其他场合可以使用不同的身份，例如在家长群中叫「Lily 爸爸」。名称可随时修改。"]);
   assert.equal(first[1].label, "设置你的名称");
-  assert.deepEqual(words(paneRows(VIEW({ avatars: [JOHN], rows: [], unread: 0, bodies: { "s-1": JOHN.id } }), STATE())), ["#GemsBang [＋]", "(暂无聊天)[发起群聊][通过链接加入]", "▁*聊天|联系人|我"], "just in: no chat yet, the two ways in the middle (P1c)");
+  assert.deepEqual(words(paneRows(VIEW({ avatars: [JOHN], rows: [], unread: 0, bodies: { "s-1": JOHN.id } }), STATE())), ["#GemsBang [＋]", "(暂无聊天。邀请联系人开始聊天)[邀请]", "▁*聊天|联系人|我"], "just in: no chat yet, the two ways in the middle (P1c)");
 });
 
 test("账号与登录 (architecture §3.1, P10): the ways in, 解绑 only when there are two; 添加登录方式 a link that opens its field, then its code in the same place (P10b); the devices with the avatars their agents play, this one tagged, the others signed out one by one or all at once; 退出登录 in red, asked first (P10c); back to 我; nothing read yet, said so", () => {
@@ -52,11 +52,11 @@ test("账号与登录 (architecture §3.1, P10): the ways in, 解绑 only when t
 test("the total inbox (spec §7.1, S11, direction ①): WeChat's — the name with the unread and ＋ at the right (＋'s two ways, 建群 and 通过链接加入, under it once pressed, P1b); the chats alone, each with its avatar's initial — no filters, no 对话 heading; 聊天 · 联系人 · 我 at the foot, 聊天 on with the unread; nothing yet, those two ways in the middle (P1c); a relay out of reach and an invitation not followed said first", () => {
   assert.deepEqual(words(paneRows(VIEW(), STATE())), ["#GemsBang(2 条未读) [＋]", "[J]设置页改版", "[L]三年二班家长", "▁*聊天2|联系人|我"]);
   const plus = paneRows(VIEW(), STATE({ plusOpen: true }));
-  assert.deepEqual(words(plus).slice(0, 2), ["#GemsBang(2 条未读) [＋]", "发起群聊›|通过链接加入›"]);
+  assert.deepEqual(words(plus).slice(0, 2), ["#GemsBang(2 条未读) [＋]", "邀请›|发起群聊›|通过链接加入›"]);
   assert.deepEqual(plus[0].actions[0].action, { op: "plus" }, "＋ again folds it");
-  assert.deepEqual(plus[1].items.map((i) => i.action), [{ op: "page", page: "new-group" }, { op: "page", page: "join" }]);
+  assert.deepEqual(plus[1].items.map((i) => i.action), [{ op: "page", page: "invite-me" }, { op: "page", page: "new-group" }, { op: "page", page: "join" }], "邀请 first (S37), then 发起群聊, then 通过链接加入 (S39)");
   assert.deepEqual(words(paneRows(VIEW({ avatars: [], rows: [], unread: 0, offline: "连不上中继：refused", notes: [{ url: "https://evil.example/i/abcd9ahe.md", at: "t" }] }), STATE())), [
-    "#GemsBang [＋]", "连接中断：连不上中继：refused · 显示的是上次同步的内容", "未执行一份入群说明：它不是你本人粘贴的（https://evil.example/i/abcd9ahe.md）", "(暂无聊天)[发起群聊][通过链接加入]", "▁*聊天|联系人|我",
+    "#GemsBang [＋]", "连接中断：连不上中继：refused · 显示的是上次同步的内容", "未执行一份入群说明：它不是你本人粘贴的（https://evil.example/i/abcd9ahe.md）", "(暂无聊天。邀请联系人开始聊天)[邀请]", "▁*聊天|联系人|我",
   ]);
   const tabs = paneRows(VIEW(), STATE()).at(-1);
   assert.deepEqual(tabs.items.map((t) => [t.icon, t.on, t.action]), [["chats", true, { op: "page", page: "inbox" }], ["contacts", false, { op: "page", page: "contacts" }], ["me", false, { op: "page", page: "avatars" }]], "聊天 · 联系人 · 我, the last row: 我 moved there from the head, 联系人 between (S34)");
@@ -161,12 +161,12 @@ test("我 (spec §7.5, S22, P8): a card per avatar — where it is, who plays it
   assert.equal(paneRows(VIEW(), STATE({ page: "settings" }))[0].key, "head-inbox", "no 设置 page: 我 is the settings");
   const groupOf = (extra) => words(paneRows(VIEW(extra.view ?? {}), STATE({ page: "new-group", groupAs: "", ...extra.state })));
   assert.deepEqual(groupOf({ view: { avatars: [JOHN] } }), ["#发起群聊", "<群聊名称>"], "one avatar: only the name (P2a)");
-  assert.deepEqual(groupOf({ view: { recent: LILY.id } }), ["#发起群聊", "<群聊名称>", "以{Lily 爸爸}发起[更换]"], "several: the one last spoken as, and 换 (P2b, Q1)");
-  assert.deepEqual(groupOf({}), ["#发起群聊", "<群聊名称>", "以{John}发起[更换]"], "nothing said yet: the first");
+  assert.deepEqual(groupOf({ view: { recent: LILY.id } }), ["#发起群聊", "以{Lily 爸爸}发起[更换]", "<群聊名称>"], "several: the one last spoken as, and 换 (P2b, Q1)");
+  assert.deepEqual(groupOf({}), ["#发起群聊", "以{John}发起[更换]", "<群聊名称>"], "nothing said yet: the first");
   assert.equal(paneRows(VIEW(), STATE({ page: "new-group", groupAs: "" })).find((r) => r.key === "group").submitLabel, "创建");
   assert.deepEqual([paneRows(VIEW(), STATE({ page: "new-group", groupAs: "" }))[0].backLabel, paneRows(VIEW({ lang: "en" }), STATE({ page: "join" }))[0].backLabel], ["聊天", "Chats"], "back to 聊天, as the tab says: never 收件箱 (S11, 2026-11-04)");
-  assert.deepEqual(groupOf({ state: { asOpen: true, groupAs: LILY.id } }), ["#发起群聊", "<群聊名称>", "John|Lily 爸爸✓|新身份…"], "换: theirs, a new one last (P2c, Q2)");
-  assert.deepEqual(groupOf({ view: { defaultName: "老张" }, state: { groupAs: "new" } }), ["#发起群聊", "<群聊名称>", "[老张]", "<自定义名称>"], "a new one: the default name a suggestion, not picked (Q9)");
+  assert.deepEqual(groupOf({ state: { asOpen: true, groupAs: LILY.id } }), ["#发起群聊", "John|Lily 爸爸✓|新身份…", "<群聊名称>"], "换: theirs, a new one last (P2c, Q2)");
+  assert.deepEqual(groupOf({ view: { defaultName: "老张" }, state: { groupAs: "new" } }), ["#发起群聊", "[老张]", "<自定义名称>", "<群聊名称>"], "a new one: the default name a suggestion, not picked (Q9)");
   assert.equal(groupOf({ state: { groupAs: "new" } }).some((w) => w.includes("贴进群链接")), false, "no link to paste here any more");
   assert.deepEqual(fieldAction("group", "周末爬山", { chat: null, address: null, groupAs: LILY.id }), { call: "group", args: { name: "周末爬山", as: LILY.id } });
   assert.deepEqual(fieldAction("group", "周末爬山", { chat: null, address: null, groupAs: "new", groupAvatar: "老张" }), { call: "group", args: { name: "周末爬山", avatarName: "老张" } });
@@ -283,7 +283,7 @@ test("联系人 (S34, Q22 (a), sketch ②): 聊天 · 联系人 · 我 at the fo
   assert.deepEqual(rows.filter((r) => r.kind === "contact").map((r) => [r.name, r.as.initial, r.sub]), [["李四", "J", "设置页改版 等 2 个群"], ["王老师", "L", "有过私聊"], ["张三", "J", "设置页改版 · 有过私聊"]]);
   assert.deepEqual(rows[2].action, { op: "contact", id: lisi.id, as: JOHN.id, back: "contacts" });
   assert.deepEqual(rows.at(-1).items.map((t) => [t.label, t.on, t.count, t.action.page]), [["聊天", false, 2, "inbox"], ["联系人", true, undefined, "contacts"], ["我", false, undefined, "avatars"]]);
-  assert.deepEqual(words(paneRows(VIEW({ contacts: [] }), STATE({ page: "contacts" }))), ["#联系人 [＋]", "(加入群聊后，群成员会出现在这里)[发起群聊][通过链接加入]", "▁聊天2|*联系人|我"]);
+  assert.deepEqual(words(paneRows(VIEW({ contacts: [] }), STATE({ page: "contacts" }))), ["#联系人 [＋]", "(暂无联系人。邀请对方后，对方会出现在这里)[邀请]", "▁聊天2|*联系人|我"]);
   assert.equal(paneRows(VIEW({ lang: "en", contacts: [lisi] }), STATE({ page: "contacts" })).find((r) => r.kind === "contact").sub, "设置页改版 and others, 2 groups");
 });
 
@@ -307,4 +307,71 @@ test("a name card (S35, sketch ③) and a two-person chat's 聊天信息 (S36, Q
   assert.deepEqual(info[2].items.map((i) => [i.label, i.on, i.hint]), [["消息免打扰", true, undefined], ["自动回复", false, "张三的消息由智能体自动回复，不再询问你；五类事项仍需你确认"]]);
   assert.deepEqual(info[2].items.map((i) => i.action), [{ op: "mute", venue: `${JOHN.id}/d-0000000001`, on: false }, { op: "auto", avatar: JOHN.id, venue: `${JOHN.id}/d-0000000001`, on: true }]);
   assert.equal(info.at(-1).text, "私聊不支持邀请链接、添加成员和退出。");
+});
+
+test("邀请 (S37, sketch ①a ①b): the empty chat list invites first, a pasted link the second way; the page shows the avatar's own link — 以 John 邀请 · 更换 with two avatars, the one last spoken as by default — with its QR code, the line for an agent, how long it works and 重置链接 asked first", () => {
+  const empty = paneRows(VIEW({ rows: [] }), STATE()).find((r) => r.kind === "empty");
+  assert.deepEqual([empty.text, empty.items.map((b) => [b.label, b.primary, b.action.page]), empty.link.label, empty.link.action.page], ["暂无聊天。邀请联系人开始聊天", [["邀请", true, "invite-me"]], "已有邀请链接？粘贴加入", "join"]);
+  const link = { code: "k7pqm3ab", url: "https://gemsbang.com/u/k7pqm3ab", line: "请阅读 https://gemsbang.com/u/k7pqm3ab.md 并按说明操作：以我的身份与 Lily 爸爸 私聊。", days: 7, forward: false, approve: false, isOwner: true, group: "Lily 爸爸", kind: "person", as: LILY.id };
+  const page = paneRows(VIEW({ recent: LILY.id }), STATE({ page: "invite-me", link }));
+  assert.deepEqual(page.map((r) => r.kind), ["head", "pick", "share", "share", "tip", "line"]);
+  assert.deepEqual([page[0].title, page[0].backLabel, page[1].badge.id, page[1].lead, page[1].press.label], ["邀请", "聊天", LILY.id, "以", "更换"], "the one last spoken as");
+  assert.deepEqual([page[2].label, page[2].text, page[2].qr, page[3].text], ["邀请链接：对方打开后即与 Lily 爸爸 私聊，无需添加好友", link.url, true, link.line]);
+  assert.deepEqual([page[5].text, page[5].press.label, page[5].press.action], ["链接 7 天内有效", "重置链接", { op: "rotate-ask", open: true }]);
+  assert.equal(paneRows(VIEW({ recent: LILY.id }), STATE({ page: "invite-me", link: { ...link, as: JOHN.id } })).at(-1).text, "…", "another avatar's link: waiting for this one's");
+  const picking = paneRows(VIEW(), STATE({ page: "invite-me", link, asOpen: true, inviteAs: LILY.id }))[1];
+  assert.deepEqual(picking.items.map((i) => [i.label, i.on, i.action]), [["John", false, { op: "invite-as", as: JOHN.id }], ["Lily 爸爸", true, { op: "invite-as", as: LILY.id }]]);
+  assert.deepEqual(paneRows(VIEW({ avatars: [JOHN] }), STATE({ page: "invite-me", link: { ...link, as: JOHN.id } })).map((r) => r.kind), ["head", "share", "share", "tip", "line"], "one avatar: no pick");
+  assert.deepEqual(words(paneRows(VIEW({ recent: LILY.id }), STATE({ page: "invite-me", link, rotating: true })).slice(2)), ["重置后旧链接立即失效，持有旧链接的人需要向你索取新链接。", "[重置][取消]"]);
+  assert.equal(paneRows(VIEW(), STATE({ page: "invite-me", link, inviteBack: "contacts" }))[0].backLabel, "联系人");
+});
+
+test("通过链接加入 with an avatar's own link (S39): whose link it is; 以 John 与「Mei」私聊？ with 确定 · 切换身份 · 取消; theirs to pick, or a new one, otherwise", () => {
+  const j = { url: "https://gemsbang.com/u/k7pqm3ab", group: "Mei", count: 2, pick: { kind: "known", avatar: JOHN.id }, suggestions: [], person: true };
+  const rows = paneRows(VIEW(), STATE({ page: "join", joining: j }));
+  assert.deepEqual([rows[1].text, rows[2].lead, rows[2].trail, rows[3].items.map((b) => b.label)], ["「Mei」的个人邀请链接 · 加入后即与对方私聊", "以", "与「Mei」私聊？", ["确定", "切换身份", "取消"]]);
+  const choose = paneRows(VIEW(), STATE({ page: "join", joining: { ...j, pick: { kind: "choose" } } }));
+  assert.equal(choose.find((r) => r.kind === "section").text, "选择与「Mei」私聊的身份");
+  assert.equal(paneRows(VIEW(), STATE({ page: "join", joining: { ...j, naming: true } }))[0].title, "与「Mei」私聊：设置名称");
+});
+
+test("a two-person chat begun from a link (S37): its first line, grey and centred, says how; in the chat list a line with no speaker is drawn alone", () => {
+  const chat = { owner: JOHN.id, id: "d-000000000d", kind: "dm", name: "李四", count: 2, as: JOHN, earlier: 0, isOwner: true, items: [
+    { kind: "began", id: "venue", avatar: "a-00000000b1", who: "李四", at: "2026-11-01T07:00:00Z", mine: false },
+  ] };
+  const ev = paneRows(VIEW(), STATE({ page: "chat", chat })).find((r) => r.kind === "event");
+  assert.deepEqual([ev.text, ev.tone], ["李四 通过你的邀请链接发起了私聊", "dim"]);
+  assert.equal(paneRows(VIEW(), STATE({ page: "chat", chat })).some((r) => r.key === "quiet"), false, "no 暂无消息 over it");
+  const mine = paneRows(VIEW(), STATE({ page: "chat", chat: { ...chat, items: [{ ...chat.items[0], avatar: JOHN.id, who: "John", mine: true }] } })).find((r) => r.kind === "event");
+  assert.equal(mine.text, "你通过邀请链接与 李四 发起了私聊");
+});
+
+test("发起群聊 from 联系人 (S38, Q26 (a), sketch ①d): the contacts the avatar it is made as knows, each with a box to tick; ticked, the name may stay blank — its hint the names joined — and 创建（N 人）; another avatar, its own contacts; none ticked, today's page; Enter in a blank name makes it with those ticked", () => {
+  const li = KNOWN("李四", JOHN, { letter: "L" }), wang = KNOWN("王五", JOHN, { letter: "W" }), zhang = KNOWN("张三", JOHN, { letter: "Z" }), teacher = KNOWN("王老师", LILY, { letter: "W" });
+  const view = VIEW({ avatars: [JOHN, LILY], recent: JOHN.id, contacts: [li, teacher, wang, zhang] });
+  const page = (state = {}) => paneRows(view, STATE({ page: "new-group", groupAs: "", ...state }));
+  assert.deepEqual(words(page({ groupPick: [li.id, wang.id] })), ["#发起群聊", "以{John}发起[更换]", "从联系人中选择成员", "☑李四|☑王五|☐张三", "<群聊名称（选填）：John、李四、王五>", "[创建（2 人）]", "不选成员也可创建，进入后可邀请成员。"], "John's contacts only, in their order");
+  const ticked = page({ groupPick: [li.id, wang.id] });
+  assert.deepEqual([ticked.find((r) => r.key === "group").draft, ticked.find((r) => r.key === "group-make").center, ticked.find((r) => r.key === "group-make").items[0].action], [true, true, { op: "group-make" }], "the name kept as it is typed, for 创建（2 人） under it");
+  assert.deepEqual(page().find((r) => r.key === "pick").items.map((i) => [i.person, i.action]), [[true, { op: "group-pick", id: li.id }], [true, { op: "group-pick", id: wang.id }], [true, { op: "group-pick", id: zhang.id }]], "each a picture and a press that ticks it");
+  assert.deepEqual([page().find((r) => r.key === "group").placeholder, page().find((r) => r.key === "group").submitLabel, page().find((r) => r.key === "group").draft, page().some((r) => r.key === "group-make")], ["群聊名称", "创建", undefined, false], "none ticked: today's page");
+  assert.deepEqual(words(page({ groupAs: LILY.id, groupPick: [li.id] })).slice(2, 4), ["从联系人中选择成员", "☐王老师"], "Lily 爸爸 knows 王老师 alone; John's tick does not carry over");
+  assert.equal(words(page({ groupAs: "new" })).includes("从联系人中选择成员"), false, "a new avatar knows nobody yet");
+  assert.equal(words(paneRows(VIEW({ avatars: [JOHN], contacts: [li] }), STATE({ page: "new-group", groupAs: "" }))).includes("☐李四"), true, "with one avatar too");
+  assert.deepEqual(fieldAction("group", " ", { chat: null, address: null, groupAs: JOHN.id, groupMembers: [li.id, wang.id] }), { call: "group", args: { name: "", as: JOHN.id, members: [li.id, wang.id] } }, "a blank name, named by the client from the members");
+  assert.equal(fieldAction("group", " ", { chat: null, address: null, groupAs: JOHN.id, groupMembers: [] }), undefined, "none ticked: a name is needed, as before");
+  assert.deepEqual(fieldAction("group", "周末爬山", { chat: null, address: null, groupAs: JOHN.id, groupMembers: [li.id] }), { call: "group", args: { name: "周末爬山", as: JOHN.id, members: [li.id] } });
+  const en = paneRows({ ...view, lang: "en" }, STATE({ page: "new-group", groupAs: "", groupPick: [li.id] }));
+  assert.deepEqual([en.find((r) => r.key === "group").placeholder, en.find((r) => r.key === "group-make").items[0].label], ["The group's name (optional): John, 李四", "Make (1)"]);
+});
+
+test("who brought them in (S38): the members one avatar brought in a row are one line — 「John 邀请李四、王五加入了群聊」, 「你邀请…」 to John, 「John 邀请你、王五…」 to 李四; who came in by a link still 加入了群聊", () => {
+  const items = [
+    { kind: "joined", id: "member-1", avatar: JOHN.id, who: "John", at: "2026-11-01T06:00:00Z" },
+    { kind: "invited", id: "member-2", by: JOHN.id, byName: "John", avatars: ["a-00000000b1", "a-00000000c1"], names: ["李四", "王五"], at: "2026-11-01T06:00:00Z", mine: false },
+  ];
+  const chat = { owner: JOHN.id, id: "g-000000000a", kind: "group", name: "John、李四、王五", count: 3, as: { ...JOHN, id: "a-00000000b1", name: "李四" }, earlier: 0, isOwner: false, items };
+  assert.deepEqual(paneRows(VIEW(), STATE({ page: "chat", chat })).filter((r) => r.kind === "event").map((r) => r.text), ["John 加入了群聊", "John 邀请你、王五加入了群聊"]);
+  const mine = { ...chat, as: JOHN, items: [items[0], { ...items[1], mine: true }] };
+  assert.deepEqual(paneRows(VIEW(), STATE({ page: "chat", chat: mine })).filter((r) => r.kind === "event").map((r) => r.text).at(-1), "你邀请李四、王五加入了群聊");
 });

@@ -4,7 +4,9 @@
 // each newcomer in by hand. A link is said as `/i/<code>`, for a person's
 // browser, and `/i/<code>.md`, for an agent; the one who passed it on may
 // ride along as `?by=<avatar>`, and the name they call the newcomer as
-// `?call=`. Pure: the random bytes and the time are given.
+// `?call=`. An avatar has a link of its own too (S37), the same code and the
+// same seven days, said as `/u/<code>`: whoever opens it starts a two-person
+// chat with that avatar. Pure: the random bytes and the time are given.
 
 export const LINK_TTL_MS = 7 * 24 * 3_600_000;
 /** Letters and digits nobody misreads: no 0/o, 1/l/i. */
@@ -57,3 +59,6 @@ export function linkPath(code: string, o: { by?: string; call?: string } = {}): 
   const s = q.toString();
   return `/i/${code}${s === "" ? "" : `?${s}`}`;
 }
+
+/** An avatar's own link (S37), for a person's browser. */
+export const personLinkPath = (code: string): string => `/u/${code}`;

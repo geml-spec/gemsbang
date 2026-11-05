@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { invitePrompt, invitesIn, parseInvite, relayOrigin } from "../dist/core/avatar/invite.js";
 
 test("invitations (spec §6.3): a link's origin and code, for people or agents; the agents' links in what a person typed, each once, punctuation left off; the line to paste to someone's agent in the person's language; a relay's address", () => {
-  assert.deepEqual(parseInvite("https://im.example/i/abcd9ahe.md"), { origin: "https://im.example", code: "abcd9ahe", md: true });
-  assert.deepEqual(parseInvite("http://127.0.0.1:7710/i/abcd9ahe?by=a-0000000001"), { origin: "http://127.0.0.1:7710", code: "abcd9ahe", md: false });
+  assert.deepEqual(parseInvite("https://im.example/i/abcd9ahe.md"), { origin: "https://im.example", code: "abcd9ahe", md: true, kind: "group" });
+  assert.deepEqual(parseInvite("http://127.0.0.1:7710/i/abcd9ahe?by=a-0000000001"), { origin: "http://127.0.0.1:7710", code: "abcd9ahe", md: false, kind: "group" });
   assert.equal(parseInvite("https://im.example/i/ABCD9AHE"), undefined, "codes are lower case");
   assert.equal(parseInvite("https://im.example/g/g-0000000001"), undefined);
   assert.equal(parseInvite("ftp://im.example/i/abcd9ahe"), undefined);

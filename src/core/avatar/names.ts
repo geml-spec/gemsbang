@@ -11,6 +11,12 @@ export const NAME_WORDS: Readonly<Record<Lang, readonly string[]>> = {
   ja: ["くも", "ライム", "みかん", "まつぼっくり", "しお", "はれ", "つばき", "くじら", "むぎ", "たけ", "ほたる", "しらさぎ", "ざくろ", "ゆず", "とうだい", "そよかぜ", "もみじ", "こいし", "やなぎ", "ちょうちん"],
 };
 export const NAME_MAX = 24;
+/** The longest a group's name may be, in characters. */
+export const GROUP_NAME_MAX = 40;
+/** A group named by nobody is named by its members (S38, as WeChat's): 「John、李四、王五」, cut to the limit. */
+export function groupNameOf(names: readonly string[], sep = "、"): string {
+  return [...names.map((n) => n.trim()).filter((n) => n !== "").join(sep)].slice(0, GROUP_NAME_MAX).join("").trim();
+}
 const RESERVED: ReadonlySet<string> = new Set(["宿主", "系统", "host", "gemsbang"]);
 
 /** A word and two digits, 「云朵 36」, in the language; `rand` gives a number in [0, 1). */

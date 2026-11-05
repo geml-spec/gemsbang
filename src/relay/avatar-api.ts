@@ -91,6 +91,27 @@ export function routeAvatars(r: AvatarRequest, relay: AvatarRelay): AvatarRespon
     });
   }
 
+  // An avatar's own link (S37): its page's facts, the agent's instructions, the way into a two-person chat with it.
+  const up = a === "u" && b !== undefined ? LINK_PART.exec(b) : null;
+  if (up !== null && parts.length === 2) {
+    return only("GET", () => {
+      const info = relay.personLinkInfo(up[1]!, by, { lang });
+      if (up[2] === undefined || !info.ok) return answer(info);
+      const days = Math.max(1, Math.ceil((Date.parse(info.expires) - Date.parse(relay.now())) / 86_400_000));
+      const base = r.base ?? "";
+      const text = say("md.dm", lang, { name: info.avatar.name, days, relay: base === "" ? relay.name : base, join: `${base}/u/${up[1]}/join` });
+      return { status: 200, body: text, type: MARKDOWN_TYPE };
+    });
+  }
+  if (up !== null && parts.length === 3 && c === "join" && up[2] === undefined) {
+    return only("POST", () => {
+      if (r.token === undefined) return answer(relay.joinWithPersonCode(up[1]!, { lang, ...obj(r.body) }), 201);
+      if (by === undefined) return no(401, "token.invalid");
+      const x = relay.joinByPersonLink(by, up[1]!, r.body);
+      return answer(x, x.ok && !x.already ? 201 : 200);
+    });
+  }
+
   if (r.token === undefined) return no(401, "token.required");
   if (by === undefined) return no(401, "token.invalid");
   const body = obj(r.body);
@@ -145,6 +166,8 @@ export function routeAvatars(r: AvatarRequest, relay: AvatarRelay): AvatarRespon
     if (c === "rules") return only("POST", () => answer(relay.setRules(by, b, r.body)));
     if (c === "token") return only("POST", () => answer(relay.issueAvatar(by, b), 201));
     if (c === "auto") return only("POST", () => answer(relay.setAuto(by, b, r.body)));
+    // The avatar's own link (S37): the current one, or a new one in its place.
+    if (c === "link") return m === "GET" ? answer(relay.personLinkFor(by, b)) : only("POST", () => answer(relay.rotatePersonLink(by, b)));
     // 不用问 (S23): the standing ones listed, one taken back.
     if (c === "allows") return m === "GET" ? answer(relay.allowsFor(by, b)) : only("POST", () => answer(relay.revokeAllow(by, b, r.body)));
     return no(404, "path.missing");

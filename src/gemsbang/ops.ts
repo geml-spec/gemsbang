@@ -13,9 +13,10 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { borrowEnvelope, factsOf, repoCommands } from "../core/avatar/borrow.js";
+import { groupNameOf } from "../core/avatar/names.js";
 import { contactsOf, type Contact } from "../core/avatar/contacts.js";
 import { badgesOf, chatOf, inboxOf, itemsOf, recentAvatar, venueKey, type Badge, type Card, type ChatItem, type InboxRow, type Mirror, type MirrorVenue, type MirrorWork } from "../core/avatar/inbox.js";
-import { invitePrompt, parseInvite, relayOrigin } from "../core/avatar/invite.js";
+import { invitePrompt, parseInvite, personInvitePrompt, relayOrigin, type InviteKind } from "../core/avatar/invite.js";
 import { orderNeeds, type Allow, type Need } from "../core/avatar/needs.js";
 import { baseFor, splitBaseLine, type BaseItem } from "../core/avatar/base.js";
 import { callKey, callOf, callsOf, roundFor, type Call, type Round } from "../core/avatar/calls.js";
@@ -66,7 +67,8 @@ export interface GbSso { state: string; kind?: string; fail?: string; reason?: s
 /** One chat for the pane; `zoneMinutes`, the machine's zone, for the times of its lines. */
 /** `members`, who is in it by name (群信息, P6); `keeper`, its 群主 (S19). */
 export interface GbChat { owner: string; id: string; kind: "group" | "dm"; name: string; count: number; as: Badge | undefined; members?: Card[]; keeper?: string; items: ChatItem[]; earlier: number; isOwner: boolean; rules?: { forward: boolean; approve: boolean }; zoneMinutes?: number }
-export interface GbLink { code: string; url: string; line: string; days: number; forward: boolean; approve: boolean; isOwner: boolean; group: string }
+/** A link to hand out: a group's, or an avatar's own (`kind: "person"`, S37), whose `group` is the avatar's name and `as` the avatar. */
+export interface GbLink { code: string; url: string; line: string; days: number; forward: boolean; approve: boolean; isOwner: boolean; group: string; kind?: "person"; as?: string }
 /** A job taken by this machine: where the borrowed agent works, what it may run, its first turn. */
 export interface GbTaken { id: string; avatar: string; summary: string; worktree: string; branch: string; commands: string[]; prompt: string }
 /** A call on one of the person's avatars as the pane shows it (architecture §6.3): its badge, and whether the person muted it. */
@@ -546,14 +548,29 @@ export class Gb {
     return this.open({ owner, id });
   }
 
-  /** A group made as one of the person's avatars, or as a new one (`avatarName`, empty for a random name). */
+  /**
+   * A group made as one of the person's avatars, or as a new one (`avatarName`, empty for a random name). `members`, contacts
+   * of `as` picked on 发起群聊 (S38), are in it at once, asked nobody (Q26 (a)); with them a blank name is theirs joined.
+   */
   async group(args: Record<string, unknown>): Promise<GbResult> {
     const as = str(args["as"]);
-    const body = { name: args["name"], ...(as !== undefined ? { as } : { avatar: str(args["avatarName"]) !== undefined ? { name: args["avatarName"] } : {} }) };
+    const members = as === undefined || !Array.isArray(args["members"]) ? [] : [...new Set(args["members"].filter((x): x is string => typeof x === "string" && x !== as))];
+    let name = str(args["name"])?.trim() ?? "";
+    if (name === "" && members.length > 0) {
+      const m = readMirror(this.o.home);
+      const known = m === undefined ? [] : contactsOf(m).filter((c) => c.as.id === as);
+      name = groupNameOf([m?.avatars.find((a) => a.id === as)?.name ?? "", ...members.map((id) => known.find((c) => c.id === id)?.name ?? "")], say("call.sep", this.lang));
+    }
+    const body = { name, ...(as !== undefined ? { as } : { avatar: str(args["avatarName"]) !== undefined ? { name: args["avatarName"] } : {} }) };
     const r = await this.call("POST", "/groups", body);
     if (this.isFail(r)) return r;
     if (r.status !== 201) return this.refused(r);
     const v = obj(obj(r.body)["venue"]);
+    for (const avatar of members) {
+      const added = await this.call("POST", `/venues/${str(v["owner"])}/${str(v["id"])}/members`, { as, avatar });
+      if (this.isFail(added)) return added;
+      if (added.status !== 200 && added.status !== 201) return this.refused(added);
+    }
     const synced = await this.sync();
     if (!synced.ok) return synced;
     return this.open({ owner: v["owner"], id: v["id"] });
@@ -587,6 +604,19 @@ export class Gb {
     if (this.isFail(r)) return r;
     if (r.status !== 200) return this.refused(r);
     return { ok: true, link: this.linkOf(at.v, obj(obj(r.body)["link"])) };
+  }
+
+  /** An avatar's own link (S37) to hand out, and the line for someone's agent; `rotate`, a new one in its place, the old one stopped. */
+  async myLink(args: Record<string, unknown>, rotate = false): Promise<GbResult> {
+    const as = str(args["as"]) ?? "";
+    const avatar = readMirror(this.o.home)?.avatars.find((a) => a.id === as);
+    if (avatar === undefined) return this.fail("avatar.missing");
+    const r = await this.call(rotate ? "POST" : "GET", `/avatars/${as}/link`, rotate ? {} : undefined);
+    if (this.isFail(r)) return r;
+    if (r.status !== 200) return this.refused(r);
+    const link = obj(obj(r.body)["link"]), code = str(link["code"]) ?? "";
+    const days = Math.max(1, Math.ceil((Date.parse(str(link["expires"]) ?? this.o.now) - Date.parse(this.o.now)) / 86_400_000));
+    return { ok: true, link: { code, url: `${this.origin}${str(link["path"]) ?? `/u/${code}`}`, line: personInvitePrompt(this.origin, code, avatar.name, this.lang), days, forward: false, approve: false, isOwner: true, group: avatar.name, kind: "person", as } };
   }
 
   async linkRules(args: Record<string, unknown>): Promise<GbResult> {
@@ -918,7 +948,7 @@ export class Gb {
 
   // --- joining ---
 
-  private invite(args: Record<string, unknown>): { origin: string; code: string } | Fail {
+  private invite(args: Record<string, unknown>): { origin: string; code: string; kind: InviteKind } | Fail {
     const p = parseInvite(str(args["url"]) ?? "");
     if (p === undefined) return this.fail("client.badLink");
     if (this.origin !== "" && p.origin !== this.origin) return this.fail("client.otherRelay", { host: new URL(p.origin).host });
@@ -930,12 +960,12 @@ export class Gb {
     const p = this.invite(args);
     if (this.isFail(p)) return p;
     if (this.origin === "") { this.client.relay = p.origin; this.save(); }
-    const r = await this.call("GET", `/i/${p.code}`);
+    const r = await this.call("GET", `/${p.kind === "person" ? "u" : "i"}/${p.code}`);
     if (this.isFail(r)) return r;
     if (r.status !== 200) return this.refused(r);
     const b = obj(r.body);
     const days = Math.max(1, Math.ceil((Date.parse(str(b["expires"]) ?? this.o.now) - Date.parse(this.o.now)) / 86_400_000));
-    return { ok: true, info: { ...b, origin: p.origin, code: p.code, days } };
+    return { ok: true, info: { ...b, origin: p.origin, code: p.code, days, kind: p.kind } };
   }
 
   /** In by the link as the person (`as`, `name` or `new`); the chats read again; `session` given, that session speaks for the avatar after. */
@@ -945,7 +975,8 @@ export class Gb {
     if (this.client.token === undefined) return this.fail("client.notLoggedIn");
     const body: Record<string, unknown> = {};
     for (const k of ["as", "name", "new", "by"]) if (args[k] !== undefined) body[k] = args[k];
-    const r = await this.call("POST", `/i/${p.code}/join`, body);
+    // A group's link joins the group; an avatar's own starts the two-person chat with it (S37).
+    const r = await this.call("POST", `/${p.kind === "person" ? "u" : "i"}/${p.code}/join`, body);
     if (this.isFail(r)) return r;
     if (r.status !== 200 && r.status !== 201) return this.refused(r);
     const joined = obj(r.body);
@@ -1095,7 +1126,7 @@ export class Gb {
 }
 
 /** The calls the bridge answers, by name. */
-export const GB_CALLS = ["status", "wait", "sso-wait", "sso-cancel", "sso-add", "setup", "login-start", "login-verify", "logout", "first-avatar", "account", "method-start", "method-verify", "method-remove", "device-revoke", "devices-revoke-others", "open", "say", "group", "dm-open", "link", "rotate", "link-rules", "rename", "mark", "default-name", "lang", "bind", "note", "link-info", "join", "answer", "mute", "wake", "auto", "allows", "rounds", "round-done", "round-failed", "repo", "work-take", "work-done", "work-now", "tool-read", "tool-say", "tool-ask", "tool-remember", "base-add", "base-set", "leave"] as const;
+export const GB_CALLS = ["status", "wait", "sso-wait", "sso-cancel", "sso-add", "setup", "login-start", "login-verify", "logout", "first-avatar", "account", "method-start", "method-verify", "method-remove", "device-revoke", "devices-revoke-others", "open", "say", "group", "dm-open", "link", "rotate", "my-link", "my-rotate", "link-rules", "rename", "mark", "default-name", "lang", "bind", "note", "link-info", "join", "answer", "mute", "wake", "auto", "allows", "rounds", "round-done", "round-failed", "repo", "work-take", "work-done", "work-now", "tool-read", "tool-say", "tool-ask", "tool-remember", "base-add", "base-set", "leave"] as const;
 export type GbCall = (typeof GB_CALLS)[number];
 
 export async function runGb(call: string, args: Record<string, unknown>, o: GbOptions): Promise<GbResult> {
@@ -1122,6 +1153,8 @@ export async function runGb(call: string, args: Record<string, unknown>, o: GbOp
     case "group": return gb.group(args);
     case "dm-open": return gb.dmOpen(args);
     case "link": return gb.link(args);
+    case "my-link": return gb.myLink(args);
+    case "my-rotate": return gb.myLink(args, true);
     case "rotate": return gb.link(args, true);
     case "link-rules": return gb.linkRules(args);
     case "rename": return gb.rename(args);

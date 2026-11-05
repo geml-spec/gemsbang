@@ -72,6 +72,10 @@ const isMessage = (b: Block): boolean => typeof b.value["text"] === "string" && 
 export type ChatItem =
   | { kind: "message"; id: string; avatar: string; who: string; text: string; at: string; mark: boolean; mine: boolean; replyTo?: string; facts?: Fact[] }
   | { kind: "joined"; id: string; avatar: string; who: string; at: string }
+  /** Members brought in by another, one line for a run of them (S38): 「John 邀请李四、王五加入了群聊」. */
+  | { kind: "invited"; id: string; by: string; byName: string; avatars: string[]; names: string[]; at: string; mine: boolean }
+  /** A two-person chat that began from an avatar's own link (S37): who opened it, and whether that was the person. */
+  | { kind: "began"; id: string; avatar: string; who: string; at: string; mine: boolean }
   /** Someone left (S19); `heir`, who took the group over when its 群主 left. */
   | { kind: "left"; id: string; avatar: string; who: string; at: string; heir?: string }
   | { kind: "note"; id: string; note: "hops"; at: string };
@@ -82,7 +86,18 @@ export function itemsOf(v: MirrorVenue): ChatItem[] {
   const out: ChatItem[] = [];
   for (const b of v.blocks) {
     const at = typeof b.value["at"] === "string" ? b.value["at"] : "";
-    if (/^member-\d+$/.test(b.id)) { const a = avatarOf(b.value["avatar"]); out.push({ kind: "joined", id: b.id, avatar: a, who: name(a), at }); continue; }
+    // A two-person chat says how it began, not that its two came in (S37).
+    if (b.id === "venue" && v.kind === "dm" && b.value["via"] === "link") { const a = avatarOf(b.value["by"]); out.push({ kind: "began", id: b.id, avatar: a, who: name(a), at, mine: a === v.as }); continue; }
+    if (/^member-\d+$/.test(b.id)) {
+      if (v.kind === "dm") continue;
+      const a = avatarOf(b.value["avatar"]), by = avatarOf(b.value["by"]);
+      if (b.value["via"] !== "invite" || by === "" || by === a) { out.push({ kind: "joined", id: b.id, avatar: a, who: name(a), at }); continue; }
+      // Brought in by another (not let in on a request): the run of them by the same one is one line (S38).
+      const prev = out[out.length - 1];
+      if (prev?.kind === "invited" && prev.by === by) { prev.avatars.push(a); prev.names.push(name(a)); continue; }
+      out.push({ kind: "invited", id: b.id, by, byName: name(by), avatars: [a], names: [name(a)], at, mine: by === v.as });
+      continue;
+    }
     if (/^leave-\d+$/.test(b.id)) { const a = avatarOf(b.value["avatar"]), h = typeof b.value["heir"] === "string" ? avatarOf(b.value["heir"]) : undefined; out.push({ kind: "left", id: b.id, avatar: a, who: name(a), at, ...(h !== undefined ? { heir: name(h) } : {}) }); continue; }
     if (/^note-\d+$/.test(b.id) && b.value["note"] === "hops") { out.push({ kind: "note", id: b.id, note: "hops", at }); continue; }
     if (!isMessage(b)) continue;
@@ -124,6 +139,13 @@ export function unreadOf(items: readonly ChatItem[], seen: string | undefined): 
   return said.slice(from).filter((i) => !i.mine).length;
 }
 
+/** A line that says how a chat began or who came in by another (S37, S38), in the words of the person reading it as `as`. */
+export function eventLine(i: Extract<ChatItem, { kind: "began" | "invited" }>, chat: string, as: string | undefined, lang: Lang): string {
+  if (i.kind === "began") return i.mine ? say("page.dm.beganMine", lang, { name: chat }) : say("page.dm.began", lang, { name: i.who });
+  const names = i.avatars.map((a, n) => (a === as ? say("page.group.you", lang) : i.names[n] ?? a)).join(say("call.sep", lang));
+  return i.mine ? say("page.group.invitedMine", lang, { names }) : say("page.group.invited", lang, { who: i.byName, names });
+}
+
 /** The inbox: every chat newest first, or only one avatar's (`only`); the avatars' badges for the row of filters; the unread in all. */
 export function inboxOf(m: Mirror, seen: Readonly<Record<string, string>>, now: string, o: { only?: string; zoneMinutes?: number } = {}): { badges: Badge[]; rows: InboxRow[]; unread: number } {
   const badges = badgesOf(m.avatars);
@@ -135,10 +157,12 @@ export function inboxOf(m: Mirror, seen: Readonly<Record<string, string>>, now: 
     const items = itemsOf(v);
     const last = [...items].reverse().find((i): i is Extract<ChatItem, { kind: "message" }> => i.kind === "message");
     const at = last?.at ?? items[items.length - 1]?.at ?? "";
+    // Nothing said yet: how the chat began, or who was brought in, is its last line (S37, S38).
+    const began = last === undefined ? [...items].reverse().find((i) => i.kind === "began" || i.kind === "invited") : undefined;
     const n = unreadOf(items, seen[venueKey(v.owner, v.id)]);
     unread += n;
     if (o.only !== undefined && o.only !== v.as) continue;
-    rows.push({ owner: v.owner, id: v.id, kind: v.kind, name: v.name, as, ...(last !== undefined ? { last: { who: whoSaid(last, m.lang), text: last.text } } : {}), at, time: timeLabel(at, now, m.lang, o.zoneMinutes), unread: n });
+    rows.push({ owner: v.owner, id: v.id, kind: v.kind, name: v.name, as, ...(last !== undefined ? { last: { who: whoSaid(last, m.lang), text: last.text } } : began !== undefined ? { last: { who: "", text: eventLine(began, v.name, v.as, m.lang) } } : {}), at, time: timeLabel(at, now, m.lang, o.zoneMinutes), unread: n });
   }
   rows.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
   return { badges, rows, unread };

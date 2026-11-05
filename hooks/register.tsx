@@ -35,7 +35,7 @@ import { cellWidth, truncate } from '../dist/hosts/claude-code/cells.js'
 import { fitToBudget } from '../dist/hosts/claude-code/budget.js'
 import { GEMSBANG_BLUE, GEMSBANG_MARK_CHAR } from '../dist/hosts/claude-code/gemsbang.js'
 import { LOCKUP, MARK as BRAND_MARK } from '../dist/hosts/claude-code/gb-brand.js'
-import { addressArgs, fieldAction, gbBand, GB_PANE_ID, groupAsOf, paneRows } from '../dist/hosts/claude-code/gb-panel.js'
+import { addressArgs, fieldAction, gbBand, GB_PANE_ID, groupAsOf, groupPicksOf, paneRows } from '../dist/hosts/claude-code/gb-panel.js'
 import type { GbAction, GbField, GbPage, GbPress, GbRow, JoinView, PaneState, Span, Tint, Tone } from '../dist/hosts/claude-code/gb-panel.js'
 import { barSvg, chatRowPicSvg, contactPicSvg, countSvg, dangerSvg, flagSvg, groupPicSvg, linkSvg, mutedSvg, nameSvg, peopleColor, personSvg, pillSvg, qrSvg, RULE_SVG, switchSvg, tabSvg, tagSvg, textWidth } from '../dist/hosts/claude-code/gb-svg.js'
 import { lastLead, pinnedOf, scrolledTo } from '../dist/hosts/claude-code/pinned.js'
@@ -46,7 +46,7 @@ import type { BridgeRequest, BridgeResponse } from '../dist/hosts/claude-code/pr
 import { nodeMajor, toolArgs } from '../dist/hosts/claude-code/readers.js'
 import { borrowVerdict } from '../dist/core/avatar/borrow.js'
 import type { Fact } from '../dist/core/avatar/borrow.js'
-import { invitesIn, parseInvite } from '../dist/core/avatar/invite.js'
+import { inviteMd, invitesIn, parseInvite } from '../dist/core/avatar/invite.js'
 import { say } from '../dist/core/avatar/words.js'
 import type { Lang } from '../dist/core/avatar/words.js'
 import type { GbAccount, GbAllow, GbChat, GbLink, GbResult, GbRound, GbView } from '../dist/gemsbang/ops.js'
@@ -79,6 +79,12 @@ const ssoAtom = atom({ plugin: 'gemsbang', key: 'sso' } as const, null as Gemsba
 const addLinksAtom = atom({ plugin: 'gemsbang', key: 'addLinks' } as const, null as GemsbangJson)
 /** The name card open (S35): whose, as which of the person's avatars knows them, and the page its ‹ goes back to. */
 const contactAtom = atom({ plugin: 'gemsbang', key: 'contact' } as const, null as GemsbangJson)
+/** 邀请 (S37): the avatar whose own link the page shows; null, the one last spoken as. */
+const inviteAsAtom = atom({ plugin: 'gemsbang', key: 'inviteAs' } as const, null as string | null)
+/** 发起群聊 (S38): the contacts ticked, by id. */
+const groupPickAtom = atom({ plugin: 'gemsbang', key: 'groupPick' } as const, [] as string[])
+/** 发起群聊 (S38): the name typed so far, kept for 创建（N 人）; read by no drawing, so typing redraws nothing. */
+const groupNameAtom = atom({ plugin: 'gemsbang', key: 'groupName' } as const, '' as string)
 /** The card of 我 whose 改 is open: one at a time. */
 const editingAtom = atom({ plugin: 'gemsbang', key: 'editing' } as const, null as string | null)
 /** 叫人's 换一个链接 asked (P4c); the page 叫人 was opened from (群信息, or an empty group's chat). */
@@ -103,7 +109,7 @@ const PANE_TITLE = 'GemsBang'
 const COMMANDS = ['gb', 'bang'] as const
 /** The heads that carry the wordmark and the version where the surface takes pictures: the inbox's and 联系人's (GbInbox, GbContacts). */
 const LOCKUP_HEADS: readonly string[] = ['head-inbox', 'head-contacts']
-const PAGES: readonly GbPage[] = ['inbox', 'chat', 'info', 'invite', 'avatars', 'account', 'new-group', 'join', 'contacts', 'contact']
+const PAGES: readonly GbPage[] = ['inbox', 'chat', 'info', 'invite', 'avatars', 'account', 'new-group', 'join', 'contacts', 'contact', 'invite-me']
 /** After a start that got no answer, a call or a prompt starts again at most this often; sooner when no Node was found. */
 const START_RETRY_MS = 60_000
 const NODE_RETRY_MS = 10_000
@@ -121,7 +127,7 @@ const WAIT_RETRY_MS = 10_000
 const TOOLS = [
   {
     name: 'im_join',
-    description: 'Join a GemsBang group from the invitation link (https://gemsbang.com/i/<code>.md) your person pasted to you in this conversation. GemsBang asks your person first in its own dialog — their email and code too when they are not signed in here, never through you — and then this session speaks for the avatar that joined. A link they did not paste themself is not followed.',
+    description: 'Join a GemsBang group from its invitation link (https://gemsbang.com/i/<code>.md), or start a direct chat from an avatar\'s own link (https://gemsbang.com/u/<code>.md), that your person pasted to you in this conversation. GemsBang asks your person first in its own dialog — their email and code too when they are not signed in here, never through you — and then this session speaks for the avatar that joined. A link they did not paste themself is not followed.',
     inputSchema: { type: 'object', properties: { url: { type: 'string', description: 'The invitation link exactly as your person pasted it.' } }, required: ['url'], additionalProperties: false },
   },
   {
@@ -454,7 +460,7 @@ async function joinFlow($: EngineInterface, url: string, fromTool: { session: st
   const host = new URL(p.origin).host
   if (fromTool !== undefined) {
     const pasted = ((await read($, pastedAtom)) as unknown as string[] | null) ?? []
-    if (!pasted.includes(`${p.origin}/i/${p.code}.md`)) { await gb($, 'note', { url }); return say('join.notPasted', l) }
+    if (!pasted.includes(inviteMd(p))) { await gb($, 'note', { url }); return say('join.notPasted', l) }
   }
   const service = (await readView($))?.relay ?? ''
   if (service !== '' && p.origin !== service) return say('client.otherRelay', l, { host })
@@ -463,7 +469,8 @@ async function joinFlow($: EngineInterface, url: string, fromTool: { session: st
     if (peek === undefined) return (await read($, problemAtom)) ?? ''
     if (!peek.ok) return peek.reason
     const group = String((peek.info?.['group'] as { name?: unknown } | undefined)?.name ?? '')
-    const typed = await ask($, say('ask.email', l, { group }), [say('ask.no', l), say('panel.open', l)])
+    const other = String((peek.info?.['avatar'] as { name?: unknown } | undefined)?.name ?? '')
+    const typed = await ask($, p.kind === 'person' ? say('ask.emailDm', l, { other }) : say('ask.email', l, { group }), [say('ask.no', l), say('panel.open', l)])
     if (typed === undefined || typed === say('ask.no', l)) return say('join.declined', l)
     if (typed === say('panel.open', l)) { await openPane($, 'inbox'); return say('client.notLoggedIn', l) }
     const email = typed.trim()
@@ -484,32 +491,35 @@ async function joinFlow($: EngineInterface, url: string, fromTool: { session: st
   const info = await gb($, 'link-info', { url })
   if (info === undefined) return (await read($, problemAtom)) ?? ''
   if (!info.ok) return info.reason
-  const i = info.info as { group: { name: string; count: number }; owner?: { name: string }; days: number; suggestions: { text: string; blank?: boolean }[]; you?: { avatars: { id: string; name: string }[]; pick: { kind: string; avatar?: string } } }
-  const group = i.group.name
+  const i = info.info as { group?: { name: string; count: number }; avatar?: { name: string }; owner?: { name: string }; days: number; suggestions: { text: string; blank?: boolean }[]; you?: { avatars: { id: string; name: string }[]; pick: { kind: string; avatar?: string } } }
+  // An avatar's own link (S37) asks the same three things about a two-person chat with it.
+  const dm = p.kind === 'person'
+  const group = dm ? i.avatar?.name ?? '' : i.group?.name ?? ''
   const days = i.days
-  const from = say('ask.from', l, { host, owner: i.owner?.name ?? '', count: i.group.count, days })
+  const from = dm ? say('ask.fromDm', l, { host, other: group, days }) : say('ask.from', l, { host, owner: i.owner?.name ?? '', count: i.group?.count ?? 0, days })
   const avatars = i.you?.avatars ?? []
   const pick = i.you?.pick ?? { kind: 'choose' }
   const name = async (): Promise<Record<string, unknown> | undefined> => {
     const offered = i.suggestions.filter((s) => s.blank !== true).slice(0, 2).map((s) => s.text)
     const blanks = i.suggestions.filter((s) => s.blank === true).map((s) => `「${s.text}」`)
     const hint = blanks.length > 0 ? `\n${say('ask.blank', l, { examples: blanks.join(' ') })}` : ''
-    const a = await ask($, `${say('ask.name', l, { group })}${hint}\n${from}`, [...offered, say('ask.skip', l), say('ask.no', l)])
+    const a = await ask($, `${dm ? say('ask.nameDm', l, { other: group }) : say('ask.name', l, { group })}${hint}\n${from}`, [...offered, say('ask.skip', l), say('ask.no', l)])
     if (a === undefined || a === say('ask.no', l)) return undefined
     return a === say('ask.skip', l) ? { new: true } : { name: a.trim() }
   }
   const choose = async (): Promise<Record<string, unknown> | undefined> => {
     if (avatars.length === 0) return name()
-    const a = await ask($, `${say('ask.choose', l, { group })}\n${from}`, [...avatars.slice(0, 3).map((x) => x.name), say('ask.new', l)])
+    const a = await ask($, `${dm ? say('ask.chooseDm', l, { other: group }) : say('ask.choose', l, { group })}\n${from}`, [...avatars.slice(0, 3).map((x) => x.name), say('ask.new', l)])
     if (a === undefined) return undefined
     const mine = avatars.find((x) => x.name === a)
     return mine !== undefined ? { as: mine.id } : a === say('ask.new', l) ? name() : { name: a.trim() }
   }
   let body: Record<string, unknown> | undefined
-  if (pick.kind === 'in') body = {}
+  if (pick.kind === 'in') body = dm && pick.avatar !== undefined ? { as: pick.avatar } : {}
   else if (pick.kind === 'known' && pick.avatar !== undefined) {
     const known = avatars.find((x) => x.id === pick.avatar)?.name ?? ''
-    const a = await ask($, `${say('ask.join', l, { name: known, group })}\n${from}\n${say('ask.known', l, { name: known })}`, [say('ask.yes', l), say('ask.switch', l), say('ask.no', l)])
+    const asked = dm ? `${say('ask.dm', l, { name: known, other: group })}\n${from}` : `${say('ask.join', l, { name: known, group })}\n${from}\n${say('ask.known', l, { name: known })}`
+    const a = await ask($, asked, [say('ask.yes', l), say('ask.switch', l), say('ask.no', l)])
     if (a === say('ask.yes', l)) body = { as: pick.avatar }
     else if (a === say('ask.switch', l)) body = await choose()
     else return say('join.declined', l)
@@ -520,6 +530,7 @@ async function joinFlow($: EngineInterface, url: string, fromTool: { session: st
   if (!joined.ok) return joined.reason
   const j = joined.joined as { venue: { owner: string; id: string; name: string }; avatar: { name: string }; pending?: string }
   if (j.pending !== undefined) return say('tool.pending', l, { group, name: j.avatar.name })
+  if (dm) return say('tool.dmJoined', l, { other: group, name: j.avatar.name, venue: `${j.venue.owner}/${j.venue.id}` })
   return say('tool.joined', l, { group: j.venue.name, name: j.avatar.name, venue: `${j.venue.owner}/${j.venue.id}` })
 }
 
@@ -652,9 +663,18 @@ async function act($: EngineInterface, action: GbAction, surface?: string): Prom
       await update($, leavingAtom, () => false)
       await update($, heirAtom, () => null)
       if (action.page === 'invite') await update($, inviteBackAtom, () => (from === 'info' ? 'info' : 'chat'))
+      // 邀请 (S37): back to where it was opened from; the link of the avatar picked, or the one last spoken as.
+      if (action.page === 'invite-me') {
+        await update($, inviteBackAtom, () => (from === 'contacts' ? 'contacts' : 'inbox'))
+        await update($, asOpenAtom, () => false)
+        await update($, linkAtom, () => null)
+        const v = await readView($)
+        const as = [await read($, inviteAsAtom), v?.recent, v?.avatars[0]?.id].find((x): x is string => typeof x === 'string' && (v?.avatars ?? []).some((a) => a.id === x))
+        if (as !== undefined) await run($, 'my-link', { as })
+      }
       await update($, editingAtom, () => null)
       await update($, plusOpenAtom, () => false)
-      if (action.page === 'new-group') { await update($, groupAsAtom, () => ''); await update($, asOpenAtom, () => false); await update($, groupAvatarAtom, () => null) }
+      if (action.page === 'new-group') { await update($, groupAsAtom, () => ''); await update($, asOpenAtom, () => false); await update($, groupAvatarAtom, () => null); await update($, groupPickAtom, () => []); await update($, groupNameAtom, () => '') }
       if (action.page === 'join') await update($, joiningAtom, () => null)
       if (action.page === 'invite' && chat !== null) { await update($, linkAtom, () => null); await run($, 'link', { owner: chat.owner, id: chat.id }) }
       if (action.page === 'account') { await update($, accountAtom, () => null); await account($, run($, 'account', {})) }
@@ -686,8 +706,18 @@ async function act($: EngineInterface, action: GbAction, surface?: string): Prom
       return
     }
     case 'rotate': {
-      if (chat !== null) await run($, 'rotate', { owner: chat.owner, id: chat.id })
+      // 邀请's link is the avatar's own (S37); 邀请成员's, the chat's.
+      const link = (await read($, linkAtom)) as unknown as GbLink | null
+      if (link?.kind === 'person' && link.as !== undefined) await run($, 'my-rotate', { as: link.as })
+      else if (chat !== null) await run($, 'rotate', { owner: chat.owner, id: chat.id })
       await update($, rotatingAtom, () => false)
+      return
+    }
+    case 'invite-as': {
+      await update($, inviteAsAtom, () => action.as)
+      await update($, asOpenAtom, () => false)
+      await update($, linkAtom, () => null)
+      await run($, 'my-link', { as: action.as })
       return
     }
     case 'rotate-ask': await update($, rotatingAtom, () => action.open); return
@@ -703,9 +733,13 @@ async function act($: EngineInterface, action: GbAction, surface?: string): Prom
     case 'group-as': {
       await update($, groupAsAtom, () => action.as)
       await update($, asOpenAtom, () => false)
+      // Another avatar knows other people: the ticks start again.
+      await update($, groupPickAtom, () => [])
       if (action.as !== 'new') await update($, groupAvatarAtom, () => null)
       return
     }
+    case 'group-pick': await update($, groupPickAtom, (xs) => (xs.includes(action.id) ? xs.filter((x) => x !== action.id) : [...xs, action.id])); return
+    case 'group-make': await submit($, 'group', await read($, groupNameAtom)); return
     case 'plus': await update($, plusOpenAtom, (was) => !was); return
     case 'choose': await update($, asOpenAtom, () => action.open); return
     case 'group-avatar': await update($, groupAvatarAtom, () => action.name); return
@@ -818,10 +852,13 @@ async function account($: EngineInterface, call: Promise<GbResult | undefined>):
 async function peekHere($: EngineInterface, url: string): Promise<void> {
   const r = await run($, 'link-info', { url })
   if (r?.ok !== true) return
-  const i = r.info as { group: { name: string; count: number }; owner?: { name: string }; suggestions: { text: string; blank?: boolean }[]; you?: { pick: { kind: string; avatar?: string } } }
+  const i = r.info as { kind?: string; group?: { name: string; count: number }; avatar?: { name: string }; owner?: { name: string }; suggestions: { text: string; blank?: boolean }[]; you?: { pick: { kind: string; avatar?: string } } }
   const pick = i.you?.pick ?? { kind: 'choose' }
-  if (pick.kind === 'in') { await joinHere($, {}, url); return }
-  const view: JoinView = { url, group: i.group.name, count: i.group.count, ...(i.owner !== undefined ? { owner: i.owner.name } : {}), pick, suggestions: i.suggestions ?? [] }
+  if (pick.kind === 'in') { await joinHere($, pick.avatar !== undefined && i.kind === 'person' ? { as: pick.avatar } : {}, url); return }
+  // An avatar's own link (S39): its name in the group's place, and joining starts a two-person chat with it.
+  const view: JoinView = i.kind === 'person'
+    ? { url, group: i.avatar?.name ?? '', count: 2, pick, suggestions: i.suggestions ?? [], person: true }
+    : { url, group: i.group?.name ?? '', count: i.group?.count ?? 0, ...(i.owner !== undefined ? { owner: i.owner.name } : {}), pick, suggestions: i.suggestions ?? [] }
   await update($, joiningAtom, () => view as unknown as GemsbangJson)
 }
 
@@ -841,14 +878,16 @@ async function joinHere($: EngineInterface, body: Record<string, unknown>, url?:
 
 /** Enter in a field: its one call, or what the pane keeps until the next. */
 async function submit($: EngineInterface, field: GbField, value: string, target?: string): Promise<void> {
-  const [chat, address, adding, groupAs, groupAvatar, joining, view] = await Promise.all([read($, chatAtom), read($, addressAtom), read($, addingAtom), read($, groupAsAtom), read($, groupAvatarAtom), read($, joiningAtom), readView($)])
+  const [chat, address, adding, groupAs, groupAvatar, joining, view, groupPick] = await Promise.all([read($, chatAtom), read($, addressAtom), read($, addingAtom), read($, groupAsAtom), read($, groupAvatarAtom), read($, joiningAtom), readView($), read($, groupPickAtom)])
   const session = await $.session.id().catch(() => '')
   const blank = (joining as unknown as JoinView | null)?.blank ?? null
   // 好了 on a card's name as it was (P8b): nothing to rename, the card folds.
   if (field === 'rename' && view?.avatars.find((x) => x.id === target)?.name === value.trim()) { await update($, editingAtom, () => null); return }
   // A new 底子 entry is given to the avatar this session plays (S27), as 我 shows it.
   const baseFor = view?.bodies?.[session] ?? view?.recent ?? view?.avatars[0]?.id
-  const a = fieldAction(field, value, { chat: chat as unknown as GbChat | null, address, adding, groupAs: groupAsOf(view ?? EMPTY_VIEW, groupAs), session, blank, ...(groupAvatar !== null ? { groupAvatar } : {}), ...(baseFor !== undefined ? { baseFor } : {}) }, target)
+  const as = groupAsOf(view ?? EMPTY_VIEW, groupAs)
+  const groupMembers = field === 'group' ? groupPicksOf(view ?? EMPTY_VIEW, { groupPick }, as).map((c) => c.id) : []
+  const a = fieldAction(field, value, { chat: chat as unknown as GbChat | null, address, adding, groupAs: as, groupMembers, session, blank, ...(groupAvatar !== null ? { groupAvatar } : {}), ...(baseFor !== undefined ? { baseFor } : {}) }, target)
   if (a === undefined) return
   if ('local' in a) {
     // An address the service gives the code back for (its beta, before mail) comes back signed in, or added: no code to type.
@@ -873,7 +912,7 @@ async function submit($: EngineInterface, field: GbField, value: string, target?
   // 好了 (P8b, P8a): the name or the default name saved, the field folds; a repository named, its field folds.
   if (field === 'rename' || field === 'default-name') await update($, editingAtom, () => null)
   if (field === 'repo') await update($, repoOpenAtom, () => false)
-  if (a.call === 'group') { await update($, groupAvatarAtom, () => null); await update($, groupAsAtom, () => ''); await update($, asOpenAtom, () => false) }
+  if (a.call === 'group') { await update($, groupAvatarAtom, () => null); await update($, groupAsAtom, () => ''); await update($, asOpenAtom, () => false); await update($, groupPickAtom, () => []); await update($, groupNameAtom, () => '') }
   if (field === 'need-own') await update($, writingAtom, () => null)
 }
 
@@ -1087,7 +1126,7 @@ function drawPictured($: EngineInterface, els: Els, row: GbRow, columns: number,
     case 'chat': {
       const r = row.row
       const room = Math.max(8, columns - 16 - (row.flag !== undefined ? cellWidth(row.flag) + 1 : 0) - (row.muted === true ? 3 : 0))
-      const second = r.last !== undefined ? truncate(`${r.last.who}：${r.last.text}`, room) : ''
+      const second = r.last !== undefined ? truncate(r.last.who === '' ? r.last.text : `${r.last.who}：${r.last.text}`, room) : ''
       return (
         <Box key={row.key} gap={1} alignItems="center" paddingX={1} hover={{ backgroundColor: SHADE }}>
           {drawPic(els, `${row.key}-pic`, chatRowPicSvg(r.kind, r.name, r.as, r.unread, row.muted === true))}
@@ -1276,6 +1315,7 @@ function drawPictured($: EngineInterface, els: Els, row: GbRow, columns: number,
           <Box key={it.key} flexDirection="column">
             {i > 0 && rule(els, `${it.key}-rule`)}
             <Box gap={1} alignItems="center" paddingY={1}>
+              {row.mark === 'check' && <Button key={`${it.key}-box`} plain label={it.on === true ? '☑' : '☐'} onPress={press(it.action)} />}
               {it.badge !== undefined && drawPic(els, `${it.key}-pill`, pillSvg(it.badge, { filled: it.on === true }))}
               {it.person === true && drawPic(els, `${it.key}-pic`, personSvg(it.label, undefined, 24))}
               {it.group === true && drawPic(els, `${it.key}-pic`, groupPicSvg(it.label, 24))}
@@ -1283,7 +1323,7 @@ function drawPictured($: EngineInterface, els: Els, row: GbRow, columns: number,
               <Box flexGrow={1} />
               {it.note !== undefined && <Text color={HEADING}>{it.note}</Text>}
               {it.badge !== undefined && <Button key={it.key} plain dimColor label={row.mark === 'tick' ? (it.on === true ? '✓' : '　') : '›'} onPress={press(it.action)} />}
-              {it.badge === undefined && <Text color={HEADING}>{row.mark === 'tick' ? (it.on === true ? '✓' : '') : '›'}</Text>}
+              {it.badge === undefined && row.mark !== 'check' && <Text color={HEADING}>{row.mark === 'tick' ? (it.on === true ? '✓' : '') : '›'}</Text>}
             </Box>
           </Box>
         ))}
@@ -1304,6 +1344,7 @@ function drawPictured($: EngineInterface, els: Els, row: GbRow, columns: number,
       <Box key={row.key} flexDirection="column" alignItems="center" gap={1} paddingY={2}>
         <Text color={HEADING}>{row.text}</Text>
         <Box gap={1}>{row.items.map((b) => pressButton($, els, b))}</Box>
+        {row.link !== undefined && picPress($, els, row.link.key, linkSvg(row.link.label), row.link.action)}
       </Box>
     )
     // A call handed to the agent, while it answers: the bar, one grey line (agent 在回…).
@@ -1390,7 +1431,7 @@ function drawRow($: EngineInterface, els: Els, row: GbRow, columns: number, vers
       // needs the person, the unread (a dot when muted) beside them.
       const r = row.row
       const room = Math.max(8, columns - 8 - (row.flag !== undefined ? cellWidth(row.flag) + 1 : 0))
-      const second = r.last !== undefined ? truncate(`${r.last.who}：${r.last.text}`, room) : ''
+      const second = r.last !== undefined ? truncate(r.last.who === '' ? r.last.text : `${r.last.who}：${r.last.text}`, room) : ''
       return (
         <Box key={row.key} flexDirection="column" paddingX={1}>
           <Box gap={1}>
@@ -1445,7 +1486,7 @@ function drawRow($: EngineInterface, els: Els, row: GbRow, columns: number, vers
       <Box key={row.key} flexDirection="column">
         {row.items.map((it) => (
           <Button key={it.key} plain onPress={press(it.action)}>
-            <Text>{it.badge !== undefined && <Text color={it.badge.color} bold>{`${it.badge.initial} `}</Text>}{it.label}{it.note !== undefined && <Text dimColor>{`  ${it.note}`}</Text>}<Text dimColor>{row.mark === 'tick' ? (it.on === true ? ' ✓' : '') : ' ›'}</Text></Text>
+            <Text>{row.mark === 'check' && <Text>{it.on === true ? '☑ ' : '☐ '}</Text>}{it.badge !== undefined && <Text color={it.badge.color} bold>{`${it.badge.initial} `}</Text>}{it.label}{it.note !== undefined && <Text dimColor>{`  ${it.note}`}</Text>}{row.mark !== 'check' && <Text dimColor>{row.mark === 'tick' ? (it.on === true ? ' ✓' : '') : ' ›'}</Text>}</Text>
           </Button>
         ))}
       </Box>
@@ -1462,6 +1503,7 @@ function drawRow($: EngineInterface, els: Els, row: GbRow, columns: number, vers
       <Box key={row.key} flexDirection="column" gap={1}>
         <Text dimColor>{row.text}</Text>
         <Box gap={2} flexWrap="wrap">{row.items.map((b) => <Button key={b.key} label={b.label} {...(b.primary ? { variant: 'primary' } : {})} onPress={press(b.action)} />)}</Box>
+        {row.link !== undefined && <Button key={row.link.key} plain dimColor label={row.link.label} onPress={press(row.link.action)} />}
       </Box>
     )
     // A card of 我: the avatar's initial and name, 改; a line per label and value with its presses; 改's fields under it.
@@ -1515,7 +1557,7 @@ function drawRow($: EngineInterface, els: Els, row: GbRow, columns: number, vers
     )
     case 'input': {
       if (Input === undefined) return <Text key={row.key} dimColor>{row.placeholder}</Text>
-      return <Input key={row.key} placeholder={row.placeholder} {...(row.label !== undefined ? { label: row.label } : {})} {...(row.submitLabel !== undefined ? { submitLabel: row.submitLabel } : {})} {...(row.value !== undefined ? { value: row.value } : {})} onSubmit={(value: string) => keep(submit($, row.field, value, row.target), $)} />
+      return <Input key={row.key} placeholder={row.placeholder} {...(row.label !== undefined ? { label: row.label } : {})} {...(row.submitLabel !== undefined ? { submitLabel: row.submitLabel } : {})} {...(row.value !== undefined ? { value: row.value } : {})} {...(row.draft === true ? { onInput: (value: string) => keep(update($, groupNameAtom, () => value).then(() => undefined), $) } : {})} onSubmit={(value: string) => keep(submit($, row.field, value, row.target), $)} />
     }
     case 'select': {
       if (Select === undefined) return <Text key={row.key} dimColor>{`${row.label}：${row.options.find((o) => o.value === row.value)?.label ?? row.value}`}</Text>
@@ -1639,7 +1681,7 @@ async function paneNow($: EngineInterface): Promise<{ view: GbView | null; state
     read($, allowAtom), read($, addingAtom), read($, accountAtom), read($, writingAtom), read($, editingAtom), read($, plusOpenAtom), read($, asOpenAtom), read($, groupAvatarAtom), read($, joiningAtom),
     read($, rotatingAtom), read($, inviteBackAtom), read($, nodeAtom),
   ])
-  const [langOpen, repoOpen, addOpen, loggingOut, allows, leaving, heir, sso, addLinks, contact] = await Promise.all([read($, langOpenAtom), read($, repoOpenAtom), read($, addOpenAtom), read($, loggingOutAtom), read($, allowsAtom), read($, leavingAtom), read($, heirAtom), read($, ssoAtom), read($, addLinksAtom), read($, contactAtom)])
+  const [langOpen, repoOpen, addOpen, loggingOut, allows, leaving, heir, sso, addLinks, contact, inviteAs, groupPick] = await Promise.all([read($, langOpenAtom), read($, repoOpenAtom), read($, addOpenAtom), read($, loggingOutAtom), read($, allowsAtom), read($, leavingAtom), read($, heirAtom), read($, ssoAtom), read($, addLinksAtom), read($, contactAtom), read($, inviteAsAtom), read($, groupPickAtom)])
   const rounds = await readRounds($)
   const session = await $.session.id().catch(() => '')
   const state: PaneState = {
@@ -1647,7 +1689,7 @@ async function paneNow($: EngineInterface): Promise<{ view: GbView | null; state
     allow: (allow as unknown as Record<string, { person?: boolean; venue?: boolean }>) ?? {}, adding, account: accountNow as unknown as GbAccount | null, writing, editing, plusOpen, asOpen, groupAvatar: groupAvatarNow, joining: joiningNow as unknown as JoinView | null,
     // The chats where this session's agent answers a call handed to it, while it does.
     replying: Object.values(rounds).map((r) => `${r.owner}/${r.id}`),
-    rotating, inviteBack: inviteBack === 'info' ? 'info' : 'chat', langOpen, repoOpen, addOpen, loggingOut, version, allows: (allows as unknown as Record<string, GbAllow[]> | null) ?? {}, leaving, heir,
+    rotating, inviteBack: (['info', 'contacts', 'inbox'] as const).find((x) => x === inviteBack) ?? 'chat', inviteAs, groupPick, langOpen, repoOpen, addOpen, loggingOut, version, allows: (allows as unknown as Record<string, GbAllow[]> | null) ?? {}, leaving, heir,
     sso: sso as unknown as { kind: string; url: string } | null, addLinks: addLinks as unknown as { kind: string; url: string }[] | null,
     contact: contact as unknown as { id: string; as: string; back: GbPage } | null,
     // The desktop is a Mac or Windows; a Node found as node.exe is Windows, where Ctrl+C copies.
