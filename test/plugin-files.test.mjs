@@ -26,8 +26,9 @@ test("no skill shares its name with a command the hooks module registers", () =>
   // `$.command.register` for a name any listed command already answers to:
   // a skill named like a command keeps that command from registering.
   const hooks = readFileSync(at("hooks/register.tsx"), "utf8");
-  const commands = [...hooks.matchAll(/\$\.command\.register\(\{\s*name:\s*'([^']+)'/g)].map((m) => m[1]);
-  assert.deepEqual(commands, ["gemsbang"], "the hooks module registers /gemsbang");
+  const commands = JSON.parse(hooks.match(/const COMMANDS = (\[[^\]]*\]) as const/)[1].replace(/'/g, '"'));
+  assert.ok(/\$\.command\.register\(\{\s*name,/.test(hooks), "each of COMMANDS is registered");
+  assert.deepEqual(commands, ["gb", "bang"], "the hooks module registers /gb and /bang (2026-11-05; it was /gemsbang)");
   for (const dir of existsSync(at("skills")) ? readdirSync(at("skills")) : []) {
     const name = readFileSync(at(`skills/${dir}/SKILL.md`), "utf8").match(/^name:\s*(\S+)\s*$/m)?.[1];
     assert.ok(name !== undefined, `skills/${dir} names itself`);

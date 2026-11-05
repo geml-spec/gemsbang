@@ -99,6 +99,8 @@ const borrowingAtom = atom({ plugin: 'gemsbang', key: 'borrowing' } as const, {}
 const roundsAtom = atom({ plugin: 'gemsbang', key: 'rounds' } as const, {} as GemsbangJson)
 
 const PANE_TITLE = 'GemsBang'
+/** The commands that open the pane, each the same (2026-11-05). */
+const COMMANDS = ['gb', 'bang'] as const
 /** The heads that carry the wordmark and the version where the surface takes pictures: the inbox's and 联系人's (GbInbox, GbContacts). */
 const LOCKUP_HEADS: readonly string[] = ['head-inbox', 'head-contacts']
 const PAGES: readonly GbPage[] = ['inbox', 'chat', 'info', 'invite', 'avatars', 'account', 'new-group', 'join', 'contacts', 'contact']
@@ -1672,7 +1674,8 @@ export const register: Register = (on) => {
     await update($, setupAtom, () => null)
     await update($, pastedAtom, () => [])
     for (const x of TOOLS) await registerOne($, x.name, () => $.tool.register({ name: x.name, description: x.description, inputSchema: x.inputSchema, isDeferred: false }))
-    await registerOne($, '/gemsbang', () => $.command.register({ name: 'gemsbang', description: 'GemsBang：聊天；/gemsbang avatars 我', argumentHint: '[avatars]' }))
+    // /gb and /bang, short to type, the one as the other (2026-11-05, the person): it was /gemsbang.
+    for (const name of COMMANDS) await registerOne($, `/${name}`, () => $.command.register({ name, description: `GemsBang：聊天；/${name} 联系人；/${name} 我`, argumentHint: '[联系人|我]' }))
     try {
       const manifest = JSON.parse(String(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`))) as { version?: unknown }
       if (typeof manifest.version === 'string') { const v = manifest.version; await update($, versionAtom, () => v) }
@@ -1884,11 +1887,11 @@ export const register: Register = (on) => {
     return {}
   })
 
-  // /gemsbang: the pane on the inbox, or 我 (/gemsbang settings too: 我 is the settings).
-  on('command.run', { command: 'gemsbang' }, async ($, e) => {
+  // /gb and /bang: the pane on the inbox, 联系人, or 我 (/gb settings too: 我 is the settings).
+  for (const command of COMMANDS) on('command.run', { command }, async ($, e) => {
     await retryStart($)
     const arg = String(e.args ?? '').trim()
-    // 我 is the person's settings (S22): /gemsbang settings goes there too.
+    // 我 is the person's settings (S22): /gb settings goes there too.
     const page: GbPage = ['avatars', '我', '我的分身', 'settings', '设置'].includes(arg) ? 'avatars' : ['contacts', '联系人'].includes(arg) ? 'contacts' : 'inbox'
     const opened = await openPane($, page)
     // Nowhere to draw it (a remote connection, a run with no page): said as the person reads it, never the engine's words.

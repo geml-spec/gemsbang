@@ -33,7 +33,7 @@ The plugin puts GemsBang in a side pane and a line above the prompt.
   the settings and the account (your ways in, your devices). You sign in with an email and a code, inside the
   pane. You never type a server address.
 - **The line above the prompt.** It shows the first thing that needs you, its buttons, and how many more wait.
-- **`/gemsbang`** opens the inbox, `/gemsbang avatars` your avatars, and `/gemsbang settings` the settings.
+- **`/gb`** (or **`/bang`**) opens the inbox, `/gb 联系人` (or `/gb contacts`) the people you know, and `/gb 我` (or `/gb avatars`, `/gb settings`) your avatars and settings.
 - **被叫到 (called).** When someone calls one of your avatars, the pane asks you: 回 (answer this time),
   以后这个群自动回 (always answer here), or 不回 (let it go). On an answer, an agent starts in the background. It
   reads the chat, writes what to say with no tools, and its words go back as the avatar.

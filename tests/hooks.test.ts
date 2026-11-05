@@ -117,11 +117,11 @@ const paneText = async ($: Engine): Promise<string> => {
 }
 const calls = (w: ReturnType<typeof world>, call: string) => w.sent.filter((r) => r.call === call)
 
-test('the start: the five tools and /gemsbang registered; every request one call of the client, the first a read of the chats', async ($, on) => {
+test('the start: the five tools and /gb registered; every request one call of the client, the first a read of the chats', async ($, on) => {
   const w = world(on)
   await start($, on)
   expect(w.registered).toEqual(['im_join', 'im_say', 'im_ask', 'im_remember', 'im_read'])
-  expect(w.commands).toEqual(['gemsbang'])
+  expect(w.commands).toEqual(['gb', 'bang'])
   expect(w.sent[0]).toEqual({ v: 1, call: 'status', args: { session: SESSION } })
   expect(await bandText($), 'logged in, nothing needs the person: the line stays, how many chats have something new').toBe('@ GemsBang · 1 个聊天有新消息 [打开]')
 })
@@ -136,7 +136,7 @@ test('the line above the prompt (S12, 2026-11-04): its mark and its words open t
   }
   expect(w.opened).toEqual(['gemsbang-board', 'gemsbang-board', 'gemsbang-board', 'gemsbang-board'])
   w.view = VIEW({ muted: { avatars: [], venues: [`${ROW.owner}/${ROW.id}`] } })
-  await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  await $.command.run({ command: 'gb', args: '', origin: COMPOSER, presentation: PRESENTATION })
   await clock.advance(1)
   expect(await bandText($)).toBe('@ GemsBang [打开]')
 })
@@ -163,7 +163,7 @@ test('a bridge that does not answer never stops a call; the line stays the plugi
   expect(await bandText($), 'missed for less than two minutes: still quiet').toBe('实现 #12 设置页缓存写路径')
   // The start is tried again at 5, 20, 50, 110 and 170 seconds: the first miss past two minutes says so.
   await clock.advance(52_000)
-  await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  await $.command.run({ command: 'gb', args: '', origin: COMPOSER, presentation: PRESENTATION })
   const text = await bandText($)
   expect(text.startsWith('实现 #12 设置页缓存写路径 @ GemsBang：暂时没应答，不拦操作'), text).toBe(true)
 })
@@ -176,7 +176,7 @@ test('nobody signed in: the line says so; the pane asks for an email, then its c
   w.answers['first-avatar'] = (args) => { w.view = VIEW({ avatars: [JOHN], rows: [], unread: 0, bodies: { [String(args['session'])]: JOHN.id } }); return { ok: true, view: w.view } }
   await start($, on)
   expect(await bandText($)).toBe('@ GemsBang 还没登录 [打开]')
-  await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  await $.command.run({ command: 'gb', args: '', origin: COMPOSER, presentation: PRESENTATION })
   expect(w.opened).toEqual(['gemsbang-board'])
   let pane = await mountPane($)
   const first = shown((await pane.drawn()) as unknown as Drawn).join(' ')
@@ -205,7 +205,7 @@ test('the beta before mail (2026-11-04): an email the service gives the code bac
   w.view = VIEW({ loggedIn: false, avatars: [], rows: [], unread: 0 })
   w.answers['login-start'] = () => { w.view = VIEW({ avatars: [], rows: [], unread: 0 }); return { ok: true, view: w.view } }
   await start($, on)
-  await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  await $.command.run({ command: 'gb', args: '', origin: COMPOSER, presentation: PRESENTATION })
   const pane = await mountPane($)
   await pane.input({ key: 'email', text: 'john@example.com' })
   await pane.unmount()
@@ -223,7 +223,7 @@ test('through another account (S28, sketch ①②): the pane opened with nobody 
   const steps: Record<string, unknown>[] = [{ ok: true, sso: { state: 'none' } }, { ok: true, sso: { state: 'opened', kind: 'github' } }]
   w.answers['sso-wait'] = () => steps.shift() ?? { ok: true, sso: { state: 'none' } }
   const clock = await start($, on)
-  await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  await $.command.run({ command: 'gb', args: '', origin: COMPOSER, presentation: PRESENTATION })
   await clock.advance(1)
   expect(await paneText($)).toContain('用 GitHub 继续')
   await clock.advance(1_000)
@@ -243,7 +243,7 @@ test('through another account (S28, sketch ①②): the pane opened with nobody 
   expect(await paneText($)).toContain('聊天 联系人 我')
 })
 
-test('账号与登录 (architecture §3.1, P10): from 我 (/gemsbang settings goes there), the account read through the client; a device signed out; 加一种登录方式 opens its field, an email added with its code; 退出这台设备的登录 asked first, then signed out to the sign-in', async ($, on) => {
+test('账号与登录 (architecture §3.1, P10): from 我 (/gb settings goes there), the account read through the client; a device signed out; 加一种登录方式 opens its field, an email added with its code; 退出这台设备的登录 asked first, then signed out to the sign-in', async ($, on) => {
   const w = world(on)
   const ACCOUNT = (methods: unknown[], devices: unknown[]) => ({ ok: true, account: { methods, devices } })
   const MAIL = { id: 'email-1', kind: 'email', shown: 'j***@example.com', at: 't' }
@@ -254,8 +254,8 @@ test('账号与登录 (architecture §3.1, P10): from 我 (/gemsbang settings go
   w.answers['method-start'] = () => ({ ok: true, text: '验证码已发到 j***@work.example', info: { to: 'j***@work.example' } })
   w.answers['method-verify'] = () => ACCOUNT([MAIL, { id: 'email-2', kind: 'email', shown: 'j***@work.example', at: 't' }], [HERE])
   await start($, on)
-  await $.command.run({ command: 'gemsbang', args: 'settings', origin: COMPOSER, presentation: PRESENTATION })
-  expect(await paneText($), '/gemsbang settings is 我').toContain('0.5.3 我 J John [改]')
+  await $.command.run({ command: 'gb', args: 'settings', origin: COMPOSER, presentation: PRESENTATION })
+  expect(await paneText($), '/gb settings is 我').toContain('0.5.3 我 J John [改]')
   let pane = await mountPane($)
   await pane.press({ key: 'account-open' })
   await pane.unmount()
@@ -289,12 +289,20 @@ test('账号与登录 (architecture §3.1, P10): from 我 (/gemsbang settings go
   expect(calls(w, 'logout').length).toBe(1)
 })
 
-test('/gemsbang with nowhere to draw the pane (a remote connection): said as the person reads it — where it shows and how to see it — never the engine\'s words', async ($, on) => {
+test('/bang does what /gb does (2026-11-05): the pane on the inbox, 联系人 or 我 by its word', async ($, on) => {
+  world(on)
+  await start($, on)
+  const r = await $.command.run({ command: 'bang', args: '我', origin: COMPOSER, presentation: PRESENTATION })
+  expect(r.text).toBe('GemsBang')
+  expect(await paneText($), '/bang 我 is 我').toContain('我 J John [改]')
+})
+
+test('/gb with nowhere to draw the pane (a remote connection): said as the person reads it — where it shows and how to see it — never the engine\'s words', async ($, on) => {
   const w = world(on)
   w.unplaced = 'no-surface: no surface is attached ($.session.surfaces() is empty)'
   await start($, on)
-  const r = await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
-  expect(r.text).toBe('侧栏只在电脑上的 Claude Code 里显示，现在这个连接没有地方画它。回到电脑上打 /gemsbang 就能看到。')
+  const r = await $.command.run({ command: 'gb', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  expect(r.text).toBe('侧栏只在电脑上的 Claude Code 里显示，现在这个连接没有地方画它。回到电脑上打 /gb 或 /bang 就能看到。')
 })
 
 test('the box (architecture §5.2, §6.2): no poll — the module waits on the box through the client, 25 seconds a wait, one after another; what a wait brings shows at once; nobody signed in, the waits stop until someone signs in', async ($, on) => {
@@ -329,7 +337,7 @@ test('the total inbox (spec §7.1, S11, direction ①): WeChat\'s — the name w
   w.answers['open'] = () => ({ ok: true, chat: CHAT, view: w.view })
   w.answers['say'] = (args) => ({ ok: true, chat: { ...CHAT, items: [...CHAT.items, { kind: 'message', id: 'p-1', avatar: JOHN.id, who: 'John', text: args['text'], at: '2026-11-01T06:09:00Z', mark: false, mine: true }] }, view: w.view })
   await start($, on)
-  await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  await $.command.run({ command: 'gb', args: '', origin: COMPOSER, presentation: PRESENTATION })
   const text = await paneText($)
   expect(text).toContain('GemsBang 2 条未读 [＋] L 三年二班家长 19:31 [你的身份：我看一下，晚点回。]')
   expect(text, '聊天 · 联系人 · 我 at the foot, the unread on 聊天').toMatch(/ 聊天 2 联系人 我$/)
@@ -363,7 +371,7 @@ test('the inbox where the surface takes pictures (S11, S13–S15, direction ①)
   w.view = VIEW({ needs: [NEED('need-1', { draft: '周五我可以去，几点集合？' })] })
   w.answers['open'] = () => ({ ok: true, chat: CHAT2, view: w.view })
   await start($, on)
-  await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  await $.command.run({ command: 'gb', args: '', origin: COMPOSER, presentation: PRESENTATION })
   let pane = await mountDesktop($)
   let drawn = (await pane.drawn()) as unknown as DrawnNode
   const alts = all(drawn, 'Svg').map((x) => String(x.props?.['alt']))
@@ -394,7 +402,7 @@ test('聊天 · 联系人 · 我 pinned at the foot (S11, S22, S34): docked, the
   const w = world(on)
   w.answers['open'] = () => ({ ok: true, chat: CHAT, view: w.view })
   await start($, on)
-  await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  await $.command.run({ command: 'gb', args: '', origin: COMPOSER, presentation: PRESENTATION })
   for (const surface of ['terminal', 'desktop'] as const) {
     const pane = await $.ui.mount({ plugin: 'gemsbang', surface, component: 'Pane', requestId: 'gemsbang-board', props: PANE })
     const drawn = (await pane.drawn()) as unknown as DrawnNode
@@ -427,8 +435,8 @@ test('联系人 and 发消息 (S34, S35, S18, S36): the tab opens 联系人 — 
   w.answers['dm-open'] = () => ({ ok: true, chat: DM, view: w.view })
   w.answers['open'] = (args) => ({ ok: true, chat: args['id'] === DM.id ? DM : { ...CHAT, members: [{ id: JOHN.id, name: 'John' }, { id: LISI.id, name: '李四' }] }, view: w.view })
   await start($, on)
-  await $.command.run({ command: 'gemsbang', args: '联系人', origin: COMPOSER, presentation: PRESENTATION })
-  expect(await paneText($), '/gemsbang 联系人 opens it; the tabs at the foot, 联系人 on').toMatch(/联系人 \[＋\] L J 李四 设置页改版 .* 聊天 2 联系人 我$/)
+  await $.command.run({ command: 'gb', args: '联系人', origin: COMPOSER, presentation: PRESENTATION })
+  expect(await paneText($), '/gb 联系人 opens it; the tabs at the foot, 联系人 on').toMatch(/联系人 \[＋\] L J 李四 设置页改版 .* 聊天 2 联系人 我$/)
   const desk = await mountDesktop($)
   const alts = all((await desk.drawn()) as unknown as DrawnNode, 'Svg').map((x) => String(x.props?.['alt']))
   expect(alts[0], 'the wordmark on top, as the inbox').toBe('GemsBang')
@@ -469,7 +477,7 @@ test('群信息 and 叫人 (P4, P6, Q17): the head opens 群信息 — the membe
   w.answers['link-rules'] = (args) => { rules = { ...rules, approve: args['approve'] === true }; return { ok: true, link: { ...LINK, approve: rules.approve } } }
   w.answers['rotate'] = () => ({ ok: true, link: { ...LINK, code: 'zzzz2222', url: `${RELAY}/i/zzzz2222?by=${JOHN.id}` } })
   await start($, on)
-  await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  await $.command.run({ command: 'gb', args: '', origin: COMPOSER, presentation: PRESENTATION })
   const go = async (key: string) => { const pane = await mountPane($); await pane.press({ key }); await pane.unmount() }
   await go(`chat-${JOHN.id}-g-000000000a-go`)
   await go('head-chat-open')
@@ -502,7 +510,7 @@ test('群信息 of a big group on the desktop (P6): every member listed — five
   const members = [{ id: JOHN.id, name: 'John' }, ...Array.from({ length: 499 }, (_, i) => ({ id: `a-${String(i).padStart(10, '0')}`, name: `家长${i}` }))]
   w.answers['open'] = () => ({ ok: true, chat: { ...CHAT, count: 500, members, rules: { forward: true, approve: false } }, view: w.view })
   await start($, on)
-  await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  await $.command.run({ command: 'gb', args: '', origin: COMPOSER, presentation: PRESENTATION })
   const go = async (key: string) => { const pane = await mountDesktop($); await pane.press({ key }); await pane.unmount() }
   await go(`chat-${JOHN.id}-g-000000000a-go`)
   await go('head-chat-open')
@@ -524,7 +532,7 @@ test('退出群 (S19, P7) from 群信息: the 群主 is asked to pick who keeps 
   const chat = { ...CHAT, members: [{ id: JOHN.id, name: 'John' }, { id: 'a-00000000b1', name: '李四' }], keeper: JOHN.id }
   w.answers['open'] = () => ({ ok: true, chat, view: w.view })
   await start($, on)
-  await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  await $.command.run({ command: 'gb', args: '', origin: COMPOSER, presentation: PRESENTATION })
   const go = async (key: string) => { const pane = await mountPane($); await pane.press({ key }); await pane.unmount() }
   await go(`chat-${JOHN.id}-g-000000000a-go`)
   await go('head-chat-open')
@@ -565,7 +573,7 @@ test('用链接进群 in the pane (S9, P3): ＋ opens its two ways; the link pas
   w.answers['join'] = (args) => ({ ok: true, view: w.view, joined: { venue: { owner: 'a-00000000d1', id: 'g-000000000c', name: '前端周会' }, avatar: { id: args['as'], name: 'John' }, already: false } })
   w.answers['open'] = () => ({ ok: true, chat: CHAT, view: w.view })
   await start($, on)
-  await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  await $.command.run({ command: 'gb', args: '', origin: COMPOSER, presentation: PRESENTATION })
   let pane = await mountPane($)
   await pane.press({ key: 'plus' })
   await pane.unmount()
@@ -628,11 +636,11 @@ test('im_say and im_read go through the client as this session, one line back; a
   expect((await $.tool.call({ tool: 'mcp__gemsbang__im_read', tool_use_id: 'r2', venue: `${JOHN.id}/g-000000000a`, limit: 1 })).result).toBe('im_read: 「设置页改版」最近 1 条：\n#m-1 李四：在吗')
 })
 
-test('我 (spec §7.5, S22, P8) through /gemsbang avatars: a card per avatar with its chats, who plays it (this session the one last spoken as, S21) and its marking, no 让这个会话替它 (B1); under them 默认名, 界面语言, 账号, 关于; 改 opens the card with its name, 好了 renames it and folds it; 换 lists the languages and one picked is set', async ($, on) => {
+test('我 (spec §7.5, S22, P8) through /gb avatars: a card per avatar with its chats, who plays it (this session the one last spoken as, S21) and its marking, no 让这个会话替它 (B1); under them 默认名, 界面语言, 账号, 关于; 改 opens the card with its name, 好了 renames it and folds it; 换 lists the languages and one picked is set', async ($, on) => {
   const w = world(on)
   w.view = { ...VIEW(), recent: JOHN.id }
   const clock = await start($, on)
-  await $.command.run({ command: 'gemsbang', args: 'avatars', origin: COMPOSER, presentation: PRESENTATION })
+  await $.command.run({ command: 'gb', args: 'avatars', origin: COMPOSER, presentation: PRESENTATION })
   await clock.settle()
   const text = await paneText($)
   expect(text).toContain('0.5.3 我 J John [改] 在哪： 设置页改版 谁来演： 这个会话 自动回： 没有 agent 说的话： 对外标出来')
@@ -664,7 +672,7 @@ test('不用问 in 我 (S23, P8a): the standing ones read through the client whe
   const ALLOW = { key: 'person:a-00000000b2', person: 'a-00000000b2', venue: { owner: JOHN.id, id: 'g-000000000a' }, who: '张三', group: '设置页改版' }
   w.answers['allows'] = (args) => ({ ok: true, allows: args['avatar'] === JOHN.id && args['allow'] === undefined ? [ALLOW] : [] })
   const clock = await start($, on)
-  await $.command.run({ command: 'gemsbang', args: 'avatars', origin: COMPOSER, presentation: PRESENTATION })
+  await $.command.run({ command: 'gb', args: 'avatars', origin: COMPOSER, presentation: PRESENTATION })
   await clock.settle()
   expect(await paneText($)).toContain('不用问： 张三的活（设置页改版） [撤]')
   const pane = await mountPane($)
@@ -680,9 +688,9 @@ test('底子 (S27, P8a, P9b′): an agent\'s entry waits — 我 at the foot cou
   w.view = VIEW({ base: [NUT], bodies: { [SESSION]: LILY.id } })
   w.answers['tool-remember'] = () => ({ ok: true, text: '已经记成待本人点头：「家人：Lily 对花生过敏」。' })
   const clock = await start($, on)
-  await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  await $.command.run({ command: 'gb', args: '', origin: COMPOSER, presentation: PRESENTATION })
   expect(await paneText($), '我 at the foot counts it').toMatch(/ 聊天 2 联系人 我 1$/)
-  await $.command.run({ command: 'gemsbang', args: 'avatars', origin: COMPOSER, presentation: PRESENTATION })
+  await $.command.run({ command: 'gb', args: 'avatars', origin: COMPOSER, presentation: PRESENTATION })
   await clock.settle()
   expect(await paneText($)).toContain('底子 [改] Lily 爸爸想记（王老师说的） 家人 · Lily 对花生过敏 · 给 Lily 爸爸 [记下] [不记]')
   const go = async (key: string) => { const pane = await mountPane($); await pane.press({ key }); await pane.unmount() }
@@ -707,7 +715,7 @@ test('需要你 (spec §7.3, S15, direction ①): the line above the prompt name
   await start($, on)
   expect(await bandText($)).toBe('@ 答应事情 · 王老师问周五能不能来当志愿者 [能去] [去不了] 还有 1 件 [打开]')
   const band = await $.ui.mount({ plugin: 'gemsbang', surface: 'terminal', component: 'AbovePrompt', props: BAND })
-  await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  await $.command.run({ command: 'gb', args: '', origin: COMPOSER, presentation: PRESENTATION })
   expect(await paneText($)).toContain('L 三年二班家长 19:31 [等你定] [你的身份：我看一下，晚点回。]')
   const inbox = await mountPane($)
   await inbox.press({ key: `chat-${ROW2.owner}-${ROW2.id}-go` })
@@ -772,7 +780,7 @@ test('被叫到 (architecture §6.3, S14): a call shows in the pane — its chat
   on('turn.complete', () => ({ text: '' }))
   const clock = await start($, on)
   expect(await bandText($)).toContain('被叫到 · 设置页改版 · 李四：@John 周五前能给稿子反馈吗？ [交给 agent 回]')
-  await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  await $.command.run({ command: 'gb', args: '', origin: COMPOSER, presentation: PRESENTATION })
   expect(await paneText($)).toContain('[＋] J 设置页改版 14:05 [有人@我] [李四：@John Safari 里导出按钮没反应] 2 L 三年二班家长')
   const inbox = await mountPane($)
   await inbox.press({ key: `chat-${JOHN.id}-g-000000000a-go` })
@@ -810,7 +818,7 @@ test('a round that fails (B3): no agent to run it, an error, stopped, or its wor
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   await start($, on)
-  await $.command.run({ command: 'gemsbang', args: '', origin: COMPOSER, presentation: PRESENTATION })
+  await $.command.run({ command: 'gb', args: '', origin: COMPOSER, presentation: PRESENTATION })
   const inbox = await mountPane($)
   await inbox.press({ key: `chat-${JOHN.id}-g-000000000a-go` })
   await inbox.unmount()

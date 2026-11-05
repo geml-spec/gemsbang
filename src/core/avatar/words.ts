@@ -354,7 +354,7 @@ const WORDS: Readonly<Record<string, Readonly<Record<Lang, string>>>> = {
   "band.unreadOne": { zh: "GemsBang · {count} 个聊天有新消息", en: "GemsBang · new messages in {count} chat", ja: "GemsBang · {count} 件のチャットに新着" },
   "panel.loginBand": { zh: "GemsBang 还没登录", en: "GemsBang: not logged in", ja: "GemsBang：未ログイン" },
   "panel.open": { zh: "打开", en: "Open", ja: "開く" },
-  "panel.noSurface": { zh: "侧栏只在电脑上的 Claude Code 里显示，现在这个连接没有地方画它。回到电脑上打 /gemsbang 就能看到。", en: "The pane shows only in Claude Code on your computer; this connection has nowhere to draw it. Back at your computer, type /gemsbang to see it.", ja: "サイドバーはパソコンの Claude Code にだけ表示されます。この接続には表示する場所がありません。パソコンに戻って /gemsbang と入力すると見られます。" },
+  "panel.noSurface": { zh: "侧栏只在电脑上的 Claude Code 里显示，现在这个连接没有地方画它。回到电脑上打 /gb 或 /bang 就能看到。", en: "The pane shows only in Claude Code on your computer; this connection has nowhere to draw it. Back at your computer, type /gb or /bang to see it.", ja: "サイドバーはパソコンの Claude Code にだけ表示されます。この接続には表示する場所がありません。パソコンに戻って /gb か /bang と入力すると見られます。" },
   "panel.unreadBand": { zh: "{count} 条未读", en: "{count} unread", ja: "未読 {count} 件" },
   "ask.no": { zh: "不要", en: "No", ja: "やめる" },
   "ask.yes": { zh: "好", en: "Yes", ja: "はい" },
