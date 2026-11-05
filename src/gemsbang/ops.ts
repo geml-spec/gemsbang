@@ -94,6 +94,11 @@ const SYNC_ROUNDS = 20;
 /** The documents of an avatar of the person's whose update says to read a piece again. */
 const PIECES: Readonly<Record<string, string>> = { "joined.geml": "venues", "needs.geml": "needs", "requests.geml": "needs", "work.geml": "work", "rules.geml": "marks", "auto.geml": "autos" };
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
+/**
+ * The whole days a link has left, as its page says them (链接 7 天内有效): a minute's slack, since the service stamps a new
+ * link a moment after this client read its clock, and a link made just now must not read as eight days.
+ */
+export const daysLeft = (expires: string | undefined, now: string): number => Math.max(1, Math.ceil((Date.parse(expires ?? now) - Date.parse(now) - 60_000) / 86_400_000));
 /** How this machine names itself to the service when it signs in: its system, and Claude Code. */
 export const deviceName = (platform: string = process.platform): string => `${platform === "darwin" ? "Mac" : platform === "win32" ? "Windows" : platform === "linux" ? "Linux" : platform} · Claude Code`;
 /** The body's address: its email, else its phone. */
@@ -591,7 +596,7 @@ export class Gb {
 
   private linkOf(v: MirrorVenue, link: Record<string, unknown>): GbLink {
     const code = str(link["code"]) ?? "";
-    const days = Math.max(1, Math.ceil((Date.parse(str(link["expires"]) ?? this.o.now) - Date.parse(this.o.now)) / 86_400_000));
+    const days = daysLeft(str(link["expires"]), this.o.now);
     return { code, url: `${this.origin}${str(link["path"]) ?? `/i/${code}`}`, line: invitePrompt(this.origin, code, v.name, this.lang), days, forward: link["forward"] !== false, approve: link["approve"] === true, isOwner: (v.keeper ?? v.owner) === v.as, group: v.name };
   }
 
@@ -615,7 +620,7 @@ export class Gb {
     if (this.isFail(r)) return r;
     if (r.status !== 200) return this.refused(r);
     const link = obj(obj(r.body)["link"]), code = str(link["code"]) ?? "";
-    const days = Math.max(1, Math.ceil((Date.parse(str(link["expires"]) ?? this.o.now) - Date.parse(this.o.now)) / 86_400_000));
+    const days = daysLeft(str(link["expires"]), this.o.now);
     return { ok: true, link: { code, url: `${this.origin}${str(link["path"]) ?? `/u/${code}`}`, line: personInvitePrompt(this.origin, code, avatar.name, this.lang), days, forward: false, approve: false, isOwner: true, group: avatar.name, kind: "person", as } };
   }
 
@@ -964,7 +969,7 @@ export class Gb {
     if (this.isFail(r)) return r;
     if (r.status !== 200) return this.refused(r);
     const b = obj(r.body);
-    const days = Math.max(1, Math.ceil((Date.parse(str(b["expires"]) ?? this.o.now) - Date.parse(this.o.now)) / 86_400_000));
+    const days = daysLeft(str(b["expires"]), this.o.now);
     return { ok: true, info: { ...b, origin: p.origin, code: p.code, days, kind: p.kind } };
   }
 

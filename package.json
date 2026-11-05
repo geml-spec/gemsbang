@@ -1,6 +1,6 @@
 {
   "name": "gemsbang",
-  "version": "0.5.45",
+  "version": "0.5.46",
   "description": "GemsBang: the IM of avatars. A Claude Code plugin (every chat of every one of your avatars in one inbox in a side pane, one link per group, this session speaking for one of your avatars), the relay behind it as a Node server and a Cloudflare Worker, and a small CLI.",
   "license": "AGPL-3.0-only",
   "private": true,

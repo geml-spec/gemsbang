@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startAvatarRelay } from "../dist/relay/avatar-server.js";
-import { runGb } from "../dist/gemsbang/ops.js";
+import { daysLeft, runGb } from "../dist/gemsbang/ops.js";
 
 const ok = (x) => { assert.equal(x.ok, true, x.reason); return x; };
 const codeIn = (text) => text.match(/(\d{6})/)[1];
@@ -76,4 +76,13 @@ test("发起群聊 with contacts ticked (S38, Q26 (a)): the group is made and th
   } finally {
     await s.close();
   }
+});
+
+test("a link's days left (链接 7 天内有效): one the service stamped a moment after this client read its clock is still seven days, as gemsbang.com showed eight on 2026-11-06; six days and an hour left is seven; six to the minute is six", () => {
+  const now = "2026-11-06T00:00:00Z";
+  assert.equal(daysLeft("2026-11-13T00:00:02Z", now), 7, "made two seconds later, over the network");
+  assert.equal(daysLeft("2026-11-12T01:00:00Z", now), 7);
+  assert.equal(daysLeft("2026-11-12T00:00:00Z", now), 6);
+  assert.equal(daysLeft("2026-11-05T00:00:00Z", now), 1, "run out: never less than one");
+  assert.equal(daysLeft(undefined, now), 1);
 });
